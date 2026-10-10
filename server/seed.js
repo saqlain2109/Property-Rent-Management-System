@@ -1,0 +1,42 @@
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+const User = require('./models/User');
+const { executeMigration } = require('./routes/migrationRoutes');
+
+dotenv.config();
+
+async function runSeed() {
+  try {
+    console.log('[Seed] Connecting to MongoDB...');
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/property_rent_db');
+    console.log('[Seed] Connected successfully.');
+
+    // 1. Create Default Admin if not existing
+    let admin = await User.findOne({ email: 'admin@propertyrent.com' });
+    if (!admin) {
+      console.log('[Seed] Creating default administrator user...');
+      admin = await User.create({
+        name: 'Administrator',
+        email: 'admin@propertyrent.com',
+        password: 'AdminPassword123!',
+        role: 'admin'
+      });
+      console.log('[Seed] Admin created: admin@propertyrent.com / AdminPassword123!');
+    } else {
+      console.log('[Seed] Admin user already exists:', admin.email);
+    }
+
+    // 2. Execute full migration from reference Excel workbooks
+    console.log('[Seed] Running full reference workbook migration...');
+    const summary = await executeMigration({ dryRun: false, user: admin });
+    console.log('[Seed] Migration Summary:', JSON.stringify(summary, null, 2));
+
+    console.log('[Seed] Database initialization and migration completed successfully!');
+    process.exit(0);
+  } catch (error) {
+    console.error('[Seed Error]', error);
+    process.exit(1);
+  }
+}
+
+runSeed();

@@ -1,0 +1,9 @@
+node_modules/
+.env
+uploads/
+dist/
+.DS_Store
+*.log
+scratch/
+reference_files/docx_extracted/
+reference_files/docx_master_dev/

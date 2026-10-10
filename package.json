@@ -1,0 +1,11 @@
+{
+  "name": "property-and-rent-management-root",
+  "version": "1.0.0",
+  "scripts": {
+    "start:server": "cd server && node index.js",
+    "start:client": "cd client && npm run dev",
+    "seed": "cd server && node seed.js",
+    "test": "cd server && node test_runner.js",
+    "build:client": "cd client && npm run build"
+  }
+}

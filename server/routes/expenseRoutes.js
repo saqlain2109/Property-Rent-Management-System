@@ -1,0 +1,153 @@
+const express = require('express');
+const router = express.Router();
+const { body, validationResult } = require('express-validator');
+const Expense = require('../models/Expense');
+const ExpenseCategory = require('../models/ExpenseCategory');
+const Property = require('../models/Property');
+const { protect, authorize } = require('../middleware/auth');
+const logAudit = require('../utils/audit');
+
+// @route GET /api/expenses
+router.get('/', protect, async (req, res) => {
+  try {
+    const { propertyId, category, startDate, endDate, search } = req.query;
+    let query = { isReversed: false };
+
+    if (propertyId) query.propertyId = propertyId;
+    if (category) query.category = category;
+    if (startDate || endDate) {
+      query.expenseDate = {};
+      if (startDate) query.expenseDate.$gte = new Date(startDate);
+      if (endDate) query.expenseDate.$lte = new Date(endDate);
+    }
+    if (search) {
+      query.$or = [
+        { description: { $regex: search, $options: 'i' } },
+        { vendorOrPayee: { $regex: search, $options: 'i' } },
+        { expenseCode: { $regex: search, $options: 'i' } },
+        { legacyCode: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const expenses = await Expense.find(query)
+      .populate('propertyId', 'name propertyCode')
+      .populate('unitId', 'unitName unitCode')
+      .sort({ expenseDate: -1 });
+
+    const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+
+    res.json({ success: true, count: expenses.length, totalAmount, data: expenses });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/expenses/categories
+router.get('/categories', protect, async (req, res) => {
+  try {
+    const categories = await ExpenseCategory.find().sort({ name: 1 });
+    res.json({ success: true, count: categories.length, data: categories });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route POST /api/expenses/categories
+router.post('/categories', protect, authorize('admin', 'manager'), [
+  body('name').trim().notEmpty().withMessage('Category name is required')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+
+  try {
+    const existing = await ExpenseCategory.findOne({ name: req.body.name.trim() });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Category already exists' });
+    }
+
+    const cat = await ExpenseCategory.create({
+      name: req.body.name.trim(),
+      description: req.body.description || ''
+    });
+
+    res.status(201).json({ success: true, data: cat });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route POST /api/expenses
+router.post('/', protect, authorize('admin', 'manager'), [
+  body('expenseDate').isISO8601().withMessage('Valid expense date is required'),
+  body('category').trim().notEmpty().withMessage('Expense category is required'),
+  body('amount').isNumeric().withMessage('Amount must be a number'),
+  body('description').trim().notEmpty().withMessage('Description is required')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+
+  try {
+    const count = await Expense.countDocuments();
+    const d = new Date(req.body.expenseDate);
+    const expenseCode = `EXP-${d.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
+
+    const expense = await Expense.create({
+      ...req.body,
+      expenseCode,
+      amount: Number(req.body.amount),
+      recordedBy: req.user._id
+    });
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'RECORD_EXPENSE',
+      entityType: 'Expense',
+      entityId: expense._id,
+      description: `Recorded expense ${expenseCode} of ₹${expense.amount} under ${expense.category}`,
+      newState: expense.toObject(),
+      req
+    });
+
+    res.status(201).json({ success: true, data: expense });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route POST /api/expenses/:id/reverse
+router.post('/:id/reverse', protect, authorize('admin'), [
+  body('reversalReason').trim().notEmpty().withMessage('Reversal reason is required')
+], async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    if (!expense) {
+      return res.status(404).json({ success: false, message: 'Expense not found' });
+    }
+    if (expense.isReversed) {
+      return res.status(400).json({ success: false, message: 'Expense is already reversed' });
+    }
+
+    expense.isReversed = true;
+    expense.reversalReason = req.body.reversalReason;
+    await expense.save();
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'REVERSE_EXPENSE',
+      entityType: 'Expense',
+      entityId: expense._id,
+      description: `Reversed expense ${expense.expenseCode} of ₹${expense.amount}. Reason: ${req.body.reversalReason}`,
+      req
+    });
+
+    res.json({ success: true, message: 'Expense reversed successfully with audit trail', data: expense });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+module.exports = router;
