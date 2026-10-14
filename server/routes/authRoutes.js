@@ -134,12 +134,19 @@ router.get('/me', protect, async (req, res) => {
 // @route GET /api/auth/status
 // Checks if admin setup is needed
 router.get('/status', async (req, res) => {
-  const userCount = await User.countDocuments();
-  res.json({
-    success: true,
-    isInitialized: userCount > 0,
-    userCount
-  });
+  try {
+    const userCount = await User.countDocuments();
+    res.json({
+      success: true,
+      isInitialized: userCount > 0,
+      userCount
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error checking auth status'
+    });
+  }
 });
 
 module.exports = router;

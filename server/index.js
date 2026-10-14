@@ -15,7 +15,11 @@ app.use(async (req, res, next) => {
     next();
   } catch (err) {
     console.error('[DB Middleware Error]', err);
-    res.status(500).json({ success: false, message: 'Database connection failed' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Database connection failed: ' + (err.message || 'Unknown error'),
+      envConfigured: !!(process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGODB_URL || process.env.DATABASE_URL)
+    });
   }
 });
 
