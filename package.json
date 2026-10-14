@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node server/index.js",
-    "build": "npm run build --prefix client",
+    "build": "cd client && npm install && npm run build",
     "start:server": "cd server && node index.js",
     "start:client": "cd client && npm run dev",
     "seed": "cd server && node seed.js",
