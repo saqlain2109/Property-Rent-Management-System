@@ -1,0 +1,54 @@
+import React, { useState } from 'react';
+import LedgerView from './LedgerView';
+import ReportsView from './ReportsView';
+import MigrationView from './MigrationView';
+import { BookOpen, Download, Upload } from 'lucide-react';
+
+const TABS = [
+  { id: 'ledger', label: 'Account Book', icon: BookOpen, desc: 'Month-by-month income, expenses, and balance summary' },
+  { id: 'export', label: 'Download Report', icon: Download, desc: 'Export your data as an Excel file' },
+  { id: 'migration', label: 'Import Excel Data', icon: Upload, desc: 'Import data from your existing Excel workbooks' },
+];
+
+export default function LedgerReportsView() {
+  const [activeTab, setActiveTab] = useState('ledger');
+
+  const currentTab = TABS.find(t => t.id === activeTab);
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
+        <h2 className="text-xl font-extrabold text-slate-900">Reports & Account Book</h2>
+        <p className="text-sm text-slate-500 mt-0.5">
+          {currentTab?.desc || 'View financial summaries, download reports, and import historical data'}
+        </p>
+
+        {/* Tab Pills */}
+        <div className="flex flex-wrap items-center gap-2 mt-4">
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                activeTab === id
+                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div>
+        {activeTab === 'ledger' && <LedgerView />}
+        {activeTab === 'export' && <ReportsView />}
+        {activeTab === 'migration' && <MigrationView />}
+      </div>
+    </div>
+  );
+}

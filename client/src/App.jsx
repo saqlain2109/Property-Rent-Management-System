@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import LoginModal from './components/LoginModal';
+import FloatingChatbot from './components/FloatingChatbot';
 import Dashboard from './views/Dashboard';
-import PropertiesView from './views/PropertiesView';
-import TenantsView from './views/TenantsView';
+import MasterManagerView from './views/MasterManagerView';
 import PaymentsView from './views/PaymentsView';
-import PGView from './views/PGView';
 import ExpensesView from './views/ExpensesView';
-import LedgerView from './views/LedgerView';
-import ReportsView from './views/ReportsView';
-import ChatbotView from './views/ChatbotView';
-import MigrationView from './views/MigrationView';
+import LedgerReportsView from './views/LedgerReportsView';
 import API from './services/api';
 
 export default function App() {
@@ -71,7 +67,8 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 overflow-hidden relative">
+      {/* Consolidated Sidebar */}
       <Sidebar
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
@@ -79,20 +76,19 @@ export default function App() {
         onLogout={handleLogout}
       />
 
+      {/* Main Content View Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <div className="p-8 max-w-7xl w-full mx-auto">
+        <div className="p-4 sm:p-8 max-w-7xl w-full mx-auto pb-24">
           {currentTab === 'dashboard' && <Dashboard />}
-          {currentTab === 'properties' && <PropertiesView />}
-          {currentTab === 'tenants' && <TenantsView />}
+          {currentTab === 'masters' && <MasterManagerView />}
           {currentTab === 'payments' && <PaymentsView />}
-          {currentTab === 'pg' && <PGView />}
           {currentTab === 'expenses' && <ExpensesView />}
-          {currentTab === 'ledger' && <LedgerView />}
-          {currentTab === 'reports' && <ReportsView />}
-          {currentTab === 'chatbot' && <ChatbotView />}
-          {currentTab === 'migration' && <MigrationView />}
+          {currentTab === 'ledger_reports' && <LedgerReportsView />}
         </div>
       </main>
+
+      {/* Intelligent Floating Assistant Bot in Bottom-Left Corner */}
+      <FloatingChatbot />
     </div>
   );
 }

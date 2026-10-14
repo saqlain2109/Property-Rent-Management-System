@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { 
-  Building2, Users, Receipt, CreditCard, PieChart, 
-  Bot, LogOut, ArrowUpDown, Database, FileSpreadsheet
+  LayoutDashboard, FolderOpen, IndianRupee, Receipt, 
+  BookOpen, LogOut, Building2
 } from 'lucide-react';
 import gsap from 'gsap';
 
@@ -10,81 +10,78 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout }) {
 
   useEffect(() => {
     if (sidebarRef.current) {
-      gsap.fromTo(sidebarRef.current, 
-        { x: -30, opacity: 0 }, 
+      gsap.fromTo(sidebarRef.current,
+        { x: -30, opacity: 0 },
         { x: 0, opacity: 1, duration: 0.5, ease: 'power2.out' }
       );
     }
   }, []);
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: PieChart },
-    { id: 'properties', label: 'Properties & Units', icon: Building2 },
-    { id: 'tenants', label: 'Tenants & Leases', icon: Users },
-    { id: 'payments', label: 'Rent Payments', icon: Receipt },
-    { id: 'pg', label: 'PG Management', icon: ArrowUpDown },
-    { id: 'expenses', label: 'Expenses', icon: CreditCard },
-    { id: 'ledger', label: 'Financial Ledger', icon: FileSpreadsheet },
-    { id: 'reports', label: 'Reports & Export', icon: FileSpreadsheet },
-    { id: 'chatbot', label: 'Smart Assistant', icon: Bot },
-    { id: 'migration', label: 'Excel Migration', icon: Database },
+    { id: 'dashboard',      label: 'Home',           icon: LayoutDashboard, desc: 'Overview' },
+    { id: 'masters',        label: 'Records',        icon: FolderOpen,      desc: 'Properties & Tenants' },
+    { id: 'payments',       label: 'Rent & Payments',icon: IndianRupee,     desc: 'Track & Record Rent' },
+    { id: 'expenses',       label: 'Expenses',       icon: Receipt,         desc: 'Costs & Repairs' },
+    { id: 'ledger_reports', label: 'Reports',        icon: BookOpen,        desc: 'Account Book & Export' },
   ];
 
   return (
-    <aside 
+    <aside
       ref={sidebarRef}
-      className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800 select-none"
+      className="w-60 bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800 select-none shadow-xl"
     >
-      {/* Brand Header */}
-      <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
-          <Building2 className="w-6 h-6" />
+      {/* Brand */}
+      <div className="p-5 border-b border-slate-800/80 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
+          <Building2 className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="font-bold text-white tracking-wide text-base">EstateLedger</h1>
-          <p className="text-xs text-emerald-400 font-medium">Rent & Property OS</p>
+          <h1 className="font-extrabold text-white tracking-wide text-base leading-tight">EstateLedger</h1>
+          <p className="text-[11px] text-emerald-400 font-semibold tracking-wide">Property Manager</p>
         </div>
       </div>
 
-      {/* Navigation Links */}
-      <nav className="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentTab === item.id;
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
+        {navItems.map(({ id, label, icon: Icon, desc }) => {
+          const isActive = currentTab === id;
           return (
             <button
-              key={item.id}
-              onClick={() => setCurrentTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              key={id}
+              onClick={() => setCurrentTab(id)}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-left transition-all group ${
                 isActive
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/25'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-              <span>{item.label}</span>
+              <Icon className={`w-4.5 h-4.5 shrink-0 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'}`} style={{ width: '1.125rem', height: '1.125rem' }} />
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">{label}</p>
+                <p className={`text-[10px] leading-tight truncate ${isActive ? 'text-emerald-100/70' : 'text-slate-600 group-hover:text-slate-500'}`}>{desc}</p>
+              </div>
             </button>
           );
         })}
       </nav>
 
-      {/* User Footer Profile */}
+      {/* User Footer */}
       <div className="p-4 border-t border-slate-800 bg-slate-950/40">
-        <div className="flex items-center justify-between mb-3 px-1">
-          <div>
-            <p className="text-sm font-semibold text-white truncate max-w-[140px]">{user?.name || 'Administrator'}</p>
-            <p className="text-xs text-slate-400 capitalize">{user?.role || 'Admin'}</p>
+        <div className="flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-white truncate">{user?.name || 'Administrator'}</p>
+            <p className="text-[10px] text-emerald-400 font-medium capitalize">{user?.role || 'Admin'}</p>
           </div>
           <button
             onClick={onLogout}
             title="Sign Out"
-            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition-colors"
+            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition-colors shrink-0"
           >
             <LogOut className="w-4 h-4" />
           </button>
         </div>
-        <div className="text-[10px] text-slate-500 text-center tracking-wider uppercase font-semibold">
-          Financial Year 2026
+        <div className="text-[10px] text-slate-600 text-center tracking-widest uppercase font-semibold mt-2">
+          FY 2026
         </div>
       </div>
     </aside>

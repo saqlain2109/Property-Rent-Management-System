@@ -85,8 +85,7 @@ router.get('/:id', protect, async (req, res) => {
 
 // @route POST /api/tenants
 router.post('/', protect, authorize('admin', 'manager'), [
-  body('name').trim().notEmpty().withMessage('Tenant name is required'),
-  body('tenantCode').trim().notEmpty().withMessage('Tenant code is required')
+  body('name').trim().notEmpty().withMessage('Tenant name is required')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -94,14 +93,22 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    const existing = await Tenant.findOne({ tenantCode: req.body.tenantCode.toUpperCase() });
+    let finalCode = req.body.tenantCode?.trim()?.toUpperCase();
+    if (!finalCode) {
+      const cleanName = req.body.name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
+      const count = await Tenant.countDocuments();
+      finalCode = `TEN-${cleanName || 'USER'}-${String(count + 1).padStart(3, '0')}`;
+    }
+
+    const existing = await Tenant.findOne({ tenantCode: finalCode });
     if (existing) {
-      return res.status(400).json({ success: false, message: 'Tenant code already exists' });
+      const rand = Math.floor(100 + Math.random() * 900);
+      finalCode = `${finalCode}-${rand}`;
     }
 
     const tenant = await Tenant.create({
       ...req.body,
-      tenantCode: req.body.tenantCode.toUpperCase()
+      tenantCode: finalCode
     });
 
     await logAudit({

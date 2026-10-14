@@ -15,9 +15,12 @@ export function formatDate(dateString) {
 }
 
 export function formatMonthYear(monthYearStr) {
-  if (!monthYearStr) return 'N/A';
+  if (!monthYearStr || monthYearStr === 'None' || monthYearStr === 'undefined' || monthYearStr === 'N/A') return 'No payments yet';
+  if (typeof monthYearStr !== 'string' || !monthYearStr.includes('-')) return monthYearStr;
   const [y, m] = monthYearStr.split('-');
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthName = months[parseInt(m, 10) - 1] || m;
+  const monthIdx = parseInt(m, 10) - 1;
+  const monthName = months[monthIdx] || m;
+  if (!y || isNaN(monthIdx)) return monthYearStr;
   return `${monthName} ${y}`;
 }

@@ -40,6 +40,10 @@ const assignmentSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  initialPaidTillMonth: {
+    type: String, // e.g. "2025-11", "2025-12"
+    default: null,
+  },
   notes: {
     type: String,
     trim: true,

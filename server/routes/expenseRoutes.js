@@ -150,4 +150,53 @@ router.post('/:id/reverse', protect, authorize('admin'), [
   }
 });
 
+// @route PUT /api/expenses/:id
+router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    if (!expense) {
+      return res.status(404).json({ success: false, message: 'Expense not found' });
+    }
+    const { expenseDate, propertyId, category, amount, description, vendorOrPayee, paymentMode } = req.body;
+    if (expenseDate) expense.expenseDate = expenseDate;
+    if (propertyId !== undefined) expense.propertyId = propertyId || null;
+    if (category) expense.category = category;
+    if (amount !== undefined) expense.amount = Number(amount);
+    if (description) expense.description = description;
+    if (vendorOrPayee !== undefined) expense.vendorOrPayee = vendorOrPayee;
+    if (paymentMode) expense.paymentMode = paymentMode;
+
+    await expense.save();
+    res.json({ success: true, message: 'Expense updated successfully', data: expense });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route DELETE /api/expenses/:id
+// Hard delete expense
+router.delete('/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id);
+    if (!expense) {
+      return res.status(404).json({ success: false, message: 'Expense not found' });
+    }
+
+    await Expense.findByIdAndDelete(req.params.id);
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'DELETE_EXPENSE',
+      entityType: 'Expense',
+      entityId: expense._id,
+      description: `Permanently deleted expense ${expense.expenseCode} of ₹${expense.amount}`,
+      req
+    });
+
+    res.json({ success: true, message: 'Expense permanently deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

@@ -63,7 +63,6 @@ router.get('/:id', protect, async (req, res) => {
 
 // @route POST /api/properties
 router.post('/', protect, authorize('admin', 'manager'), [
-  body('propertyCode').trim().notEmpty().withMessage('Property code is required'),
   body('name').trim().notEmpty().withMessage('Property name is required')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -72,14 +71,22 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    const existing = await Property.findOne({ propertyCode: req.body.propertyCode.toUpperCase() });
+    let finalCode = req.body.propertyCode?.trim()?.toUpperCase();
+    if (!finalCode) {
+      const cleanName = req.body.name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
+      const count = await Property.countDocuments();
+      finalCode = `PROP-${cleanName || 'SITE'}-${String(count + 1).padStart(2, '0')}`;
+    }
+
+    const existing = await Property.findOne({ propertyCode: finalCode });
     if (existing) {
-      return res.status(400).json({ success: false, message: 'Property code already exists' });
+      const rand = Math.floor(100 + Math.random() * 900);
+      finalCode = `${finalCode}-${rand}`;
     }
 
     const property = await Property.create({
       ...req.body,
-      propertyCode: req.body.propertyCode.toUpperCase()
+      propertyCode: finalCode
     });
 
     await logAudit({

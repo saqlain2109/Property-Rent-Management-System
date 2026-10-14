@@ -107,7 +107,7 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear = '2026
   }
   months.sort();
 
-  let paidTillMonth = null;
+  let paidTillMonth = assignment.initialPaidTillMonth || null;
   let nextUnpaidMonth = null;
   let totalExpected = 0;
   let totalAllocated = 0;
@@ -115,40 +115,52 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear = '2026
   const monthsBreakdown = [];
 
   for (const m of months) {
+    const isHistoricallySettled = assignment.initialPaidTillMonth && m <= assignment.initialPaidTillMonth;
     const expectedRate = await getEffectiveRentForMonth(unitId, tenantId, m);
     
     // Sum allocations for this month
     const monthAllocations = allocations.filter(a => a.rentMonthYear === m);
     const allocated = monthAllocations.reduce((sum, a) => sum + a.allocatedAmount, 0);
 
-    const pending = Math.max(0, expectedRate - allocated);
-    const advance = Math.max(0, allocated - expectedRate);
-
     let status = 'Unpaid';
-    if (allocated >= expectedRate && expectedRate > 0) {
+    let pending = 0;
+    let advance = 0;
+
+    if (isHistoricallySettled) {
       status = 'Fully Paid';
-      paidTillMonth = m;
-    } else if (allocated > 0 && allocated < expectedRate) {
-      status = 'Partially Paid';
-    } else if (expectedRate === 0 && allocated > 0) {
-      status = 'Credit / Advance';
-    }
+      pending = 0;
+      advance = Math.max(0, allocated);
+      if (!paidTillMonth || m > paidTillMonth) paidTillMonth = m;
+    } else {
+      pending = Math.max(0, expectedRate - allocated);
+      advance = Math.max(0, allocated - expectedRate);
 
-    if (!nextUnpaidMonth && (status === 'Unpaid' || status === 'Partially Paid') && m <= upToMonthYear) {
-      nextUnpaidMonth = m;
-    }
+      if (allocated >= expectedRate && expectedRate > 0) {
+        status = 'Fully Paid';
+        if (!paidTillMonth || m > paidTillMonth) paidTillMonth = m;
+      } else if (allocated > 0 && allocated < expectedRate) {
+        status = 'Partially Paid';
+      } else if (expectedRate === 0 && allocated > 0) {
+        status = 'Credit / Advance';
+      }
 
-    totalExpected += expectedRate;
-    totalAllocated += allocated;
-    totalOutstanding += pending;
+      if (!nextUnpaidMonth && (status === 'Unpaid' || status === 'Partially Paid') && m <= upToMonthYear) {
+        nextUnpaidMonth = m;
+      }
+
+      totalExpected += expectedRate;
+      totalAllocated += allocated;
+      totalOutstanding += pending;
+    }
 
     monthsBreakdown.push({
       monthYear: m,
       expectedRate,
-      allocatedAmount: allocated,
+      allocatedAmount: isHistoricallySettled ? (allocated || expectedRate) : allocated,
       outstandingAmount: pending,
       advanceAmount: advance,
-      status
+      status: isHistoricallySettled ? 'Fully Paid' : status,
+      isHistorical: isHistoricallySettled
     });
   }
 

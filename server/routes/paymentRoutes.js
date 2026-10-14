@@ -193,6 +193,93 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 });
 
+// @route PUT /api/payments/:id
+// Update payment receipt details & allocations
+router.put('/:id', protect, authorize('admin', 'manager'), [
+  body('receiptDate').optional().isISO8601().withMessage('Valid receipt date is required'),
+  body('totalAmount').optional().isNumeric().withMessage('Total amount must be a number'),
+  body('paymentMode').optional().isString(),
+  body('allocations').optional().isArray({ min: 1 }).withMessage('At least one month allocation is required')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+
+  try {
+    const receipt = await PaymentReceipt.findById(req.params.id);
+    if (!receipt) {
+      return res.status(404).json({ success: false, message: 'Receipt not found' });
+    }
+    if (receipt.isReversed) {
+      return res.status(400).json({ success: false, message: 'Cannot edit a cancelled/reversed receipt' });
+    }
+
+    const {
+      receiptDate,
+      totalAmount,
+      paymentMode,
+      referenceNumber,
+      bankName,
+      comments,
+      allocations
+    } = req.body;
+
+    const parsedTotal = totalAmount !== undefined ? Number(totalAmount) : receipt.totalAmount;
+
+    if (allocations && Array.isArray(allocations)) {
+      const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
+      if (Math.abs(parsedTotal - sumAllocated) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `Sum of monthly allocations (₹${sumAllocated}) must equal receipt total amount (₹${parsedTotal})`
+        });
+      }
+
+      // Remove previous allocations and create new ones
+      await PaymentAllocation.deleteMany({ receiptId: receipt._id });
+      for (const alloc of allocations) {
+        await PaymentAllocation.create({
+          receiptId: receipt._id,
+          tenantId: receipt.tenantId,
+          unitId: receipt.unitId,
+          rentMonthYear: alloc.rentMonthYear,
+          allocatedAmount: Number(alloc.allocatedAmount),
+          notes: alloc.notes || ''
+        });
+      }
+    }
+
+    if (receiptDate) receipt.receiptDate = receiptDate;
+    if (totalAmount !== undefined) receipt.totalAmount = parsedTotal;
+    if (paymentMode) receipt.paymentMode = paymentMode;
+    if (referenceNumber !== undefined) receipt.referenceNumber = referenceNumber;
+    if (bankName !== undefined) receipt.bankName = bankName;
+    if (comments !== undefined) receipt.comments = comments;
+
+    await receipt.save();
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'UPDATE_PAYMENT',
+      entityType: 'PaymentReceipt',
+      entityId: receipt._id,
+      description: `Updated receipt ${receipt.receiptNumber} amount ₹${receipt.totalAmount}`,
+      req
+    });
+
+    const updatedAllocations = await PaymentAllocation.find({ receiptId: receipt._id });
+
+    res.json({
+      success: true,
+      message: 'Payment updated successfully',
+      data: { receipt, allocations: updatedAllocations }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // @route POST /api/payments/:id/reverse
 // Safe audited reversal of payment
 router.post('/:id/reverse', protect, authorize('admin'), [
@@ -222,6 +309,33 @@ router.post('/:id/reverse', protect, authorize('admin'), [
     });
 
     res.json({ success: true, message: 'Payment successfully reversed with full audit trail', data: receipt });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route DELETE /api/payments/:id
+// Hard delete payment receipt and allocations
+router.delete('/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    const receipt = await PaymentReceipt.findById(req.params.id);
+    if (!receipt) {
+      return res.status(404).json({ success: false, message: 'Receipt not found' });
+    }
+
+    await PaymentAllocation.deleteMany({ receiptId: receipt._id });
+    await PaymentReceipt.findByIdAndDelete(req.params.id);
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'DELETE_PAYMENT',
+      entityType: 'PaymentReceipt',
+      entityId: receipt._id,
+      description: `Permanently deleted receipt ${receipt.receiptNumber} of ₹${receipt.totalAmount}`,
+      req
+    });
+
+    res.json({ success: true, message: 'Payment receipt permanently deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

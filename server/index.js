@@ -8,8 +8,16 @@ dotenv.config();
 
 const app = express();
 
-// Connect to MongoDB
-connectDB();
+// Middleware to ensure DB is connected for serverless invocations
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('[DB Middleware Error]', err);
+    res.status(500).json({ success: false, message: 'Database connection failed' });
+  }
+});
 
 // CORS configuration
 app.use(cors({
