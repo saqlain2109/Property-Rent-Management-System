@@ -2,7 +2,7 @@
 services:
   # 1. MongoDB Database
   mongodb:
-    image: mongo:6-alpine
+    image: mongo:6
     container_name: estate_mongodb
     restart: unless-stopped
     environment:
