@@ -2,12 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   LayoutDashboard, FolderTree, IndianRupee, Receipt, 
   BookOpen, LogOut, Building2, ChevronDown, ChevronRight,
-  Layers, Users, Home
+  Layers, Users, Home, UserCog
 } from 'lucide-react';
 import gsap from 'gsap';
 import API from '../services/api';
 
-export default function Sidebar({ currentTab, setCurrentTab, user, onLogout }) {
+export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onOpenProfile }) {
   const sidebarRef = useRef(null);
   const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'pg'].includes(currentTab);
   const [mastersExpanded, setMastersExpanded] = useState(true);
@@ -212,11 +212,25 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout }) {
 
       {/* User Footer */}
       <div className="p-4 border-t border-slate-800 bg-slate-950/40">
-        <div className="flex items-center justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-bold text-white truncate">{user?.name || 'Administrator'}</p>
-            <p className="text-[10px] text-emerald-400 font-medium capitalize">{user?.role || 'Admin'}</p>
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <button
+            onClick={onOpenProfile}
+            title="Edit Profile & Security Settings"
+            className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-80 transition-opacity flex-1 group"
+          >
+            <div className="w-8 h-8 rounded-xl bg-slate-800 group-hover:bg-emerald-600/20 text-slate-300 group-hover:text-emerald-400 flex items-center justify-center shrink-0 border border-slate-700 transition-colors">
+              <UserCog className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white truncate group-hover:text-emerald-300 transition-colors">
+                {user?.name || user?.username || 'Administrator'}
+              </p>
+              <p className="text-[10px] text-emerald-400 font-medium capitalize truncate">
+                {user?.username ? `@${user.username}` : user?.role || 'Admin'}
+              </p>
+            </div>
+          </button>
+
           <button
             onClick={onLogout}
             title="Sign Out"

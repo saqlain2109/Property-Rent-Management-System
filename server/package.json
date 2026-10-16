@@ -23,6 +23,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.1",
     "multer": "^2.4.0",
+    "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

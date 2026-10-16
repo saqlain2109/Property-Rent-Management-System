@@ -7,12 +7,24 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Please provide user name'],
     trim: true,
   },
+  username: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    lowercase: true,
+  },
   email: {
     type: String,
     required: [true, 'Please provide email'],
     unique: true,
     lowercase: true,
     trim: true,
+  },
+  phone: {
+    type: String,
+    trim: true,
+    default: '',
   },
   password: {
     type: String,
@@ -31,6 +43,18 @@ const userSchema = new mongoose.Schema({
   },
   lastLogin: {
     type: Date,
+  },
+  twoFactorEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  twoFactorSecret: {
+    type: String,
+    select: false,
+  },
+  twoFactorTempSecret: {
+    type: String,
+    select: false,
   }
 }, {
   timestamps: true,

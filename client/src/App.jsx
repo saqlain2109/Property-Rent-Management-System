@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import LoginModal from './components/LoginModal';
+import ProfileModal from './components/ProfileModal';
 import FloatingChatbot from './components/FloatingChatbot';
 import Dashboard from './views/Dashboard';
 import PropertiesView from './views/PropertiesView';
@@ -17,6 +18,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isInitialized, setIsInitialized] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [partitionPropertyFilter, setPartitionPropertyFilter] = useState('');
   const [partitionSearch, setPartitionSearch] = useState('');
 
@@ -79,7 +81,17 @@ export default function App() {
         setCurrentTab={setCurrentTab}
         user={user}
         onLogout={handleLogout}
+        onOpenProfile={() => setShowProfileModal(true)}
       />
+
+      {/* Profile & Security Modal */}
+      {showProfileModal && (
+        <ProfileModal
+          user={user}
+          onUpdateUser={(updated) => setUser(updated)}
+          onClose={() => setShowProfileModal(false)}
+        />
+      )}
 
       {/* Main Content View Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">

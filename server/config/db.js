@@ -32,14 +32,20 @@ const connectDB = async () => {
           console.log('[Database] Database is empty. Running automatic verified migration...');
           const { executeMigration } = require('../routes/migrationRoutes');
           const User = require('../models/User');
-          let admin = await User.findOne({ email: 'admin@propertyrent.com' });
+          let admin = await User.findOne({
+            $or: [{ email: 'admin@propertyrent.com' }, { username: 'admin' }]
+          });
           if (!admin) {
             admin = await User.create({
               name: 'Administrator',
+              username: 'admin',
               email: 'admin@propertyrent.com',
               password: 'AdminPassword123!',
               role: 'admin'
             });
+          } else if (!admin.username) {
+            admin.username = 'admin';
+            await admin.save();
           }
           await executeMigration({ dryRun: false, user: admin });
           console.log('[Database] Automatic migration completed successfully!');
