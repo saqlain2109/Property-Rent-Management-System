@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
-import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import { formatCurrency, formatMonthYear, formatDate } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
-import { BookOpen, CheckCircle2, TrendingUp, TrendingDown, Minus, RotateCcw } from 'lucide-react';
+import { 
+  BookOpen, CheckCircle2, TrendingUp, TrendingDown, Minus, 
+  RotateCcw, RefreshCw, Eye, X, ArrowUpRight, Calendar, DollarSign
+} from 'lucide-react';
 
 const LEDGER_COLUMNS_DEF = [
   { id: 'month', label: 'Month', defaultVisible: true },
@@ -12,18 +15,20 @@ const LEDGER_COLUMNS_DEF = [
   { id: 'net', label: 'Net Cash Flow', defaultVisible: true },
   { id: 'closing', label: 'Closing Balance', defaultVisible: true },
   { id: 'status', label: 'Status', defaultVisible: true },
+  { id: 'actions', label: 'Details', defaultVisible: true },
   { id: 'netMargin', label: 'Net Cash Margin %', defaultVisible: false },
   { id: 'expenseRatio', label: 'Expense to Income %', defaultVisible: false }
 ];
 
 const DEFAULT_LEDGER_COLUMN_WIDTHS = {
-  month: 100,
-  opening: 120,
+  month: 110,
+  opening: 125,
   income: 125,
-  expenses: 115,
+  expenses: 120,
   net: 115,
   closing: 125,
   status: 90,
+  actions: 90,
   netMargin: 110,
   expenseRatio: 110
 };
@@ -31,6 +36,12 @@ const DEFAULT_LEDGER_COLUMN_WIDTHS = {
 export default function LedgerView() {
   const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Month breakdown modal
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [monthDetails, setMonthDetails] = useState(null);
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_ledger');
@@ -47,21 +58,38 @@ export default function LedgerView() {
     hasCustomWidths
   } = useResizableColumns('ledger', DEFAULT_LEDGER_COLUMN_WIDTHS);
 
-  const fetchLedger = async () => {
+  const fetchLedger = async (isManual = false) => {
     try {
-      setLoading(true);
+      if (isManual) setRefreshing(true);
+      else setLoading(true);
       const res = await API.get('/ledger');
       if (res.data.success) setLedger(res.data.data);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const handleOpenMonthDetails = async (monthYear) => {
+    try {
+      setSelectedMonth(monthYear);
+      setDetailsLoading(true);
+      const res = await API.get(`/ledger/month-details?month=${monthYear}`);
+      if (res.data.success) {
+        setMonthDetails(res.data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDetailsLoading(false);
     }
   };
 
   useEffect(() => { fetchLedger(); }, []);
 
-  if (loading) {
+  if (loading && ledger.length === 0) {
     return (
       <div className="flex items-center justify-center py-16">
         <div className="w-7 h-7 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
@@ -72,26 +100,47 @@ export default function LedgerView() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div className="flex items-center gap-3 mb-1">
-          <BookOpen className="w-5 h-5 text-emerald-600" />
-          <h2 className="text-xl font-extrabold text-slate-900">Monthly Account Book</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <BookOpen className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-xl font-extrabold text-slate-900">Monthly Account Book</h2>
+          </div>
+          <p className="text-sm text-slate-500">
+            Simple formula: <span className="font-semibold text-slate-700">Opening Balance + Rent Received − Expenses = Closing Balance</span>. 
+            All newly added expenses and payments update this book automatically.
+          </p>
         </div>
-        <p className="text-sm text-slate-500">
-          Simple formula: <span className="font-semibold text-slate-700">Opening Balance + Rent Received − Expenses = Closing Balance</span>. 
-          Each month's closing balance becomes next month's opening balance.
-        </p>
+        <button
+          onClick={() => fetchLedger(true)}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 text-xs font-semibold transition-all shrink-0 self-start sm:self-auto"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-600' : ''}`} />
+          <span>{refreshing ? 'Updating...' : 'Refresh Live Book'}</span>
+        </button>
       </div>
 
       {/* Monthly Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {ledger.map((m) => (
-          <div key={m.monthYear} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+          <div 
+            key={m.monthYear} 
+            onClick={() => handleOpenMonthDetails(m.monthYear)}
+            className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer group"
+          >
             <div className="flex items-center justify-between">
-              <span className="font-extrabold text-slate-900 text-sm">{formatMonthYear(m.monthYear)}</span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                <CheckCircle2 className="w-3 h-3" /> Verified
+              <span className="font-extrabold text-slate-900 text-sm group-hover:text-emerald-700 transition-colors">
+                {formatMonthYear(m.monthYear)}
               </span>
+              <div className="flex items-center gap-1.5">
+                <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  <CheckCircle2 className="w-3 h-3" /> Verified
+                </span>
+                <span className="p-1 rounded-lg bg-slate-50 group-hover:bg-emerald-100/70 text-slate-400 group-hover:text-emerald-700 transition-colors">
+                  <Eye className="w-3.5 h-3.5" />
+                </span>
+              </div>
             </div>
 
             <div className="space-y-2 text-xs">
@@ -126,7 +175,10 @@ export default function LedgerView() {
       {/* Ledger Table */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="font-bold text-slate-800 text-sm">Full Account Summary</h3>
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm">Full Account Summary</h3>
+            <p className="text-xs text-slate-400">Chronological carry-forward book across all operational months</p>
+          </div>
           <div className="flex items-center gap-2">
             {hasCustomWidths && (
               <button
@@ -168,7 +220,7 @@ export default function LedgerView() {
                   const width = columnWidths[colId] || DEFAULT_LEDGER_COLUMN_WIDTHS[colId] || 100;
                   
                   let alignClass = 'text-left';
-                  if (colId === 'status') alignClass = 'text-center';
+                  if (colId === 'status' || colId === 'actions') alignClass = 'text-center';
                   else if (['opening', 'income', 'expenses', 'net', 'closing', 'netMargin', 'expenseRatio'].includes(colId)) alignClass = 'text-right';
 
                   let colorClass = '';
@@ -232,6 +284,20 @@ export default function LedgerView() {
                           </td>
                         );
                       }
+                      if (colId === 'actions') {
+                        return (
+                          <td key={colId} className="py-4 text-center">
+                            <button
+                              onClick={() => handleOpenMonthDetails(m.monthYear)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 text-xs font-semibold transition-colors"
+                              title="Inspect month income & expenses"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>View</span>
+                            </button>
+                          </td>
+                        );
+                      }
                       if (colId === 'netMargin') {
                         return (
                           <td key={colId} className="py-4 text-right text-xs font-mono font-bold">
@@ -257,6 +323,160 @@ export default function LedgerView() {
           </table>
         </div>
       </div>
+
+      {/* Month Breakdown Modal */}
+      {selectedMonth && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-700">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">
+                    Account Breakdown · {formatMonthYear(selectedMonth)}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Live itemized receipts and expenses for this month
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setSelectedMonth(null); setMonthDetails(null); }}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-6">
+              {detailsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-6 h-6 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <>
+                  {/* Summary Bar */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-xl bg-emerald-50/80 border border-emerald-100 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-emerald-800">Total Rent Received</p>
+                        <p className="text-xl font-extrabold text-emerald-700 mt-0.5">
+                          {formatCurrency(monthDetails?.totalIncome || 0)}
+                        </p>
+                      </div>
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-200/60 text-emerald-800">
+                        {monthDetails?.receipts?.length || 0} payment(s)
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-rose-50/80 border border-rose-100 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-rose-800">Total Expenses Paid</p>
+                        <p className="text-xl font-extrabold text-rose-700 mt-0.5">
+                          {formatCurrency(monthDetails?.totalExpenses || 0)}
+                        </p>
+                      </div>
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-rose-200/60 text-rose-800">
+                        {monthDetails?.expenses?.length || 0} expense(s)
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Expenses List */}
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm mb-2.5 flex items-center gap-2">
+                      <TrendingDown className="w-4 h-4 text-rose-500" />
+                      <span>Expenses Paid in {formatMonthYear(selectedMonth)}</span>
+                    </h4>
+                    {(!monthDetails?.expenses || monthDetails.expenses.length === 0) ? (
+                      <p className="text-xs text-slate-400 italic py-4 bg-slate-50 rounded-xl text-center">
+                        No expenses recorded in {formatMonthYear(selectedMonth)}
+                      </p>
+                    ) : (
+                      <div className="border border-slate-200 rounded-xl overflow-hidden">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                            <tr>
+                              <th className="py-2.5 px-3 font-semibold">Date</th>
+                              <th className="py-2.5 px-3 font-semibold">Property</th>
+                              <th className="py-2.5 px-3 font-semibold">Category</th>
+                              <th className="py-2.5 px-3 font-semibold">Description</th>
+                              <th className="py-2.5 px-3 font-semibold text-right">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {monthDetails.expenses.map((e) => (
+                              <tr key={e._id} className="hover:bg-slate-50/60">
+                                <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{formatDate(e.expenseDate)}</td>
+                                <td className="py-2.5 px-3 font-medium text-slate-800">{e.propertyId?.name || 'General'}</td>
+                                <td className="py-2.5 px-3 text-slate-600">{e.category}</td>
+                                <td className="py-2.5 px-3 text-slate-500 max-w-[200px] truncate">{e.description}</td>
+                                <td className="py-2.5 px-3 text-right font-bold text-rose-600">{formatCurrency(e.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Rent Receipts List */}
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm mb-2.5 flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-emerald-500" />
+                      <span>Rent Payments in {formatMonthYear(selectedMonth)}</span>
+                    </h4>
+                    {(!monthDetails?.receipts || monthDetails.receipts.length === 0) ? (
+                      <p className="text-xs text-slate-400 italic py-4 bg-slate-50 rounded-xl text-center">
+                        No rent payments recorded in {formatMonthYear(selectedMonth)}
+                      </p>
+                    ) : (
+                      <div className="border border-slate-200 rounded-xl overflow-hidden">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                            <tr>
+                              <th className="py-2.5 px-3 font-semibold">Receipt No</th>
+                              <th className="py-2.5 px-3 font-semibold">Date</th>
+                              <th className="py-2.5 px-3 font-semibold">Tenant</th>
+                              <th className="py-2.5 px-3 font-semibold">Unit</th>
+                              <th className="py-2.5 px-3 font-semibold text-right">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {monthDetails.receipts.map((r) => (
+                              <tr key={r._id} className="hover:bg-slate-50/60">
+                                <td className="py-2.5 px-3 font-mono font-semibold text-slate-700">{r.receiptNumber}</td>
+                                <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{formatDate(r.receiptDate)}</td>
+                                <td className="py-2.5 px-3 font-medium text-slate-800">{r.tenantId?.name}</td>
+                                <td className="py-2.5 px-3 text-slate-500">{r.unitId?.unitName}</td>
+                                <td className="py-2.5 px-3 text-right font-bold text-emerald-600">{formatCurrency(r.totalAmount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+              <button
+                onClick={() => { setSelectedMonth(null); setMonthDetails(null); }}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

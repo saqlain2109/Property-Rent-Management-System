@@ -83,6 +83,19 @@ export default function ReportsView() {
             <CheckCircle2 className="w-3.5 h-3.5" /> Included in exported workbook
           </div>
         </div>
+
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <h3 className="font-bold text-slate-800 text-base">Monthly Account Book</h3>
+          <p className="text-xs text-slate-500">
+            Consecutive starting balance, live rent received, live expenses paid, net cash flow, and closing balance.
+          </p>
+          <div className="pt-2 text-xs text-emerald-600 font-semibold flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Included in exported workbook
+          </div>
+        </div>
       </div>
     </div>
   );

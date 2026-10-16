@@ -2,84 +2,70 @@ const express = require('express');
 const router = express.Router();
 const PaymentReceipt = require('../models/PaymentReceipt');
 const Expense = require('../models/Expense');
-const MonthlyLedger = require('../models/MonthlyLedger');
+const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 const { protect } = require('../middleware/auth');
 
 /**
- * Generate monthly financial ledger on the fly from true underlying transactions
+ * @route GET /api/ledger
+ * Generates monthly financial account book dynamically from true underlying transactions
  */
 router.get('/', protect, async (req, res) => {
   try {
     const { startMonth, endMonth } = req.query; // YYYY-MM
-    const ledgers = await MonthlyLedger.find().sort({ monthYear: 1 });
+    let ledgerReport = await syncMonthlyLedgers();
 
-    // Aggregate monthly receipts
-    const receipts = await PaymentReceipt.aggregate([
-      { $match: { isReversed: false } },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m', date: '$receiptDate' } },
-          totalIncome: { $sum: '$totalAmount' },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { _id: 1 } }
-    ]);
-
-    // Aggregate monthly expenses
-    const expenses = await Expense.aggregate([
-      { $match: { isReversed: false } },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m', date: '$expenseDate' } },
-          totalExpense: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { _id: 1 } }
-    ]);
-
-    // Gather all distinct months
-    const allMonths = new Set([
-      ...ledgers.map(l => l.monthYear),
-      ...receipts.map(r => r._id),
-      ...expenses.map(e => e._id)
-    ]);
-    const sortedMonths = Array.from(allMonths).sort();
-
-    // Baseline opening balance for Jan 2026 is 5,643,188.74 as proven by Excel
-    let currentBalance = 5643188.74;
-    const ledgerReport = [];
-
-    for (const m of sortedMonths) {
-      if (startMonth && m < startMonth) continue;
-      if (endMonth && m > endMonth) continue;
-
-      const incObj = receipts.find(r => r._id === m);
-      const expObj = expenses.find(e => e._id === m);
-      const inc = incObj ? incObj.totalIncome : 0;
-      const exp = expObj ? expObj.totalExpense : 0;
-      const net = inc - exp;
-      const opening = currentBalance;
-      const closing = opening + net;
-      currentBalance = closing;
-
-      const storedLedger = ledgers.find(l => l.monthYear === m);
-
-      ledgerReport.push({
-        monthYear: m,
-        openingBalance: opening,
-        totalIncomeReceived: inc,
-        totalExpensesPaid: exp,
-        netCashFlow: net,
-        closingBalance: closing,
-        storedOpening: storedLedger ? storedLedger.openingBalance : null,
-        storedClosing: storedLedger ? storedLedger.closingBalance : null,
-        isReconciled: storedLedger ? Math.abs(storedLedger.closingBalance - closing) < 1 : true
+    if (startMonth || endMonth) {
+      ledgerReport = ledgerReport.filter(m => {
+        if (startMonth && m.monthYear < startMonth) return false;
+        if (endMonth && m.monthYear > endMonth) return false;
+        return true;
       });
     }
 
     res.json({ success: true, count: ledgerReport.length, data: ledgerReport });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * @route GET /api/ledger/month-details
+ * Returns detailed transaction breakdown (receipts and expenses) for a specific month
+ */
+router.get('/month-details', protect, async (req, res) => {
+  try {
+    const { month } = req.query; // YYYY-MM
+    if (!month) {
+      return res.status(400).json({ success: false, message: 'Month parameter is required (YYYY-MM)' });
+    }
+
+    const [year, m] = month.split('-').map(Number);
+    const startOfMonth = new Date(year, m - 1, 1);
+    const endOfMonth = new Date(year, m, 0, 23, 59, 59, 999);
+
+    const receipts = await PaymentReceipt.find({
+      isReversed: false,
+      receiptDate: { $gte: startOfMonth, $lte: endOfMonth }
+    })
+      .populate('tenantId', 'name tenantCode')
+      .populate('unitId', 'unitName')
+      .sort({ receiptDate: 1 });
+
+    const expenses = await Expense.find({
+      isReversed: false,
+      expenseDate: { $gte: startOfMonth, $lte: endOfMonth }
+    })
+      .populate('propertyId', 'name propertyCode')
+      .sort({ expenseDate: 1 });
+
+    res.json({
+      success: true,
+      month,
+      receipts,
+      expenses,
+      totalIncome: receipts.reduce((sum, r) => sum + r.totalAmount, 0),
+      totalExpenses: expenses.reduce((sum, e) => sum + e.amount, 0)
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

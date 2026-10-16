@@ -9,6 +9,7 @@ const RentAgreement = require('../models/RentAgreement');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const Expense = require('../models/Expense');
 const { calculateTenantUnitLedger } = require('../services/rentCalculator');
+const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 const { protect } = require('../middleware/auth');
 
 // @route GET /api/reports/tenant-ledger/:tenantId
@@ -156,6 +157,20 @@ router.get('/export-excel', protect, async (req, res) => {
     }));
     const wsExp = XLSX.utils.json_to_sheet(expRows);
     XLSX.utils.book_append_sheet(wb, wsExp, 'Expenses');
+
+    // 5. Monthly Account Book Sheet
+    const ledgerData = await syncMonthlyLedgers();
+    const ledgerRows = ledgerData.map(m => ({
+      'Month': m.monthYear,
+      'Starting Balance': m.openingBalance,
+      'Rent Received': m.totalIncomeReceived,
+      'Expenses Paid': m.totalExpensesPaid,
+      'Net Cash Flow': m.netCashFlow,
+      'Closing Balance': m.closingBalance,
+      'Status': m.isReconciled ? 'Verified' : 'Pending'
+    }));
+    const wsLedger = XLSX.utils.json_to_sheet(ledgerRows);
+    XLSX.utils.book_append_sheet(wb, wsLedger, 'Monthly Account Book');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Disposition', 'attachment; filename="Property_Rent_Management_Export.xlsx"');

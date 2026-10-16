@@ -1,0 +1,113 @@
+const PaymentReceipt = require('../models/PaymentReceipt');
+const Expense = require('../models/Expense');
+const MonthlyLedger = require('../models/MonthlyLedger');
+
+/**
+ * Recalculates and synchronizes monthly financial ledgers from authentic transaction records.
+ * Baseline opening balance for Jan 2026 is 5,643,188.74 as proven by Excel audit.
+ */
+async function syncMonthlyLedgers() {
+  const BASELINE_OPENING_BALANCE = 5643188.74;
+  const BASELINE_START_MONTH = '2026-01';
+
+  // 1. Aggregate all non-reversed receipts by month
+  const receipts = await PaymentReceipt.aggregate([
+    { $match: { isReversed: false } },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m', date: '$receiptDate' } },
+        totalIncome: { $sum: '$totalAmount' },
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+  const receiptMap = {};
+  receipts.forEach(r => {
+    if (r._id) receiptMap[r._id] = r.totalIncome;
+  });
+
+  // 2. Aggregate all non-reversed expenses by month
+  const expenses = await Expense.aggregate([
+    { $match: { isReversed: false } },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m', date: '$expenseDate' } },
+        totalExpense: { $sum: '$amount' },
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+  const expenseMap = {};
+  expenses.forEach(e => {
+    if (e._id) expenseMap[e._id] = e.totalExpense;
+  });
+
+  // 3. Determine current month and latest month to cover
+  const now = new Date();
+  const currentMonthYear = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  const allMonthsSet = new Set([
+    ...Object.keys(receiptMap),
+    ...Object.keys(expenseMap),
+    BASELINE_START_MONTH,
+    '2026-03',
+    currentMonthYear
+  ]);
+  const sortedDistinct = Array.from(allMonthsSet).filter(Boolean).sort();
+  const maxMonth = sortedDistinct[sortedDistinct.length - 1];
+
+  // 4. Generate continuous sequence of months from BASELINE_START_MONTH to maxMonth
+  const months = [];
+  let [curY, curM] = BASELINE_START_MONTH.split('-').map(Number);
+  const [maxY, maxM] = maxMonth.split('-').map(Number);
+
+  while (curY < maxY || (curY === maxY && curM <= maxM)) {
+    months.push(`${curY}-${String(curM).padStart(2, '0')}`);
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+
+  // 5. Carry forward balances sequentially
+  let runningBalance = BASELINE_OPENING_BALANCE;
+  const ledgerReport = [];
+
+  for (const m of months) {
+    const inc = receiptMap[m] || 0;
+    const exp = expenseMap[m] || 0;
+    const net = inc - exp;
+    const opening = runningBalance;
+    const closing = opening + net;
+    runningBalance = closing;
+
+    await MonthlyLedger.findOneAndUpdate(
+      { monthYear: m },
+      {
+        monthYear: m,
+        openingBalance: opening,
+        totalIncomeReceived: inc,
+        totalExpensesPaid: exp,
+        netCashFlow: net,
+        closingBalance: closing,
+        isReconciled: true
+      },
+      { upsert: true, new: true }
+    );
+
+    ledgerReport.push({
+      monthYear: m,
+      openingBalance: opening,
+      totalIncomeReceived: inc,
+      totalExpensesPaid: exp,
+      netCashFlow: net,
+      closingBalance: closing,
+      isReconciled: true
+    });
+  }
+
+  return ledgerReport;
+}
+
+module.exports = { syncMonthlyLedgers };

@@ -6,6 +6,7 @@ const ExpenseCategory = require('../models/ExpenseCategory');
 const Property = require('../models/Property');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
+const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 
 // @route GET /api/expenses
 router.get('/', protect, async (req, res) => {
@@ -112,6 +113,8 @@ router.post('/', protect, authorize('admin', 'manager'), [
       req
     });
 
+    await syncMonthlyLedgers().catch(console.error);
+
     res.status(201).json({ success: true, data: expense });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -144,6 +147,8 @@ router.post('/:id/reverse', protect, authorize('admin'), [
       req
     });
 
+    await syncMonthlyLedgers().catch(console.error);
+
     res.json({ success: true, message: 'Expense reversed successfully with audit trail', data: expense });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -167,6 +172,8 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (paymentMode) expense.paymentMode = paymentMode;
 
     await expense.save();
+    await syncMonthlyLedgers().catch(console.error);
+
     res.json({ success: true, message: 'Expense updated successfully', data: expense });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -192,6 +199,8 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
       description: `Permanently deleted expense ${expense.expenseCode} of ₹${expense.amount}`,
       req
     });
+
+    await syncMonthlyLedgers().catch(console.error);
 
     res.json({ success: true, message: 'Expense permanently deleted' });
   } catch (error) {

@@ -143,7 +143,6 @@ export default function PaymentsView() {
   // Filters
   const [search, setSearch] = useState('');
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState(''); // 'overdue' | 'clear' | 'partial'
 
   // Modals
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -863,17 +862,7 @@ export default function PaymentsView() {
       d.property?._id === selectedPropertyFilter ||
       d.property?.name === selectedPropertyFilter;
 
-    const monthData = d.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-    const isOverdue = d.totalOutstanding > 0;
-    const isClear = d.totalOutstanding <= 0;
-    const isPartial = monthData?.status === 'Partially Paid';
-
-    const matchesStatus = !selectedStatusFilter ||
-      (selectedStatusFilter === 'overdue' && isOverdue) ||
-      (selectedStatusFilter === 'clear' && isClear) ||
-      (selectedStatusFilter === 'partial' && isPartial);
-
-    return matchesSearch && matchesProp && matchesStatus;
+    return matchesSearch && matchesProp;
   }).sort((a, b) => {
     // Sort rows by Property Master displayOrder
     const orderA = a.property?.displayOrder ?? 9999;
@@ -1047,17 +1036,6 @@ export default function PaymentsView() {
                 {properties.map(p => (
                   <option key={p._id} value={p._id}>{p.name}</option>
                 ))}
-              </select>
-
-              <select
-                value={selectedStatusFilter}
-                onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
-              >
-                <option value="">All Statuses</option>
-                <option value="overdue">Pending Dues</option>
-                <option value="partial">Partially Paid</option>
-                <option value="clear">Fully Paid / Clear</option>
               </select>
 
               {/* Excel Export Button */}

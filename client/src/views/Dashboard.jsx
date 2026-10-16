@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import { 
@@ -51,6 +51,18 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [ledgerTrend, setLedgerTrend] = useState([]);
   const cardContainerRef = useRef(null);
+
+  const availableMonths = useMemo(() => {
+    const set = new Set(data?.availableMonths || []);
+    // Ensure all 12 months for 2025, 2026, 2027 are available
+    for (let y = 2025; y <= 2027; y++) {
+      for (let m = 1; m <= 12; m++) {
+        set.add(`${y}-${String(m).padStart(2, '0')}`);
+      }
+    }
+    if (targetMonth) set.add(targetMonth);
+    return Array.from(set).sort();
+  }, [data?.availableMonths, targetMonth]);
 
   const fetchDashboard = async () => {
     try {
@@ -105,11 +117,13 @@ export default function Dashboard() {
             <select
               value={targetMonth}
               onChange={(e) => setTargetMonth(e.target.value)}
-              className="bg-transparent text-sm font-semibold text-slate-700 focus:outline-none cursor-pointer"
+              className="bg-transparent text-sm font-semibold text-slate-700 focus:outline-none cursor-pointer max-w-[170px]"
             >
-              <option value="2026-01">January 2026</option>
-              <option value="2026-02">February 2026</option>
-              <option value="2026-03">March 2026</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {formatMonthYear(m)}
+                </option>
+              ))}
             </select>
           </div>
           <button
@@ -152,9 +166,9 @@ export default function Dashboard() {
           iconColor="text-rose-600"
         />
         <KpiCard
-          label="Rent Still Pending"
+          label={`Rent Still Pending · ${formatMonthYear(targetMonth)}`}
           value={formatCurrency(stats.totalOutstandingRent)}
-          sub={`${stats.overdueTenantsCount || 0} tenant(s) have dues`}
+          sub={`${stats.overdueTenantsCount || 0} tenant(s) have pending dues`}
           icon={AlertTriangle}
           color="text-amber-700"
           bgColor="bg-amber-50"
@@ -199,7 +213,7 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
-              Net Cash This Month
+              Net Cash · {formatMonthYear(targetMonth)}
             </p>
             <p className="text-3xl font-extrabold text-white mt-1">
               {formatCurrency(stats.netCashFlowMonth)}
@@ -207,7 +221,7 @@ export default function Dashboard() {
 
             <div className="mt-5 pt-4 border-t border-slate-700/60 space-y-2.5 text-sm">
               <div className="flex justify-between text-slate-400">
-                <span>Expected Monthly Rent:</span>
+                <span>Expected Rent ({formatMonthYear(targetMonth)}):</span>
                 <span className="font-semibold text-white">{formatCurrency(stats.totalExpectedRent)}</span>
               </div>
               <div className="flex justify-between text-slate-400">
@@ -222,16 +236,21 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Activity */}
+      {/* Recent Activity Filtered by Month */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Payments */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            <h3 className="font-bold text-slate-800 text-sm">Recent Rent Payments</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <h3 className="font-bold text-slate-800 text-sm">Rent Payments · {formatMonthYear(targetMonth)}</h3>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+              {data?.recentReceipts?.length || 0} payment(s)
+            </span>
           </div>
           {(!data?.recentReceipts || data.recentReceipts.length === 0) ? (
-            <p className="text-xs text-slate-400 italic py-4 text-center">No payments recorded yet</p>
+            <p className="text-xs text-slate-400 italic py-8 text-center">No rent payments recorded in {formatMonthYear(targetMonth)}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -260,12 +279,17 @@ export default function Dashboard() {
 
         {/* Recent Expenses */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <Clock className="w-4 h-4 text-rose-400" />
-            <h3 className="font-bold text-slate-800 text-sm">Recent Expenses</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-rose-400" />
+              <h3 className="font-bold text-slate-800 text-sm">Expenses · {formatMonthYear(targetMonth)}</h3>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-100">
+              {data?.recentExpenses?.length || 0} expense(s)
+            </span>
           </div>
           {(!data?.recentExpenses || data.recentExpenses.length === 0) ? (
-            <p className="text-xs text-slate-400 italic py-4 text-center">No expenses recorded yet</p>
+            <p className="text-xs text-slate-400 italic py-8 text-center">No expenses recorded in {formatMonthYear(targetMonth)}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">

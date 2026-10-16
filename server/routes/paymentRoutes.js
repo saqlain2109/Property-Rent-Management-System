@@ -7,6 +7,7 @@ const TenantAssignment = require('../models/TenantAssignment');
 const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
+const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 
 // @route GET /api/payments
 router.get('/', protect, async (req, res) => {
@@ -183,6 +184,8 @@ router.post('/', protect, authorize('admin', 'manager'), [
       req
     });
 
+    await syncMonthlyLedgers().catch(console.error);
+
     res.status(201).json({
       success: true,
       message: 'Payment recorded and allocated successfully',
@@ -268,7 +271,8 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       req
     });
 
-    const updatedAllocations = await PaymentAllocation.find({ receiptId: receipt._id });
+    await PaymentAllocation.find({ receiptId: receipt._id });
+    await syncMonthlyLedgers().catch(console.error);
 
     res.json({
       success: true,
@@ -308,6 +312,8 @@ router.post('/:id/reverse', protect, authorize('admin'), [
       req
     });
 
+    await syncMonthlyLedgers().catch(console.error);
+
     res.json({ success: true, message: 'Payment successfully reversed with full audit trail', data: receipt });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -334,6 +340,8 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
       description: `Permanently deleted receipt ${receipt.receiptNumber} of ₹${receipt.totalAmount}`,
       req
     });
+
+    await syncMonthlyLedgers().catch(console.error);
 
     res.json({ success: true, message: 'Payment receipt permanently deleted' });
   } catch (error) {
