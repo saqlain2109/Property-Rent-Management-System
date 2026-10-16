@@ -33,6 +33,16 @@ const propertySchema = new mongoose.Schema({
     trim: true,
     default: 'Owner',
   },
+  totalAreaSqFt: {
+    type: Number,
+    default: 0, // Area in square feet e.g. 5000 sq ft
+  },
+  ownershipPercentage: {
+    type: Number,
+    default: 100, // e.g. 100 for godown 100%, 50 for 50/50 split
+    min: 0,
+    max: 100,
+  },
   description: {
     type: String,
     trim: true,
@@ -45,6 +55,10 @@ const propertySchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true,
+  },
+  displayOrder: {
+    type: Number,
+    default: 0, // Order for custom property sorting (1, 2, 3...)
   }
 }, {
   timestamps: true,

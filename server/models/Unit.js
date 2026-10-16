@@ -14,15 +14,24 @@ const unitSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
-  unitName: {
+  subUnitPartition: {
     type: String,
     required: true,
-    trim: true, // e.g. "Paying Guest / Kotak PG", "Room 2108"
+    trim: true, // e.g. "Partition 1", "Room 10", "Water Wala Space"
+  },
+  unitName: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  areaSqFt: {
+    type: Number,
+    default: 0, // Area of partition in square feet
   },
   unitType: {
     type: String,
-    enum: ['Room', 'Godown Partition', 'Shop / Salon', 'Attic', 'Flat', 'PG Beds', 'Garage Space', 'Other'],
-    default: 'Room',
+    default: 'Godown Partition',
+    trim: true,
   },
   floor: {
     type: String,
@@ -32,7 +41,7 @@ const unitSchema = new mongoose.Schema({
   occupancyStatus: {
     type: String,
     enum: ['Occupied', 'Vacant', 'Maintenance', 'Under Notice'],
-    default: 'Occupied',
+    default: 'Vacant',
   },
   legacySheetCode: {
     type: String,

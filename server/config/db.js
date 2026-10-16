@@ -11,14 +11,12 @@ const connectDB = async () => {
     return cached.conn;
   }
 
+  if (!cached.promise) {
     const uri = process.env.MONGODB_URI || 
                 process.env.MONGO_URI || 
                 process.env.MONGODB_URL || 
-                process.env.DATABASE_URL;
-
-    if (!uri) {
-      throw new Error('No MongoDB URI found in environment variables (checked MONGODB_URI, MONGO_URI, MONGODB_URL, DATABASE_URL)');
-    }
+                process.env.DATABASE_URL ||
+                'mongodb://127.0.0.1:27017/property_rent_db';
 
     cached.promise = mongoose.connect(uri, {
       bufferCommands: false,

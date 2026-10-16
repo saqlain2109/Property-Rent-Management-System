@@ -4,7 +4,7 @@ const { body, validationResult } = require('express-validator');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const PaymentAllocation = require('../models/PaymentAllocation');
 const TenantAssignment = require('../models/TenantAssignment');
-const { calculateTenantUnitLedger } = require('../services/rentCalculator');
+const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
 
@@ -55,7 +55,7 @@ router.get('/', protect, async (req, res) => {
 router.get('/outstanding-summary', protect, async (req, res) => {
   try {
     const { upToMonthYear } = req.query;
-    const targetMonth = upToMonthYear || '2026-03';
+    const targetMonth = upToMonthYear || getCurrentMonthYear();
 
     const activeAssignments = await TenantAssignment.find({ status: 'Active' })
       .populate('tenantId', 'name tenantCode phone')
@@ -98,7 +98,7 @@ router.get('/tenant-unit-ledger', protect, async (req, res) => {
       return res.status(400).json({ success: false, message: 'unitId and tenantId are required' });
     }
 
-    const ledger = await calculateTenantUnitLedger(unitId, tenantId, upToMonthYear || '2026-03');
+    const ledger = await calculateTenantUnitLedger(unitId, tenantId, upToMonthYear || getCurrentMonthYear());
     res.json({ success: true, data: ledger });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

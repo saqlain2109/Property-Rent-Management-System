@@ -26,7 +26,7 @@ router.get('/', protect, async (req, res) => {
       query.isActive = status === 'true';
     }
 
-    const properties = await Property.find(query).sort({ propertyCode: 1 });
+    const properties = await Property.find(query).sort({ displayOrder: 1, name: 1, propertyCode: 1 });
     
     // Attach unit count
     const propertyIds = properties.map(p => p._id);

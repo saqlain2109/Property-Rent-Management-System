@@ -27,22 +27,30 @@ router.get('/', protect, async (req, res) => {
 
     const tenants = await Tenant.find(query).sort({ name: 1 });
 
-    // Populate active unit info
+    // Populate active unit info and rent agreement
     const tenantIds = tenants.map(t => t._id);
     const assignments = await TenantAssignment.find({
       tenantId: { $in: tenantIds },
       status: 'Active'
     }).populate({
       path: 'unitId',
-      populate: { path: 'propertyId', select: 'name propertyCode' }
+      populate: { path: 'propertyId', select: 'name propertyCode totalAreaSqFt ownershipPercentage' }
+    });
+
+    const assignmentIds = assignments.map(a => a._id);
+    const agreements = await RentAgreement.find({
+      assignmentId: { $in: assignmentIds },
+      isCurrentRate: true
     });
 
     const tenantsWithUnits = tenants.map(t => {
       const activeAssign = assignments.find(a => a.tenantId.toString() === t._id.toString());
+      const activeAgreement = activeAssign ? agreements.find(ag => ag.assignmentId.toString() === activeAssign._id.toString()) : null;
       return {
         ...t.toObject(),
         activeAssignment: activeAssign || null,
-        activeUnit: activeAssign ? activeAssign.unitId : null
+        activeUnit: activeAssign ? activeAssign.unitId : null,
+        currentRentAgreement: activeAgreement || null
       };
     });
 
@@ -106,10 +114,40 @@ router.post('/', protect, authorize('admin', 'manager'), [
       finalCode = `${finalCode}-${rand}`;
     }
 
+    const { unitId, monthlyRate, startDate, endDate, depositHeld, terms, initialPaidTillMonth } = req.body;
+
     const tenant = await Tenant.create({
       ...req.body,
       tenantCode: finalCode
     });
+
+    if (unitId && monthlyRate !== undefined && monthlyRate !== null && monthlyRate !== '') {
+      const asnCount = await TenantAssignment.countDocuments();
+      const assignment = await TenantAssignment.create({
+        assignmentCode: `ASN-${String(asnCount + 1).padStart(4, '0')}`,
+        tenantId: tenant._id,
+        unitId,
+        startDate: startDate || new Date().toISOString().split('T')[0],
+        endDate: endDate || null,
+        depositHeld: Number(depositHeld) || 0,
+        initialPaidTillMonth: initialPaidTillMonth || null,
+        status: 'Active'
+      });
+
+      await RentAgreement.create({
+        assignmentId: assignment._id,
+        unitId,
+        tenantId: tenant._id,
+        rentType: 'Monthly Fixed',
+        monthlyRate: Number(monthlyRate) || 0,
+        effectiveFrom: startDate || new Date().toISOString().split('T')[0],
+        terms: terms || '',
+        isCurrentRate: true
+      });
+
+      const Unit = require('../models/Unit');
+      await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+    }
 
     await logAudit({
       userId: req.user._id,
@@ -136,11 +174,81 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     }
 
     const prev = tenant.toObject();
+    const { unitId, monthlyRate, startDate, endDate, depositHeld, terms } = req.body;
+
     Object.assign(tenant, req.body);
     if (req.body.tenantCode) {
       tenant.tenantCode = req.body.tenantCode.toUpperCase();
     }
     await tenant.save();
+
+    // Handle unit & rent updates if provided
+    if (unitId || monthlyRate !== undefined) {
+      const Unit = require('../models/Unit');
+      const currentAssignment = await TenantAssignment.findOne({ tenantId: tenant._id, status: 'Active' });
+
+      if (currentAssignment) {
+        if (unitId && currentAssignment.unitId.toString() !== unitId.toString()) {
+          // Free previous unit
+          await Unit.findByIdAndUpdate(currentAssignment.unitId, { occupancyStatus: 'Vacant' });
+          currentAssignment.unitId = unitId;
+          await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+        }
+        if (startDate) currentAssignment.startDate = startDate;
+        if (endDate !== undefined) currentAssignment.endDate = endDate || null;
+        if (depositHeld !== undefined) currentAssignment.depositHeld = Number(depositHeld) || 0;
+        await currentAssignment.save();
+
+        if (monthlyRate !== undefined && monthlyRate !== '') {
+          const currentAgreement = await RentAgreement.findOne({
+            assignmentId: currentAssignment._id,
+            isCurrentRate: true
+          });
+          if (currentAgreement) {
+            currentAgreement.monthlyRate = Number(monthlyRate);
+            if (terms !== undefined) currentAgreement.terms = terms;
+            if (unitId) currentAgreement.unitId = unitId;
+            await currentAgreement.save();
+          } else {
+            await RentAgreement.create({
+              assignmentId: currentAssignment._id,
+              unitId: currentAssignment.unitId,
+              tenantId: tenant._id,
+              rentType: 'Monthly Fixed',
+              monthlyRate: Number(monthlyRate) || 0,
+              effectiveFrom: startDate || currentAssignment.startDate,
+              terms: terms || '',
+              isCurrentRate: true
+            });
+          }
+        }
+      } else if (unitId && monthlyRate !== undefined && monthlyRate !== '') {
+        // Create new assignment
+        const asnCount = await TenantAssignment.countDocuments();
+        const newAsn = await TenantAssignment.create({
+          assignmentCode: `ASN-${String(asnCount + 1).padStart(4, '0')}`,
+          tenantId: tenant._id,
+          unitId,
+          startDate: startDate || new Date().toISOString().split('T')[0],
+          endDate: endDate || null,
+          depositHeld: Number(depositHeld) || 0,
+          status: 'Active'
+        });
+
+        await RentAgreement.create({
+          assignmentId: newAsn._id,
+          unitId,
+          tenantId: tenant._id,
+          rentType: 'Monthly Fixed',
+          monthlyRate: Number(monthlyRate) || 0,
+          effectiveFrom: startDate || new Date().toISOString().split('T')[0],
+          terms: terms || '',
+          isCurrentRate: true
+        });
+
+        await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+      }
+    }
 
     await logAudit({
       userId: req.user._id,

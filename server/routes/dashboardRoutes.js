@@ -6,12 +6,12 @@ const Tenant = require('../models/Tenant');
 const TenantAssignment = require('../models/TenantAssignment');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const Expense = require('../models/Expense');
-const { calculateTenantUnitLedger } = require('../services/rentCalculator');
+const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
 const { protect } = require('../middleware/auth');
 
 router.get('/summary', protect, async (req, res) => {
   try {
-    const { targetMonth = '2026-03' } = req.query;
+    const { targetMonth = getCurrentMonthYear() } = req.query;
 
     const totalProperties = await Property.countDocuments({ isActive: true });
     const totalUnits = await Unit.countDocuments({ isActive: true });

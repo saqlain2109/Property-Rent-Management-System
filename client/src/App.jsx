@@ -3,7 +3,10 @@ import Sidebar from './components/Sidebar';
 import LoginModal from './components/LoginModal';
 import FloatingChatbot from './components/FloatingChatbot';
 import Dashboard from './views/Dashboard';
-import MasterManagerView from './views/MasterManagerView';
+import PropertiesView from './views/PropertiesView';
+import PartitionsView from './views/PartitionsView';
+import TenantsView from './views/TenantsView';
+import PGView from './views/PGView';
 import PaymentsView from './views/PaymentsView';
 import ExpensesView from './views/ExpensesView';
 import LedgerReportsView from './views/LedgerReportsView';
@@ -14,6 +17,8 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isInitialized, setIsInitialized] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
+  const [partitionPropertyFilter, setPartitionPropertyFilter] = useState('');
+  const [partitionSearch, setPartitionSearch] = useState('');
 
   useEffect(() => {
     const checkAuthStatus = async () => {
@@ -68,7 +73,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden relative">
-      {/* Consolidated Sidebar */}
+      {/* Consolidated Sidebar with Masters Toggle Accordion */}
       <Sidebar
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
@@ -80,9 +85,37 @@ export default function App() {
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         <div className="p-4 sm:p-8 max-w-7xl w-full mx-auto pb-24">
           {currentTab === 'dashboard' && <Dashboard />}
-          {currentTab === 'masters' && <MasterManagerView />}
+
+          {/* Master Views (rendered full-width, navigated via left sidebar toggle) */}
+          {(currentTab === 'masters' || currentTab === 'properties') && (
+            <PropertiesView
+              onNavigateToPartitions={(propId) => {
+                setPartitionPropertyFilter(propId);
+                setPartitionSearch('');
+                setCurrentTab('partitions');
+              }}
+            />
+          )}
+
+          {currentTab === 'partitions' && (
+            <PartitionsView
+              initialPropertyFilter={partitionPropertyFilter}
+              initialSearch={partitionSearch}
+              onClearPropertyFilter={() => {
+                setPartitionPropertyFilter('');
+                setPartitionSearch('');
+              }}
+            />
+          )}
+
+          {currentTab === 'tenants' && <TenantsView />}
+
+          {currentTab === 'pg' && <PGView />}
+
           {currentTab === 'payments' && <PaymentsView />}
+
           {currentTab === 'expenses' && <ExpensesView />}
+
           {currentTab === 'ledger_reports' && <LedgerReportsView />}
         </div>
       </main>

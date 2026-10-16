@@ -1,13 +1,60 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
-import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit } from 'lucide-react';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit, RotateCcw } from 'lucide-react';
+
+const PG_COLUMNS_DEF = [
+  { id: 'month', label: 'Month', defaultVisible: true },
+  { id: 'gross', label: 'Gross Collection', defaultVisible: true },
+  { id: 'altaf', label: 'Altaf Share', defaultVisible: true },
+  { id: 'anand', label: 'Anand Share', defaultVisible: true },
+  { id: 'bisleri', label: 'Bisleri Water', defaultVisible: true },
+  { id: 'deductions', label: 'Total Deductions', defaultVisible: true },
+  { id: 'net', label: 'Net Received by Owner', defaultVisible: true },
+  { id: 'rehan', label: 'Rehan Share', defaultVisible: false },
+  { id: 'actualBank', label: 'Actual Bank Received', defaultVisible: false },
+  { id: 'difference', label: 'Bank vs Net Variance', defaultVisible: false },
+  { id: 'notes', label: 'Notes / Remarks', defaultVisible: false },
+  { id: 'actions', label: 'Actions', defaultVisible: true }
+];
+
+// Screen-fitting default column widths to guarantee zero horizontal scroll by default!
+const DEFAULT_PG_COLUMN_WIDTHS = {
+  month: 100,
+  gross: 110,
+  altaf: 95,
+  anand: 95,
+  bisleri: 95,
+  deductions: 110,
+  net: 130,
+  actions: 85,
+  rehan: 95,
+  actualBank: 110,
+  difference: 110,
+  notes: 140
+};
 
 export default function PGView() {
   const [settlements, setSettlements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingSettlement, setEditingSettlement] = useState(null);
+
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('cols_pg_settlements');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return PG_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
+  });
+
+  const {
+    columnWidths,
+    handleResizeStart,
+    resetColumnWidths,
+    hasCustomWidths
+  } = useResizableColumns('pg_settlements', DEFAULT_PG_COLUMN_WIDTHS);
 
   const [form, setForm] = useState({
     monthYear: '2026-01',
@@ -105,43 +152,197 @@ export default function PGView() {
 
       {/* Settlements Table */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
-        <h3 className="font-bold text-slate-800 text-base">Historical PG Collections & Deductions</h3>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-bold text-slate-800 text-base">Historical PG Collections & Deductions</h3>
+          <div className="flex items-center gap-2">
+            <ColumnManager
+              columns={PG_COLUMNS_DEF}
+              visibleColumns={visibleColumns}
+              onChangeVisible={setVisibleColumns}
+              storageKey="pg_settlements"
+              onResetWidths={resetColumnWidths}
+            />
+            <button
+              type="button"
+              onClick={resetColumnWidths}
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
+              title="Reset column widths"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Reset Widths</span>
+            </button>
+          </div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table
+            className="w-full text-left text-xs border-collapse table-fixed"
+            style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_PG_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
+          >
+            <colgroup>
+              {visibleColumns.map(colId => (
+                <col
+                  key={colId}
+                  style={{ width: `${columnWidths[colId] || DEFAULT_PG_COLUMN_WIDTHS[colId] || 100}px` }}
+                />
+              ))}
+            </colgroup>
             <thead>
-              <tr className="border-b border-slate-100 text-slate-400 uppercase font-semibold">
-                <th className="pb-3">Month</th>
-                <th className="pb-3">Gross Collection</th>
-                <th className="pb-3">Altaf Share</th>
-                <th className="pb-3">Anand Share</th>
-                <th className="pb-3">Bisleri Water</th>
-                <th className="pb-3">Total Deductions</th>
-                <th className="pb-3">Net Received by Owner</th>
-                <th className="pb-3 text-right">Actions</th>
+              <tr className="border-b border-slate-200 text-slate-500 uppercase font-extrabold select-none">
+                {visibleColumns.map((colId) => {
+                  const dragProps = getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'pg_settlements');
+                  const width = columnWidths[colId] || DEFAULT_PG_COLUMN_WIDTHS[colId] || 100;
+                  let align = 'text-left';
+                  if (colId === 'actions') align = 'text-right';
+                  let label = colId;
+                  if (colId === 'month') label = 'Month';
+                  else if (colId === 'gross') label = 'Gross Collection';
+                  else if (colId === 'altaf') label = 'Altaf Share';
+                  else if (colId === 'anand') label = 'Anand Share';
+                  else if (colId === 'bisleri') label = 'Bisleri Water';
+                  else if (colId === 'deductions') label = 'Total Deductions';
+                  else if (colId === 'net') label = 'Net Received by Owner';
+                  else if (colId === 'rehan') label = 'Rehan Share';
+                  else if (colId === 'actualBank') label = 'Actual Bank Received';
+                  else if (colId === 'difference') label = 'Variance';
+                  else if (colId === 'notes') label = 'Notes';
+                  else if (colId === 'actions') label = 'Actions';
+                  else {
+                    const colDef = PG_COLUMNS_DEF.find(c => c.id === colId);
+                    if (colDef) label = colDef.label;
+                  }
+
+                  return (
+                    <th
+                      key={colId}
+                      {...dragProps}
+                      style={{ width: `${width}px` }}
+                      className={`pb-3 pr-2 border-r border-slate-100 relative group ${align}`}
+                    >
+                      <span className="truncate block pr-2">{label}</span>
+                      <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {settlements.map((s) => (
-                <tr key={s._id} className="hover:bg-slate-50/50">
-                  <td className="py-3.5 font-bold text-slate-900 text-xs">{formatMonthYear(s.monthYear)}</td>
-                  <td className="py-3.5 font-semibold text-slate-800 text-xs">{formatCurrency(s.pgGrossCollection)}</td>
-                  <td className="py-3.5 text-xs text-slate-600">{formatCurrency(s.altafShare)}</td>
-                  <td className="py-3.5 text-xs text-slate-600">{formatCurrency(s.anandShare)}</td>
-                  <td className="py-3.5 text-xs text-slate-600">{formatCurrency(s.bisleriWaterShare)}</td>
-                  <td className="py-3.5 text-xs font-semibold text-rose-600">{formatCurrency(s.totalOperatorDeductions)}</td>
-                  <td className="py-3.5 font-bold text-emerald-600 text-xs">{formatCurrency(s.netReceivedByOwner)}</td>
-                  <td className="py-3.5 text-right">
-                    <button
-                      onClick={() => openEditSettlement(s)}
-                      title="Edit Settlement"
-                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-slate-600 hover:text-emerald-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
-                    >
-                      <Edit className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
+              {settlements.length === 0 ? (
+                <tr>
+                  <td colSpan={visibleColumns.length} className="py-8 text-center text-slate-400">
+                    No PG settlements recorded yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                settlements.map((s) => {
+                  const actualBank = s.actualBankReceived != null ? Number(s.actualBankReceived) : null;
+                  const variance = actualBank != null ? actualBank - Number(s.netReceivedByOwner || 0) : null;
+
+                  return (
+                    <tr key={s._id} className="hover:bg-slate-50/50">
+                      {visibleColumns.map((colId) => {
+                        if (colId === 'month') {
+                          return (
+                            <td key={colId} className="py-3.5 font-bold text-slate-900 text-xs">
+                              {formatMonthYear(s.monthYear)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'gross') {
+                          return (
+                            <td key={colId} className="py-3.5 font-semibold text-slate-800 text-xs">
+                              {formatCurrency(s.pgGrossCollection)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'altaf') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                              {formatCurrency(s.altafShare)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'anand') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                              {formatCurrency(s.anandShare)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'bisleri') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                              {formatCurrency(s.bisleriWaterShare)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'deductions') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs font-semibold text-rose-600">
+                              {formatCurrency(s.totalOperatorDeductions)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'net') {
+                          return (
+                            <td key={colId} className="py-3.5 font-bold text-emerald-600 text-xs">
+                              {formatCurrency(s.netReceivedByOwner)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'rehan') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                              {s.rehanShare ? formatCurrency(s.rehanShare) : '₹0'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'actualBank') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs font-semibold text-slate-800">
+                              {actualBank != null ? formatCurrency(actualBank) : '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'difference') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs font-mono">
+                              {variance != null ? (
+                                <span className={variance >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                                  {variance >= 0 ? '+' : ''}{formatCurrency(variance)}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                          );
+                        }
+                        if (colId === 'notes') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs text-slate-500 max-w-xs truncate" title={s.notes}>
+                              {s.notes || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'actions') {
+                          return (
+                            <td key={colId} className="py-3.5 text-right">
+                              <button
+                                onClick={() => openEditSettlement(s)}
+                                title="Edit Settlement"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-slate-600 hover:text-emerald-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                                <span>Edit</span>
+                              </button>
+                            </td>
+                          );
+                        }
+                        return null;
+                      })}
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

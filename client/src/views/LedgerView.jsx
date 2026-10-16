@@ -1,11 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
-import { BookOpen, CheckCircle2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { BookOpen, CheckCircle2, TrendingUp, TrendingDown, Minus, RotateCcw } from 'lucide-react';
+
+const LEDGER_COLUMNS_DEF = [
+  { id: 'month', label: 'Month', defaultVisible: true },
+  { id: 'opening', label: 'Starting Balance', defaultVisible: true },
+  { id: 'income', label: 'Rent Received', defaultVisible: true },
+  { id: 'expenses', label: 'Expenses Paid', defaultVisible: true },
+  { id: 'net', label: 'Net Cash Flow', defaultVisible: true },
+  { id: 'closing', label: 'Closing Balance', defaultVisible: true },
+  { id: 'status', label: 'Status', defaultVisible: true },
+  { id: 'netMargin', label: 'Net Cash Margin %', defaultVisible: false },
+  { id: 'expenseRatio', label: 'Expense to Income %', defaultVisible: false }
+];
+
+const DEFAULT_LEDGER_COLUMN_WIDTHS = {
+  month: 100,
+  opening: 120,
+  income: 125,
+  expenses: 115,
+  net: 115,
+  closing: 125,
+  status: 90,
+  netMargin: 110,
+  expenseRatio: 110
+};
 
 export default function LedgerView() {
   const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('cols_ledger');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return LEDGER_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
+  });
+
+  const {
+    columnWidths,
+    handleResizeStart,
+    resetColumnWidths,
+    hasCustomWidths
+  } = useResizableColumns('ledger', DEFAULT_LEDGER_COLUMN_WIDTHS);
 
   const fetchLedger = async () => {
     try {
@@ -84,41 +124,135 @@ export default function LedgerView() {
       </div>
 
       {/* Ledger Table */}
-      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <h3 className="font-bold text-slate-800 text-sm mb-4">Full Account Summary</h3>
+      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-bold text-slate-800 text-sm">Full Account Summary</h3>
+          <div className="flex items-center gap-2">
+            {hasCustomWidths && (
+              <button
+                onClick={resetColumnWidths}
+                title="Reset column widths to default"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl shadow-xs transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Widths</span>
+              </button>
+            )}
+            <ColumnManager
+              columns={LEDGER_COLUMNS_DEF}
+              visibleColumns={visibleColumns}
+              onChangeVisible={setVisibleColumns}
+              onResetWidths={resetColumnWidths}
+              storageKey="ledger"
+            />
+          </div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+          <table
+            className="w-full text-left text-sm border-collapse table-fixed"
+            style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_LEDGER_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
+          >
+            <colgroup>
+              {visibleColumns.map((colId) => (
+                <col
+                  key={colId}
+                  style={{ width: `${columnWidths[colId] || DEFAULT_LEDGER_COLUMN_WIDTHS[colId] || 100}px` }}
+                />
+              ))}
+            </colgroup>
             <thead>
-              <tr className="border-b border-slate-100 text-[11px] text-slate-400 uppercase tracking-wide">
-                <th className="pb-3 font-semibold">Month</th>
-                <th className="pb-3 font-semibold text-right">Starting Balance</th>
-                <th className="pb-3 font-semibold text-right text-emerald-600">Rent Received</th>
-                <th className="pb-3 font-semibold text-right text-rose-600">Expenses</th>
-                <th className="pb-3 font-semibold text-right">Net</th>
-                <th className="pb-3 font-semibold text-right">Closing Balance</th>
-                <th className="pb-3 font-semibold text-center">Status</th>
+              <tr className="border-b border-slate-200 text-[11px] text-slate-500 uppercase tracking-wide select-none">
+                {visibleColumns.map((colId) => {
+                  const dragProps = getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'ledger');
+                  const colDef = LEDGER_COLUMNS_DEF.find(c => c.id === colId);
+                  const width = columnWidths[colId] || DEFAULT_LEDGER_COLUMN_WIDTHS[colId] || 100;
+                  
+                  let alignClass = 'text-left';
+                  if (colId === 'status') alignClass = 'text-center';
+                  else if (['opening', 'income', 'expenses', 'net', 'closing', 'netMargin', 'expenseRatio'].includes(colId)) alignClass = 'text-right';
+
+                  let colorClass = '';
+                  if (colId === 'income') colorClass = 'text-emerald-600';
+                  if (colId === 'expenses') colorClass = 'text-rose-600';
+
+                  return (
+                    <th
+                      key={colId}
+                      {...dragProps}
+                      style={{ width: `${width}px` }}
+                      className={`pb-3 font-semibold relative group ${alignClass} ${colorClass}`}
+                    >
+                      <span className="truncate block pr-2">{colDef?.label || colId}</span>
+                      <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {ledger.map((m) => (
-                <tr key={m.monthYear} className="hover:bg-slate-50/60">
-                  <td className="py-4 font-bold text-slate-900 text-xs">{formatMonthYear(m.monthYear)}</td>
-                  <td className="py-4 text-right text-slate-600 text-xs font-medium">{formatCurrency(m.openingBalance)}</td>
-                  <td className="py-4 text-right text-emerald-600 text-xs font-semibold">{formatCurrency(m.totalIncomeReceived)}</td>
-                  <td className="py-4 text-right text-rose-600 text-xs font-semibold">{formatCurrency(m.totalExpensesPaid)}</td>
-                  <td className="py-4 text-right text-xs font-bold">
-                    <span className={m.netCashFlow >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                      {formatCurrency(m.netCashFlow)}
-                    </span>
-                  </td>
-                  <td className="py-4 text-right text-slate-900 text-xs font-extrabold">{formatCurrency(m.closingBalance)}</td>
-                  <td className="py-4 text-center">
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full">
-                      <CheckCircle2 className="w-3 h-3" /> Verified
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {ledger.map((m) => {
+                const income = m.totalIncomeReceived || 0;
+                const expenses = m.totalExpensesPaid || 0;
+                const netMargin = income > 0 ? ((m.netCashFlow / income) * 100).toFixed(1) : '0.0';
+                const expenseRatio = income > 0 ? ((expenses / income) * 100).toFixed(1) : '0.0';
+
+                return (
+                  <tr key={m.monthYear} className="hover:bg-slate-50/60">
+                    {visibleColumns.map((colId) => {
+                      if (colId === 'month') {
+                        return <td key={colId} className="py-4 font-bold text-slate-900 text-xs">{formatMonthYear(m.monthYear)}</td>;
+                      }
+                      if (colId === 'opening') {
+                        return <td key={colId} className="py-4 text-right text-slate-600 text-xs font-medium">{formatCurrency(m.openingBalance)}</td>;
+                      }
+                      if (colId === 'income') {
+                        return <td key={colId} className="py-4 text-right text-emerald-600 text-xs font-semibold">{formatCurrency(m.totalIncomeReceived)}</td>;
+                      }
+                      if (colId === 'expenses') {
+                        return <td key={colId} className="py-4 text-right text-rose-600 text-xs font-semibold">{formatCurrency(m.totalExpensesPaid)}</td>;
+                      }
+                      if (colId === 'net') {
+                        return (
+                          <td key={colId} className="py-4 text-right text-xs font-bold">
+                            <span className={m.netCashFlow >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                              {formatCurrency(m.netCashFlow)}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (colId === 'closing') {
+                        return <td key={colId} className="py-4 text-right text-slate-900 text-xs font-extrabold">{formatCurrency(m.closingBalance)}</td>;
+                      }
+                      if (colId === 'status') {
+                        return (
+                          <td key={colId} className="py-4 text-center">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" /> Verified
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (colId === 'netMargin') {
+                        return (
+                          <td key={colId} className="py-4 text-right text-xs font-mono font-bold">
+                            <span className={Number(netMargin) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                              {Number(netMargin) >= 0 ? '+' : ''}{netMargin}%
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (colId === 'expenseRatio') {
+                        return (
+                          <td key={colId} className="py-4 text-right text-xs font-mono text-slate-600">
+                            {expenseRatio}%
+                          </td>
+                        );
+                      }
+                      return null;
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

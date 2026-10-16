@@ -41,7 +41,12 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function Dashboard() {
-  const [targetMonth, setTargetMonth] = useState('2026-03');
+  const getCurrentMonthYear = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const [targetMonth, setTargetMonth] = useState(getCurrentMonthYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [ledgerTrend, setLedgerTrend] = useState([]);

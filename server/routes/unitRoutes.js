@@ -84,7 +84,6 @@ router.get('/:id', protect, async (req, res) => {
 
 // @route POST /api/units
 router.post('/', protect, authorize('admin', 'manager'), [
-  body('unitName').trim().notEmpty().withMessage('Unit name is required'),
   body('propertyId').isMongoId().withMessage('Valid property ID is required')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -98,9 +97,11 @@ router.post('/', protect, authorize('admin', 'manager'), [
       return res.status(404).json({ success: false, message: 'Parent property not found' });
     }
 
+    const partitionName = req.body.subUnitPartition?.trim() || req.body.unitName?.trim() || 'Partition';
+
     let finalCode = req.body.unitCode?.trim()?.toUpperCase();
     if (!finalCode) {
-      const cleanName = req.body.unitName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
+      const cleanName = partitionName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
       const count = await Unit.countDocuments({ propertyId: property._id });
       finalCode = `${property.propertyCode.slice(0, 4)}-${cleanName || 'UNIT'}-${String(count + 1).padStart(2, '0')}`;
     }
@@ -115,6 +116,8 @@ router.post('/', protect, authorize('admin', 'manager'), [
 
     const unit = await Unit.create({
       ...req.body,
+      subUnitPartition: partitionName,
+      unitName: partitionName,
       unitCode: finalCode
     });
 

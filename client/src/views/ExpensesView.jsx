@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import ColumnManager from '../components/ColumnManager';
-import { Receipt, Plus, Search, RotateCcw, Tag, X, Edit2, Trash2 } from 'lucide-react';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import SearchableSelect from '../components/SearchableSelect';
+import { Plus, Search, RotateCcw, X, Edit2, Trash2 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
   'Maintenance',
@@ -27,14 +28,25 @@ const CATEGORY_COLORS = {
 };
 
 const EXPENSES_COLUMNS_DEF = [
-  { id: 'date', label: 'Date' },
-  { id: 'property', label: 'Property' },
-  { id: 'category', label: 'Expense Type' },
-  { id: 'description', label: 'What it was for' },
-  { id: 'payee', label: 'Paid To / Mode' },
-  { id: 'amount', label: 'Amount' },
-  { id: 'actions', label: 'Action' }
+  { id: 'date', label: 'Date', defaultVisible: true },
+  { id: 'property', label: 'Property', defaultVisible: true },
+  { id: 'category', label: 'Expense Type', defaultVisible: true },
+  { id: 'description', label: 'What it was for', defaultVisible: true },
+  { id: 'payee', label: 'Paid To / Mode', defaultVisible: true },
+  { id: 'amount', label: 'Amount', defaultVisible: true },
+  { id: 'actions', label: 'Action', defaultVisible: true }
 ];
+
+// Screen-fitting default column widths to ensure ZERO horizontal scrolling by default!
+const DEFAULT_EXPENSES_COLUMN_WIDTHS = {
+  date: 95,
+  property: 140,
+  category: 130,
+  description: 220,
+  payee: 130,
+  amount: 105,
+  actions: 95
+};
 
 export default function ExpensesView() {
   const [expenses, setExpenses] = useState([]);
@@ -50,8 +62,21 @@ export default function ExpensesView() {
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_expenses');
-    return saved ? JSON.parse(saved) : EXPENSES_COLUMNS_DEF.map(c => c.id);
+    if (!saved) return EXPENSES_COLUMNS_DEF.map(c => c.id);
+    try {
+      const allowed = EXPENSES_COLUMNS_DEF.map((column) => column.id);
+      return JSON.parse(saved).filter((column) => allowed.includes(column));
+    } catch {
+      return EXPENSES_COLUMNS_DEF.map(c => c.id);
+    }
   });
+
+  const {
+    columnWidths,
+    handleResizeStart,
+    resetColumnWidths,
+    hasCustomWidths
+  } = useResizableColumns('expenses', DEFAULT_EXPENSES_COLUMN_WIDTHS);
 
   const [form, setForm] = useState({
     expenseDate: new Date().toISOString().split('T')[0],
@@ -107,15 +132,32 @@ export default function ExpensesView() {
     e.preventDefault();
     try {
       setSubmitting(true);
+      const categoryName = form.category.trim();
+      const existingCategory = [...CATEGORY_OPTIONS, ...categories.map((category) => (
+        typeof category === 'string' ? category : category.name
+      ))].some((category) => category?.toLowerCase() === categoryName.toLowerCase());
+      if (!existingCategory) {
+        try {
+          const categoryRes = await API.post('/expenses/categories', { name: categoryName });
+          if (categoryRes.data.success) {
+            setCategories((current) => [...current, categoryRes.data.data]);
+          }
+        } catch (error) {
+          const isDuplicate = error.response?.status === 400 &&
+            error.response?.data?.message === 'Category already exists';
+          if (!isDuplicate) throw error;
+        }
+      }
+      const payload = { ...form, category: categoryName };
       if (editingExpenseId) {
-        const res = await API.put(`/expenses/${editingExpenseId}`, form);
+        const res = await API.put(`/expenses/${editingExpenseId}`, payload);
         if (res.data.success) {
           setShowModal(false);
           resetForm();
           fetchData();
         }
       } else {
-        const res = await API.post('/expenses', form);
+        const res = await API.post('/expenses', payload);
         if (res.data.success) {
           setShowModal(false);
           resetForm();
@@ -155,18 +197,20 @@ export default function ExpensesView() {
       !search ||
       e.description?.toLowerCase().includes(search.toLowerCase()) ||
       e.vendorOrPayee?.toLowerCase().includes(search.toLowerCase()) ||
-      e.propertyId?.name?.toLowerCase().includes(search.toLowerCase());
+      e.propertyId?.name?.toLowerCase().includes(search.toLowerCase()) ||
+      e.category?.toLowerCase().includes(search.toLowerCase());
 
     const matchesCategory = !categoryFilter || e.category === categoryFilter;
-    const matchesProp = !propertyFilter || e.propertyId?._id === propertyFilter || e.propertyId?.name === propertyFilter;
+    const matchesProp = !propertyFilter || String(e.propertyId?._id || e.propertyId || '') === propertyFilter;
 
     return matchesSearch && matchesCategory && matchesProp;
   });
 
   const totalShown = filtered.reduce((s, e) => s + (e.isReversed ? 0 : e.amount), 0);
-  const allCategories = categories.length > 0 
-    ? categories.map(c => (typeof c === 'string' ? c : c.name || c._id))
-    : CATEGORY_OPTIONS;
+  const allCategories = [...new Set([
+    ...CATEGORY_OPTIONS,
+    ...categories.map(c => (typeof c === 'string' ? c : c.name)).filter(Boolean)
+  ])].sort((a, b) => a.localeCompare(b));
 
   return (
     <div className="space-y-6">
@@ -204,35 +248,43 @@ export default function ExpensesView() {
           )}
         </div>
 
-        {/* Property Filter */}
-        <select
+        <SearchableSelect
+          className="w-full sm:w-56"
           value={propertyFilter}
-          onChange={(e) => setPropertyFilter(e.target.value)}
-          className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
-        >
-          <option value="">All Properties</option>
-          {properties.map(p => (
-            <option key={p._id} value={p._id}>{p.name}</option>
-          ))}
-        </select>
-
-        {/* Category Filter */}
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
-        >
-          <option value="">All Expense Types</option>
-          {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-
-        {/* Column Manager */}
-        <ColumnManager
-          columns={EXPENSES_COLUMNS_DEF}
-          visibleColumns={visibleColumns}
-          onChangeVisible={setVisibleColumns}
-          storageKey="expenses"
+          onChange={setPropertyFilter}
+          placeholder="All Properties"
+          searchPlaceholder="Search properties..."
+          options={properties.map((property) => ({ value: property._id, label: property.name }))}
         />
+
+        <SearchableSelect
+          className="w-full sm:w-52"
+          value={categoryFilter}
+          onChange={setCategoryFilter}
+          placeholder="All Expense Types"
+          searchPlaceholder="Search expense types..."
+          options={allCategories.map((category) => ({ value: category, label: category }))}
+        />
+
+        {/* Column Manager & Reset */}
+        <div className="flex items-center gap-2">
+          <ColumnManager
+            columns={EXPENSES_COLUMNS_DEF}
+            visibleColumns={visibleColumns}
+            onChangeVisible={setVisibleColumns}
+            storageKey="expenses"
+            onResetWidths={resetColumnWidths}
+          />
+          <button
+            type="button"
+            onClick={resetColumnWidths}
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
+            title="Reset column widths"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Reset Widths</span>
+          </button>
+        </div>
 
         <div className="sm:ml-auto text-xs font-semibold text-slate-700 whitespace-nowrap pl-1">
           Total: <span className="text-rose-600 font-bold">{formatCurrency(totalShown)}</span>
@@ -249,18 +301,44 @@ export default function ExpensesView() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table
+              className="w-full text-left text-sm border-collapse table-fixed"
+              style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_EXPENSES_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
+            >
+              <colgroup>
+                {visibleColumns.map(colId => (
+                  <col
+                    key={colId}
+                    style={{ width: `${columnWidths[colId] || DEFAULT_EXPENSES_COLUMN_WIDTHS[colId] || 100}px` }}
+                  />
+                ))}
+              </colgroup>
               <thead className="bg-slate-50 border-b border-slate-200">
-                <tr className="text-[11px] text-slate-400 uppercase tracking-wide font-semibold">
+                <tr className="text-[11px] text-slate-500 uppercase tracking-wide font-extrabold select-none">
                   {visibleColumns.map(colId => {
-                    if (colId === 'date') return <th key={colId} className="px-5 py-3.5">Date</th>;
-                    if (colId === 'property') return <th key={colId} className="px-5 py-3.5">Property</th>;
-                    if (colId === 'category') return <th key={colId} className="px-5 py-3.5">Expense Type</th>;
-                    if (colId === 'description') return <th key={colId} className="px-5 py-3.5">What it was for</th>;
-                    if (colId === 'payee') return <th key={colId} className="px-5 py-3.5">Paid To / Method</th>;
-                    if (colId === 'amount') return <th key={colId} className="px-5 py-3.5 text-right">Amount</th>;
-                    if (colId === 'actions') return <th key={colId} className="px-5 py-3.5 text-center">Action</th>;
-                    return null;
+                    const dragProps = getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'expenses');
+                    const width = columnWidths[colId] || DEFAULT_EXPENSES_COLUMN_WIDTHS[colId] || 100;
+                    let label = colId;
+                    let align = 'text-left';
+                    if (colId === 'date') label = 'Date';
+                    else if (colId === 'property') label = 'Property';
+                    else if (colId === 'category') label = 'Expense Type';
+                    else if (colId === 'description') label = 'What it was for';
+                    else if (colId === 'payee') label = 'Paid To / Method';
+                    else if (colId === 'amount') { label = 'Amount'; align = 'text-right'; }
+                    else if (colId === 'actions') { label = 'Action'; align = 'text-center'; }
+
+                    return (
+                      <th
+                        key={colId}
+                        {...dragProps}
+                        style={{ width: `${width}px` }}
+                        className={`px-4 py-3.5 border-r border-slate-200 relative group ${align}`}
+                      >
+                        <span className="truncate block pr-2">{label}</span>
+                        <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
+                      </th>
+                    );
                   })}
                 </tr>
               </thead>
@@ -309,7 +387,7 @@ export default function ExpensesView() {
                       if (colId === 'actions') {
                         return (
                           <td key={colId} className="px-5 py-3.5 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                               {!e.isReversed && (
                                 <>
                                   <button
@@ -327,14 +405,14 @@ export default function ExpensesView() {
                                       setShowModal(true);
                                     }}
                                     title="Edit Expense"
-                                    className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-slate-100 rounded-lg transition-colors"
+                                    className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-slate-100 rounded-lg transition-colors shrink-0"
                                   >
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
                                   <button
                                     onClick={() => handleReverse(e._id)}
                                     title="Cancel/Reverse Expense"
-                                    className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                    className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors shrink-0"
                                   >
                                     <RotateCcw className="w-3.5 h-3.5" />
                                   </button>
@@ -378,9 +456,49 @@ export default function ExpensesView() {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
+              {/* Row 1: Property + Expense Type */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Date</label>
+                  <SearchableSelect
+                    label="Property"
+                    placeholder="General (No property)"
+                    searchPlaceholder="Search properties..."
+                    options={properties.map((property) => ({ value: property._id, label: property.name }))}
+                    value={form.propertyId}
+                    onChange={(propertyId) => setForm((prev) => ({ ...prev, propertyId }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Expense Type *</label>
+                  <input
+                    type="text"
+                    list="expense-category-options"
+                    required
+                    placeholder="Select or type new..."
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                  />
+                  <datalist id="expense-category-options">
+                    {allCategories.map((category) => <option key={category} value={category} />)}
+                  </datalist>
+                  <p className="mt-1 text-[11px] text-slate-400">Choose from list or type custom value</p>
+                </div>
+              </div>
+
+              {/* Row 2: Amount + Date */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Amount (₹) *</label>
+                  <input
+                    type="number" required min="0" step="0.01" placeholder="e.g. 4500"
+                    value={form.amount}
+                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-bold text-rose-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Date *</label>
                   <input
                     type="date" required
                     value={form.expenseDate}
@@ -388,56 +506,23 @@ export default function ExpensesView() {
                     className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Property</label>
-                  <select
-                    value={form.propertyId}
-                    onChange={(e) => setForm({ ...form, propertyId: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-                  >
-                    <option value="">General (No property)</option>
-                    {properties.map(p => (
-                      <option key={p._id} value={p._id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Expense Type</label>
-                  <select
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-                  >
-                    {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Amount (₹)</label>
-                  <input
-                    type="number" required placeholder="e.g. 4500"
-                    value={form.amount}
-                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-bold text-rose-600"
-                  />
-                </div>
-              </div>
-
+              {/* Row 3: Description */}
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">What it was for</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">What was it for? *</label>
                 <input
-                  type="text" required placeholder="e.g. Water tank cleaning, electrician visit"
+                  type="text" required placeholder="e.g. Water tank cleaning, electrician visit, plumbing"
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                 />
               </div>
 
+              {/* Row 4: Payee + Mode */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Paid To (optional)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Paid To <span className="text-slate-400 font-normal">(optional)</span></label>
                   <input
                     type="text" placeholder="e.g. Ramesh Painter"
                     value={form.vendorOrPayee}
@@ -446,7 +531,7 @@ export default function ExpensesView() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">How was it paid?</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Payment Method</label>
                   <select
                     value={form.paymentMode}
                     onChange={(e) => setForm({ ...form, paymentMode: e.target.value })}

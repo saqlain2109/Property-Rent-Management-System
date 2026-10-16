@@ -43,13 +43,21 @@ async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr) {
   return agreement ? agreement.monthlyRate : 0;
 }
 
+function getCurrentMonthYear() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
 /**
  * Calculate detailed paid-till, outstanding, and month-by-month breakdown
  * @param {ObjectId} unitId 
  * @param {ObjectId} tenantId 
- * @param {String} upToMonthYear optional target month, defaults to current month or latest
+ * @param {String} upToMonthYear optional target month, defaults to current month
  */
-async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear = '2026-03') {
+async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear) {
+  const effectiveUpTo = upToMonthYear || getCurrentMonthYear();
   // 1. Get occupancy assignment
   const assignment = await TenantAssignment.findOne({ unitId, tenantId }).sort({ startDate: -1 });
   if (!assignment) {
@@ -67,8 +75,8 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear = '2026
   // Determine starting month from occupancy startDate
   const startMonthStr = `${assignment.startDate.getFullYear()}-${String(assignment.startDate.getMonth() + 1).padStart(2, '0')}`;
   
-  // If assignment has ended before upToMonthYear, cap it
-  let endMonthStr = upToMonthYear;
+  // If assignment has ended before effectiveUpTo, cap it
+  let endMonthStr = effectiveUpTo;
   if (assignment.endDate) {
     const assignEndStr = `${assignment.endDate.getFullYear()}-${String(assignment.endDate.getMonth() + 1).padStart(2, '0')}`;
     if (assignEndStr < endMonthStr) {
@@ -144,7 +152,7 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear = '2026
         status = 'Credit / Advance';
       }
 
-      if (!nextUnpaidMonth && (status === 'Unpaid' || status === 'Partially Paid') && m <= upToMonthYear) {
+      if (!nextUnpaidMonth && (status === 'Unpaid' || status === 'Partially Paid') && m <= effectiveUpTo) {
         nextUnpaidMonth = m;
       }
 
@@ -185,6 +193,7 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear = '2026
 }
 
 module.exports = {
+  getCurrentMonthYear,
   getEffectiveRentForMonth,
   calculateTenantUnitLedger,
   getMonthsRange

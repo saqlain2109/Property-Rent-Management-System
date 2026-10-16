@@ -29,7 +29,7 @@ export default function SearchableSelect({
     }
     const val = valueKey ? opt[valueKey] : (opt.value !== undefined ? opt.value : opt._id || opt.id);
     const lab = displayKey ? opt[displayKey] : (opt.label !== undefined ? opt.label : opt.name || opt.title);
-    const sub = secondaryKey ? opt[secondaryKey] : (opt.subtext || opt.code || opt.propertyCode || opt.unitCode || opt.tenantCode || '');
+    const sub = secondaryKey ? opt[secondaryKey] : (opt.subtext || '');
     const badge = badgeKey ? opt[badgeKey] : (opt.badge || (opt.occupancyStatus ? opt.occupancyStatus : ''));
     const badgeColor = opt.badgeColor || (
       badge === 'Occupied' ? 'bg-amber-100 text-amber-800' :

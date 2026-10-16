@@ -1,12 +1,19 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
+const { noSqlInjectionProtection } = require('./middleware/security');
 
 dotenv.config();
 
 const app = express();
+
+// Security Headers with Helmet
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
 
 // Middleware to ensure DB is connected for serverless invocations
 app.use(async (req, res, next) => {
@@ -30,16 +37,28 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Body parsers
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsers with payload size limit (DoS prevention)
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// Rate limiter for authentication endpoints
+// NoSQL Injection Protection
+app.use(noSqlInjectionProtection);
+
+// Rate limiter for authentication endpoints (Brute-force protection)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50,
   message: { success: false, message: 'Too many login attempts from this IP, please try again after 15 minutes' }
 });
+
+// General API rate limiter (DoS & scraping protection)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  message: { success: false, message: 'Too many requests from this IP, please try again shortly.' }
+});
+
+app.use('/api', apiLimiter);
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
