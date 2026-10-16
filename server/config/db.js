@@ -21,8 +21,33 @@ const connectDB = async () => {
     cached.promise = mongoose.connect(uri, {
       bufferCommands: false,
       serverSelectionTimeoutMS: 5000
-    }).then((mongooseInstance) => {
+    }).then(async (mongooseInstance) => {
       console.log(`[Database] MongoDB Connected: ${mongooseInstance.connection.host}/${mongooseInstance.connection.name}`);
+      
+      // Auto-seed if database has 0 properties (first deployment / fresh server)
+      try {
+        const Property = require('../models/Property');
+        const count = await Property.countDocuments();
+        if (count === 0) {
+          console.log('[Database] Database is empty. Running automatic verified migration...');
+          const { executeMigration } = require('../routes/migrationRoutes');
+          const User = require('../models/User');
+          let admin = await User.findOne({ email: 'admin@propertyrent.com' });
+          if (!admin) {
+            admin = await User.create({
+              name: 'Administrator',
+              email: 'admin@propertyrent.com',
+              password: 'AdminPassword123!',
+              role: 'admin'
+            });
+          }
+          await executeMigration({ dryRun: false, user: admin });
+          console.log('[Database] Automatic migration completed successfully!');
+        }
+      } catch (err) {
+        console.error('[Database Auto-Seed Warning]', err.message);
+      }
+
       return mongooseInstance;
     });
   }

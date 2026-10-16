@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import LedgerView from './LedgerView';
 import ReportsView from './ReportsView';
-import MigrationView from './MigrationView';
-import { BookOpen, Download, Upload } from 'lucide-react';
+import { BookOpen, Download } from 'lucide-react';
 
 const TABS = [
   { id: 'ledger', label: 'Account Book', icon: BookOpen, desc: 'Month-by-month income, expenses, and balance summary' },
   { id: 'export', label: 'Download Report', icon: Download, desc: 'Export your data as an Excel file' },
-  { id: 'migration', label: 'Import Excel Data', icon: Upload, desc: 'Import data from your existing Excel workbooks' },
 ];
 
 export default function LedgerReportsView() {
@@ -21,7 +19,7 @@ export default function LedgerReportsView() {
       <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
         <h2 className="text-xl font-extrabold text-slate-900">Reports & Account Book</h2>
         <p className="text-sm text-slate-500 mt-0.5">
-          {currentTab?.desc || 'View financial summaries, download reports, and import historical data'}
+          {currentTab?.desc || 'View financial summaries and download reports'}
         </p>
 
         {/* Tab Pills */}
@@ -47,7 +45,6 @@ export default function LedgerReportsView() {
       <div>
         {activeTab === 'ledger' && <LedgerView />}
         {activeTab === 'export' && <ReportsView />}
-        {activeTab === 'migration' && <MigrationView />}
       </div>
     </div>
   );

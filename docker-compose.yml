@@ -28,6 +28,7 @@ services:
       - mongodb
     volumes:
       - server_uploads:/app/uploads
+      - ./reference_files:/reference_files:ro
     networks:
       - estate_net
 

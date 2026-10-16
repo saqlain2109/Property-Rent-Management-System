@@ -40,14 +40,20 @@ async function executeMigration({ dryRun = false, user = null }) {
     errors: []
   };
 
-  const refPath = path.join(__dirname, '../../reference_files');
+  let refPath = path.join(__dirname, '../../reference_files');
+  if (!fs.existsSync(refPath) && fs.existsSync('/reference_files')) {
+    refPath = '/reference_files';
+  } else if (!fs.existsSync(refPath) && fs.existsSync(path.join(__dirname, '../reference_files'))) {
+    refPath = path.join(__dirname, '../reference_files');
+  }
+
   const rentDetailsFile = path.join(refPath, 'Rent Details 2026.xlsx');
   const janFile = path.join(refPath, 'Jan 26.xlsx');
   const febFile = path.join(refPath, 'Feb 26.xlsx');
   const marFile = path.join(refPath, 'Mar 26.xlsx');
 
   if (!fs.existsSync(rentDetailsFile)) {
-    throw new Error('Reference file "Rent Details 2026.xlsx" not found');
+    throw new Error(`Reference file "Rent Details 2026.xlsx" not found in path: ${refPath}`);
   }
 
   // 1. Setup Default Expense Categories
