@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
 import SearchableSelect from '../components/SearchableSelect';
 import { Plus, Search, RotateCcw, X, Edit2, Trash2 } from 'lucide-react';
@@ -78,7 +78,16 @@ export default function ExpensesView() {
     hasCustomWidths
   } = useResizableColumns('expenses', DEFAULT_EXPENSES_COLUMN_WIDTHS);
 
+  const [entryByDate, setEntryByDate] = useState(false);
+  const [monthFilter, setMonthFilter] = useState('');
+
+  const getInitialMonth = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  };
+
   const [form, setForm] = useState({
+    expenseMonth: getInitialMonth(),
     expenseDate: new Date().toISOString().split('T')[0],
     propertyId: '',
     category: 'Maintenance',
@@ -112,7 +121,9 @@ export default function ExpensesView() {
 
   const resetForm = () => {
     setEditingExpenseId(null);
+    setEntryByDate(false);
     setForm({
+      expenseMonth: getInitialMonth(),
       expenseDate: new Date().toISOString().split('T')[0],
       propertyId: '',
       category: 'Maintenance',
@@ -148,7 +159,12 @@ export default function ExpensesView() {
           if (!isDuplicate) throw error;
         }
       }
-      const payload = { ...form, category: categoryName };
+      const payload = {
+        ...form,
+        category: categoryName,
+        expenseMonth: !entryByDate ? form.expenseMonth : (form.expenseDate ? form.expenseDate.slice(0, 7) : form.expenseMonth),
+        expenseDate: entryByDate ? form.expenseDate : `${form.expenseMonth}-01`
+      };
       if (editingExpenseId) {
         const res = await API.put(`/expenses/${editingExpenseId}`, payload);
         if (res.data.success) {
@@ -202,8 +218,10 @@ export default function ExpensesView() {
 
     const matchesCategory = !categoryFilter || e.category === categoryFilter;
     const matchesProp = !propertyFilter || String(e.propertyId?._id || e.propertyId || '') === propertyFilter;
+    const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
+    const matchesMonth = !monthFilter || expM === monthFilter;
 
-    return matchesSearch && matchesCategory && matchesProp;
+    return matchesSearch && matchesCategory && matchesProp && matchesMonth;
   });
 
   const totalShown = filtered.reduce((s, e) => s + (e.isReversed ? 0 : e.amount), 0);
@@ -211,6 +229,10 @@ export default function ExpensesView() {
     ...CATEGORY_OPTIONS,
     ...categories.map(c => (typeof c === 'string' ? c : c.name)).filter(Boolean)
   ])].sort((a, b) => a.localeCompare(b));
+
+  const availableExpenseMonths = [...new Set(
+    expenses.map(e => e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '')).filter(Boolean)
+  )].sort().reverse();
 
   return (
     <div className="space-y-6">
@@ -255,6 +277,15 @@ export default function ExpensesView() {
           placeholder="All Properties"
           searchPlaceholder="Search properties..."
           options={properties.map((property) => ({ value: property._id, label: property.name }))}
+        />
+
+        <SearchableSelect
+          className="w-full sm:w-44"
+          value={monthFilter}
+          onChange={setMonthFilter}
+          placeholder="All Months"
+          searchPlaceholder="Search month..."
+          options={availableExpenseMonths.map((m) => ({ value: m, label: formatMonthYear(m) }))}
         />
 
         <SearchableSelect
@@ -347,7 +378,18 @@ export default function ExpensesView() {
                   <tr key={e._id} className={`hover:bg-slate-50/60 transition-colors ${e.isReversed ? 'opacity-50' : ''}`}>
                     {visibleColumns.map(colId => {
                       if (colId === 'date') {
-                        return <td key={colId} className="px-5 py-3.5 text-xs text-slate-500 whitespace-nowrap">{formatDate(e.expenseDate)}</td>;
+                        return (
+                          <td key={colId} className="px-5 py-3.5 text-xs text-slate-500 whitespace-nowrap">
+                            <span className="font-semibold text-slate-700 block">
+                              {e.expenseMonth ? formatMonthYear(e.expenseMonth) : formatDate(e.expenseDate)}
+                            </span>
+                            {e.expenseDate && e.expenseMonth && (
+                              <span className="text-[10px] text-slate-400 block">
+                                {formatDate(e.expenseDate)}
+                              </span>
+                            )}
+                          </td>
+                        );
                       }
                       if (colId === 'property') {
                         return (
@@ -393,8 +435,12 @@ export default function ExpensesView() {
                                   <button
                                     onClick={() => {
                                       setEditingExpenseId(e._id);
+                                      const dStr = e.expenseDate ? new Date(e.expenseDate).toISOString().split('T')[0] : '';
+                                      const mStr = e.expenseMonth || (dStr ? dStr.slice(0, 7) : getInitialMonth());
+                                      setEntryByDate(Boolean(dStr && !dStr.endsWith('-01')));
                                       setForm({
-                                        expenseDate: e.expenseDate ? new Date(e.expenseDate).toISOString().split('T')[0] : '',
+                                        expenseMonth: mStr,
+                                        expenseDate: dStr,
                                         propertyId: e.propertyId?._id || e.propertyId || '',
                                         category: e.category || 'Maintenance',
                                         amount: String(e.amount),
@@ -486,7 +532,7 @@ export default function ExpensesView() {
                 </div>
               </div>
 
-              {/* Row 2: Amount + Date */}
+              {/* Row 2: Amount + Month / Date Assignment */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Amount (₹) *</label>
@@ -498,13 +544,36 @@ export default function ExpensesView() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Date *</label>
-                  <input
-                    type="date" required
-                    value={form.expenseDate}
-                    onChange={(e) => setForm({ ...form, expenseDate: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-600">
+                      {entryByDate ? 'Specific Date' : 'Assign to Month'} *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setEntryByDate(!entryByDate)}
+                      className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 underline cursor-pointer"
+                    >
+                      {entryByDate ? 'Assign by Month' : 'Specific Date?'}
+                    </button>
+                  </div>
+                  {!entryByDate ? (
+                    <input
+                      type="month" required
+                      value={form.expenseMonth}
+                      onChange={(e) => setForm({ ...form, expenseMonth: e.target.value })}
+                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-emerald-50/20 font-semibold text-slate-800"
+                    />
+                  ) : (
+                    <input
+                      type="date" required
+                      value={form.expenseDate}
+                      onChange={(e) => setForm({ ...form, expenseDate: e.target.value, expenseMonth: e.target.value.slice(0, 7) })}
+                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    />
+                  )}
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    {!entryByDate ? 'Assigned directly to selected month' : 'Specific day within month'}
+                  </p>
                 </div>
               </div>
 

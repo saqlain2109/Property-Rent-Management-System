@@ -2,16 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   LayoutDashboard, FolderTree, IndianRupee, Receipt, 
   BookOpen, LogOut, Building2, ChevronDown, ChevronRight,
-  Layers, Users, Home, UserCog
+  Layers, Users, Home, UserCog, FileText
 } from 'lucide-react';
 import gsap from 'gsap';
 import API from '../services/api';
 
 export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onOpenProfile }) {
   const sidebarRef = useRef(null);
-  const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'pg'].includes(currentTab);
+  const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'contracts', 'pg'].includes(currentTab);
   const [mastersExpanded, setMastersExpanded] = useState(true);
-  const [counts, setCounts] = useState({ properties: 0, units: 0, tenants: 0 });
+  const [counts, setCounts] = useState({ properties: 0, units: 0, tenants: 0, contracts: 0 });
 
   useEffect(() => {
     if (sidebarRef.current) {
@@ -29,19 +29,21 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
     }
   }, [isMasterTab]);
 
-  // Fetch counts for properties, partitions, and tenants
+  // Fetch counts for properties, partitions, tenants, and contracts
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        const [pRes, uRes, tRes] = await Promise.all([
+        const [pRes, uRes, tRes, cRes] = await Promise.all([
           API.get('/properties'),
           API.get('/units'),
           API.get('/tenants'),
+          API.get('/assignments'),
         ]);
         setCounts({
           properties: pRes.data?.data?.length || 0,
           units: uRes.data?.data?.length || 0,
           tenants: tRes.data?.data?.length || 0,
+          contracts: cRes.data?.data?.length || 0,
         });
       } catch (e) {
         // quiet error
@@ -54,6 +56,7 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
     { id: 'properties', label: 'Properties', icon: Building2, count: counts.properties },
     { id: 'partitions', label: 'Partitions (Units)', icon: Layers, count: counts.units },
     { id: 'tenants',    label: 'Tenants', icon: Users, count: counts.tenants },
+    { id: 'contracts',  label: 'Contracts (Leases)', icon: FileText, count: counts.contracts },
     { id: 'pg',         label: 'PG Settlements', icon: Home },
   ];
 

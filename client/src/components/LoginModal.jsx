@@ -35,7 +35,7 @@ export default function LoginModal({ onLoginSuccess, isSetupMode = false }) {
           onLoginSuccess(res.data.user);
         }
       } else {
-        const payload = { username, password };
+        const payload = { username: username.trim(), email: username.trim(), password };
         const res = await API.post('/auth/login', payload);
 
         if (res.data.require2FA) {

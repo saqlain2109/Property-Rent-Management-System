@@ -77,17 +77,16 @@ router.post('/setup-admin', [
 
 // @route POST /api/auth/login
 // Supports login with Username OR Email
-router.post('/login', [
-  body('username').trim().notEmpty().withMessage('Username is required'),
-  body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ success: false, errors: errors.array() });
-  }
+router.post('/login', async (req, res) => {
+  const identifier = (req.body.username || req.body.email || '').trim().toLowerCase();
+  const password = req.body.password;
 
-  const { username, password } = req.body;
-  const identifier = username.toLowerCase().trim();
+  if (!identifier) {
+    return res.status(400).json({ success: false, message: 'Username is required' });
+  }
+  if (!password) {
+    return res.status(400).json({ success: false, message: 'Password is required' });
+  }
 
   try {
     const user = await User.findOne({

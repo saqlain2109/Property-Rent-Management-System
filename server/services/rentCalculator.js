@@ -22,25 +22,115 @@ function getMonthsRange(startDate, endDate) {
 }
 
 /**
- * Determine effective monthly rent for a given unit/tenant for a given month "YYYY-MM"
+ * Helper to extract calendar day number reliably
  */
-async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr) {
-  const [year, month] = monthYearStr.split('-').map(Number);
-  const monthStart = new Date(year, month - 1, 1);
-  const monthEnd = new Date(year, month, 0, 23, 59, 59);
+function getDayNumber(date) {
+  if (!date) return 1;
+  if (typeof date === 'string') {
+    const parts = date.split('T')[0].split('-');
+    if (parts.length === 3) return parseInt(parts[2], 10);
+  }
+  const iso = date.toISOString ? date.toISOString().split('T')[0] : String(date);
+  const parts = iso.split('-');
+  if (parts.length === 3) return parseInt(parts[2], 10);
+  return date.getDate();
+}
 
-  // Find agreement where effectiveFrom <= monthEnd AND (effectiveTo == null OR effectiveTo >= monthStart)
-  const agreement = await RentAgreement.findOne({
+/**
+ * Calculates proration ratio for a date range [startDay, endDay] in a month with totalDays.
+ * Implements standard commercial 15th-day rule (half month = 0.5) and day proration.
+ */
+function calculateMonthRatio(startDay, endDay, totalDays) {
+  if (startDay <= 1 && endDay >= totalDays) return 1.0;
+  // Specific half-month commercial rule:
+  // Starts on 15th: 15 to totalDays = 0.5 (e.g. ₹9,000 becomes ₹4,500)
+  if (startDay === 15 && endDay >= totalDays - 1) return 0.5;
+  // Ends on 15th: 1 to 15 = 0.5 (e.g. ₹9,000 becomes ₹4,500)
+  if (startDay <= 1 && endDay === 15) return 0.5;
+  // Ends on 14th (when next rate starts on 15th): 1 to 14 = 0.5
+  if (startDay <= 1 && endDay === 14) return 0.5;
+  // Starts on 16th (when previous ended on 15th): 16 to totalDays = 0.5
+  if (startDay === 16 && endDay >= totalDays - 1) return 0.5;
+
+  // General proration by active days:
+  const activeDays = Math.max(1, endDay - startDay + 1);
+  return Math.min(1.0, activeDays / totalDays);
+}
+
+/**
+ * Determine effective monthly rent for a given unit/tenant for a given month "YYYY-MM"
+ * Supports proration for partial first/last month and mid-month rent rate revisions.
+ */
+async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAssignment = null) {
+  const [year, month] = monthYearStr.split('-').map(Number);
+  const totalDays = new Date(year, month, 0).getDate();
+  const monthStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+  const monthEnd = new Date(Date.UTC(year, month - 1, totalDays, 23, 59, 59, 999));
+
+  let assignment = passedAssignment;
+  if (!assignment) {
+    assignment = await TenantAssignment.findOne({ unitId, tenantId }).sort({ startDate: -1 });
+  }
+
+  if (!assignment) return 0;
+
+  const assignStart = new Date(assignment.startDate);
+  if (assignStart > monthEnd) {
+    return 0; // Tenant has not occupied yet this month
+  }
+  if (assignment.endDate && new Date(assignment.endDate) < monthStart) {
+    return 0; // Tenant vacated prior to this month
+  }
+
+  // Active occupancy window in this calendar month
+  const windowStart = assignStart > monthStart ? assignStart : monthStart;
+  const windowEnd = (assignment.endDate && new Date(assignment.endDate) < monthEnd)
+    ? new Date(assignment.endDate)
+    : monthEnd;
+
+  if (windowStart > windowEnd) return 0;
+
+  // Find all rent agreements active during this window
+  const agreements = await RentAgreement.find({
     unitId,
     tenantId,
-    effectiveFrom: { $lte: monthEnd },
+    effectiveFrom: { $lte: windowEnd },
     $or: [
       { effectiveTo: null },
-      { effectiveTo: { $gte: monthStart } }
+      { effectiveTo: { $gte: windowStart } }
     ]
-  }).sort({ effectiveFrom: -1 });
+  }).sort({ effectiveFrom: 1 });
 
-  return agreement ? agreement.monthlyRate : 0;
+  if (!agreements || agreements.length === 0) {
+    const latestAgreement = await RentAgreement.findOne({
+      unitId,
+      tenantId
+    }).sort({ effectiveFrom: -1 });
+    if (!latestAgreement) return 0;
+
+    const sDay = getDayNumber(windowStart);
+    const eDay = getDayNumber(windowEnd);
+    const ratio = calculateMonthRatio(sDay, eDay, totalDays);
+    return Math.round(latestAgreement.monthlyRate * ratio);
+  }
+
+  let totalProratedRent = 0;
+  for (const ag of agreements) {
+    const agFrom = new Date(ag.effectiveFrom);
+    const agTo = ag.effectiveTo ? new Date(ag.effectiveTo) : null;
+
+    const segStart = agFrom > windowStart ? agFrom : windowStart;
+    const segEnd = (agTo && agTo < windowEnd) ? agTo : windowEnd;
+
+    if (segStart <= segEnd) {
+      const sDay = getDayNumber(segStart);
+      const eDay = getDayNumber(segEnd);
+      const ratio = calculateMonthRatio(sDay, eDay, totalDays);
+      totalProratedRent += Math.round(ag.monthlyRate * ratio);
+    }
+  }
+
+  return totalProratedRent;
 }
 
 function getCurrentMonthYear() {
@@ -124,7 +214,7 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear) {
 
   for (const m of months) {
     const isHistoricallySettled = assignment.initialPaidTillMonth && m <= assignment.initialPaidTillMonth;
-    const expectedRate = await getEffectiveRentForMonth(unitId, tenantId, m);
+    const expectedRate = await getEffectiveRentForMonth(unitId, tenantId, m, assignment);
     
     // Sum allocations for this month
     const monthAllocations = allocations.filter(a => a.rentMonthYear === m);
@@ -196,5 +286,6 @@ module.exports = {
   getCurrentMonthYear,
   getEffectiveRentForMonth,
   calculateTenantUnitLedger,
-  getMonthsRange
+  getMonthsRange,
+  calculateMonthRatio
 };

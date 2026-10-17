@@ -7,6 +7,7 @@ import Dashboard from './views/Dashboard';
 import PropertiesView from './views/PropertiesView';
 import PartitionsView from './views/PartitionsView';
 import TenantsView from './views/TenantsView';
+import ContractsView from './views/ContractsView';
 import PGView from './views/PGView';
 import PaymentsView from './views/PaymentsView';
 import ExpensesView from './views/ExpensesView';
@@ -121,6 +122,8 @@ export default function App() {
           )}
 
           {currentTab === 'tenants' && <TenantsView />}
+
+          {currentTab === 'contracts' && <ContractsView />}
 
           {currentTab === 'pg' && <PGView />}
 

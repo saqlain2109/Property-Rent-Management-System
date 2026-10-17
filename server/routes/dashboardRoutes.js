@@ -32,6 +32,10 @@ router.get('/summary', protect, async (req, res) => {
     ]);
     const totalPropertyExpenses = totalExpenseResult.length > 0 ? totalExpenseResult[0].total : 0;
 
+    const [year, m] = targetMonth.split('-').map(Number);
+    const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+
     // Month-specific figures for targetMonth
     const monthIncomeResult = await PaymentReceipt.aggregate([
       {
@@ -50,9 +54,14 @@ router.get('/summary', protect, async (req, res) => {
       {
         $match: {
           isReversed: false,
-          $expr: {
-            $eq: [{ $dateToString: { format: '%Y-%m', date: '$expenseDate' } }, targetMonth]
-          }
+          $or: [
+            { expenseMonth: targetMonth },
+            {
+              $expr: {
+                $eq: [{ $dateToString: { format: '%Y-%m', date: '$expenseDate' } }, targetMonth]
+              }
+            }
+          ]
         }
       },
       { $group: { _id: null, total: { $sum: '$amount' } } }
@@ -74,7 +83,7 @@ router.get('/summary', protect, async (req, res) => {
         overdueTenantsCount++;
       }
 
-      const curMonthEntry = ledger.monthsBreakdown.find(m => m.monthYear === targetMonth);
+      const curMonthEntry = ledger.monthsBreakdown.find(entry => entry.monthYear === targetMonth);
       if (curMonthEntry) {
         monthExpectedRent += (curMonthEntry.expectedRate || 0);
         monthOutstandingRent += (curMonthEntry.outstandingAmount || 0);
@@ -99,15 +108,23 @@ router.get('/summary', protect, async (req, res) => {
     // Expenses filtered strictly by targetMonth
     const recentExpenses = await Expense.find({
       isReversed: false,
-      $expr: {
-        $eq: [{ $dateToString: { format: '%Y-%m', date: '$expenseDate' } }, targetMonth]
-      }
+      $or: [
+        { expenseMonth: targetMonth },
+        { expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }
+      ]
     })
       .populate('propertyId', 'name propertyCode')
       .sort({ expenseDate: -1 })
       .limit(50);
 
-    // Available months in database
+    // Full sequence of months from 2025 through 2027
+    const sequenceMonths = [];
+    for (let y = 2025; y <= 2027; y++) {
+      for (let monthNum = 1; monthNum <= 12; monthNum++) {
+        sequenceMonths.push(`${y}-${String(monthNum).padStart(2, '0')}`);
+      }
+    }
+
     const recMonths = await PaymentReceipt.aggregate([
       { $match: { isReversed: false } },
       { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$receiptDate' } } } }
@@ -117,7 +134,7 @@ router.get('/summary', protect, async (req, res) => {
       { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$expenseDate' } } } }
     ]);
     const availableMonths = Array.from(new Set([
-      '2026-01', '2026-02', '2026-03',
+      ...sequenceMonths,
       ...recMonths.map(r => r._id).filter(Boolean),
       ...expMonths.map(e => e._id).filter(Boolean),
       targetMonth

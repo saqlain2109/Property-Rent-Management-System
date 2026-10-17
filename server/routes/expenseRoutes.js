@@ -11,12 +11,20 @@ const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 // @route GET /api/expenses
 router.get('/', protect, async (req, res) => {
   try {
-    const { propertyId, category, startDate, endDate, search } = req.query;
+    const { propertyId, category, startDate, endDate, month, search } = req.query;
     let query = { isReversed: false };
 
     if (propertyId) query.propertyId = propertyId;
     if (category) query.category = category;
-    if (startDate || endDate) {
+    if (month) {
+      const [year, m] = month.split('-').map(Number);
+      const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+      const endOfMonth = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+      query.$or = [
+        { expenseMonth: month },
+        { expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }
+      ];
+    } else if (startDate || endDate) {
       query.expenseDate = {};
       if (startDate) query.expenseDate.$gte = new Date(startDate);
       if (endDate) query.expenseDate.$lte = new Date(endDate);
@@ -81,7 +89,6 @@ router.post('/categories', protect, authorize('admin', 'manager'), [
 
 // @route POST /api/expenses
 router.post('/', protect, authorize('admin', 'manager'), [
-  body('expenseDate').isISO8601().withMessage('Valid expense date is required'),
   body('category').trim().notEmpty().withMessage('Expense category is required'),
   body('amount').isNumeric().withMessage('Amount must be a number'),
   body('description').trim().notEmpty().withMessage('Description is required')
@@ -92,12 +99,34 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 
   try {
+    let { expenseDate, expenseMonth, ...rest } = req.body;
+
+    if (!expenseDate && !expenseMonth) {
+      const now = new Date();
+      expenseMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    let finalExpenseDate;
+    let finalExpenseMonth;
+
+    if (expenseMonth && !expenseDate) {
+      finalExpenseMonth = expenseMonth;
+      const [y, m] = expenseMonth.split('-').map(Number);
+      finalExpenseDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+    } else {
+      finalExpenseDate = new Date(expenseDate);
+      const y = finalExpenseDate.getFullYear();
+      const m = String(finalExpenseDate.getMonth() + 1).padStart(2, '0');
+      finalExpenseMonth = expenseMonth || `${y}-${m}`;
+    }
+
     const count = await Expense.countDocuments();
-    const d = new Date(req.body.expenseDate);
-    const expenseCode = `EXP-${d.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
+    const expenseCode = `EXP-${finalExpenseDate.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
 
     const expense = await Expense.create({
-      ...req.body,
+      ...rest,
+      expenseDate: finalExpenseDate,
+      expenseMonth: finalExpenseMonth,
       expenseCode,
       amount: Number(req.body.amount),
       recordedBy: req.user._id
@@ -108,7 +137,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       action: 'RECORD_EXPENSE',
       entityType: 'Expense',
       entityId: expense._id,
-      description: `Recorded expense ${expenseCode} of ₹${expense.amount} under ${expense.category}`,
+      description: `Recorded expense ${expenseCode} of ₹${expense.amount} under ${expense.category} for month ${finalExpenseMonth}`,
       newState: expense.toObject(),
       req
     });
@@ -162,8 +191,17 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
-    const { expenseDate, propertyId, category, amount, description, vendorOrPayee, paymentMode } = req.body;
-    if (expenseDate) expense.expenseDate = expenseDate;
+    const { expenseDate, expenseMonth, propertyId, category, amount, description, vendorOrPayee, paymentMode } = req.body;
+    if (expenseMonth && !expenseDate) {
+      expense.expenseMonth = expenseMonth;
+      const [y, m] = expenseMonth.split('-').map(Number);
+      expense.expenseDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+    } else if (expenseDate) {
+      expense.expenseDate = new Date(expenseDate);
+      const y = expense.expenseDate.getFullYear();
+      const m = String(expense.expenseDate.getMonth() + 1).padStart(2, '0');
+      expense.expenseMonth = expenseMonth || `${y}-${m}`;
+    }
     if (propertyId !== undefined) expense.propertyId = propertyId || null;
     if (category) expense.category = category;
     if (amount !== undefined) expense.amount = Number(amount);

@@ -8,6 +8,10 @@ const Tenant = require('../models/Tenant');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
 
+const { calculateTenantUnitLedger } = require('../services/rentCalculator');
+const PaymentAllocation = require('../models/PaymentAllocation');
+const PaymentReceipt = require('../models/PaymentReceipt');
+
 // @route GET /api/assignments
 router.get('/', protect, async (req, res) => {
   try {
@@ -25,7 +29,62 @@ router.get('/', protect, async (req, res) => {
       })
       .sort({ startDate: -1 });
 
-    res.json({ success: true, count: assignments.length, data: assignments });
+    // Fetch reversed receipts to exclude
+    const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+
+    // Enrich each assignment with rate history, total expected, and total received
+    const enriched = await Promise.all(assignments.map(async (assign) => {
+      const obj = assign.toObject();
+      if (!assign.unitId || !assign.tenantId) {
+        return {
+          ...obj,
+          rateHistory: [],
+          totalExpected: 0,
+          totalReceived: 0,
+          outstandingBalance: 0,
+          currentRate: 0
+        };
+      }
+
+      // Fetch all rent agreements for this assignment/unit/tenant
+      const rateHistory = await RentAgreement.find({
+        $or: [
+          { assignmentId: assign._id },
+          { unitId: assign.unitId._id, tenantId: assign.tenantId._id }
+        ]
+      }).sort({ effectiveFrom: 1 });
+
+      const currentAgr = rateHistory.find(r => r.isCurrentRate) || rateHistory[rateHistory.length - 1];
+
+      // Calculate expected to date and received
+      try {
+        const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id);
+        return {
+          ...obj,
+          rateHistory,
+          currentAgreement: currentAgr,
+          currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+          totalExpected: ledger.totalExpected || 0,
+          totalReceived: ledger.totalAllocated || 0,
+          outstandingBalance: ledger.totalOutstanding || 0,
+          paidTillMonth: ledger.paidTillMonth,
+          nextUnpaidMonth: ledger.nextUnpaidMonth,
+          monthsBreakdown: ledger.monthsBreakdown || []
+        };
+      } catch (err) {
+        return {
+          ...obj,
+          rateHistory,
+          currentAgreement: currentAgr,
+          currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+          totalExpected: 0,
+          totalReceived: 0,
+          outstandingBalance: 0
+        };
+      }
+    }));
+
+    res.json({ success: true, count: enriched.length, data: enriched });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -221,6 +280,68 @@ router.get('/agreements/history', protect, async (req, res) => {
       .sort({ effectiveFrom: -1 });
 
     res.json({ success: true, count: history.length, data: history });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route PUT /api/assignments/:id (Update contract dates, deposit, notes)
+router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
+  try {
+    const assignment = await TenantAssignment.findById(req.params.id);
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Contract assignment not found' });
+    }
+
+    const { startDate, endDate, depositHeld, notes, status } = req.body;
+    if (startDate) assignment.startDate = startDate;
+    if (endDate !== undefined) assignment.endDate = endDate || null;
+    if (depositHeld !== undefined) assignment.depositHeld = Number(depositHeld) || 0;
+    if (notes !== undefined) assignment.notes = notes;
+    if (status) assignment.status = status;
+
+    await assignment.save();
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'UPDATE_CONTRACT',
+      entityType: 'TenantAssignment',
+      entityId: assignment._id,
+      description: `Updated contract ${assignment.assignmentCode}`,
+      newState: assignment.toObject(),
+      req
+    });
+
+    res.json({ success: true, message: 'Contract updated successfully', data: assignment });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route DELETE /api/assignments/:id (Delete contract)
+router.delete('/:id', protect, authorize('admin'), async (req, res) => {
+  try {
+    const assignment = await TenantAssignment.findById(req.params.id);
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Contract not found' });
+    }
+
+    // Set unit back to Vacant
+    await Unit.findByIdAndUpdate(assignment.unitId, { occupancyStatus: 'Vacant' });
+
+    await RentAgreement.deleteMany({ assignmentId: assignment._id });
+    await TenantAssignment.findByIdAndDelete(req.params.id);
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'DELETE_CONTRACT',
+      entityType: 'TenantAssignment',
+      entityId: assignment._id,
+      description: `Deleted contract ${assignment.assignmentCode}`,
+      req
+    });
+
+    res.json({ success: true, message: 'Contract deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

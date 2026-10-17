@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
+import MonthlyExcelReportView from './MonthlyExcelReportView';
 import LedgerView from './LedgerView';
 import ReportsView from './ReportsView';
-import { BookOpen, Download } from 'lucide-react';
+import { BookOpen, Download, FileSpreadsheet } from 'lucide-react';
 
 const TABS = [
-  { id: 'ledger', label: 'Account Book', icon: BookOpen, desc: 'Month-by-month income, expenses, and balance summary' },
-  { id: 'export', label: 'Download Report', icon: Download, desc: 'Export your data as an Excel file' },
+  { id: 'monthly_statement', label: 'Monthly Statement (Excel Style)', icon: FileSpreadsheet, desc: 'Single report: Rent income first, expenses below, difference, cumulative balance & outstanding dues' },
+  { id: 'ledger', label: 'Account Book', icon: BookOpen, desc: 'Month-by-month income, expenses, and rolling balance ledger' },
+  { id: 'export', label: 'Portfolio Workbook', icon: Download, desc: 'Export all properties, units, tenants, receipts, expenses, and ledger into an Excel file' },
 ];
 
 export default function LedgerReportsView() {
-  const [activeTab, setActiveTab] = useState('ledger');
+  const [activeTab, setActiveTab] = useState('monthly_statement');
 
   const currentTab = TABS.find(t => t.id === activeTab);
 
@@ -17,9 +19,9 @@ export default function LedgerReportsView() {
     <div className="space-y-5">
       {/* Header */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-extrabold text-slate-900">Reports & Account Book</h2>
+        <h2 className="text-xl font-extrabold text-slate-900">Reports & Financial Statements</h2>
         <p className="text-sm text-slate-500 mt-0.5">
-          {currentTab?.desc || 'View financial summaries and download reports'}
+          {currentTab?.desc || 'View financial statements, monthly account book, and Excel workbooks'}
         </p>
 
         {/* Tab Pills */}
@@ -43,6 +45,7 @@ export default function LedgerReportsView() {
 
       {/* Tab Content */}
       <div>
+        {activeTab === 'monthly_statement' && <MonthlyExcelReportView />}
         {activeTab === 'ledger' && <LedgerView />}
         {activeTab === 'export' && <ReportsView />}
       </div>

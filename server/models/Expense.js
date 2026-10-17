@@ -12,6 +12,11 @@ const expenseSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  expenseMonth: {
+    type: String, // e.g. "2026-03"
+    trim: true,
+    index: true,
+  },
   propertyId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Property',

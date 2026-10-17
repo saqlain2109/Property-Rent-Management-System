@@ -8,7 +8,9 @@ const TenantAssignment = require('../models/TenantAssignment');
 const RentAgreement = require('../models/RentAgreement');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const Expense = require('../models/Expense');
-const { calculateTenantUnitLedger } = require('../services/rentCalculator');
+const MonthlyLedger = require('../models/MonthlyLedger');
+const PaymentAllocation = require('../models/PaymentAllocation');
+const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
 const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 const { protect } = require('../middleware/auth');
 
@@ -174,6 +176,251 @@ router.get('/export-excel', protect, async (req, res) => {
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Disposition', 'attachment; filename="Property_Rent_Management_Export.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/reports/monthly-unified-report
+// Generates the single Excel-style unified statement: Rent income first, expenses below, net difference, cumulative total & outstanding
+router.get('/monthly-unified-report', protect, async (req, res) => {
+  try {
+    const targetMonth = req.query.month || getCurrentMonthYear();
+    const [year, m] = targetMonth.split('-').map(Number);
+    const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+
+    // 1. Get Rent Income items for targetMonth
+    // Columns: Tenant, Property, Unit, Amount (NO date, NO receipt number!)
+    const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+    const allocations = await PaymentAllocation.find({
+      rentMonthYear: targetMonth,
+      receiptId: { $nin: reversedReceipts }
+    })
+      .populate('tenantId', 'name')
+      .populate({
+        path: 'unitId',
+        populate: { path: 'propertyId', select: 'name' }
+      })
+      .sort({ createdAt: 1 });
+
+    let rentEntries = [];
+    if (allocations.length > 0) {
+      rentEntries = allocations.map(a => ({
+        tenant: a.tenantId?.name || '—',
+        property: a.unitId?.propertyId?.name || '—',
+        unit: a.unitId?.unitName || '—',
+        amount: a.allocatedAmount
+      }));
+    } else {
+      // Fallback: receipts in month
+      const receipts = await PaymentReceipt.find({
+        isReversed: false,
+        receiptDate: { $gte: startOfMonth, $lte: endOfMonth }
+      })
+        .populate('tenantId', 'name')
+        .populate({
+          path: 'unitId',
+          populate: { path: 'propertyId', select: 'name' }
+        })
+        .sort({ receiptDate: 1 });
+
+      rentEntries = receipts.map(r => ({
+        tenant: r.tenantId?.name || '—',
+        property: r.unitId?.propertyId?.name || '—',
+        unit: r.unitId?.unitName || '—',
+        amount: r.totalAmount
+      }));
+    }
+
+    const totalRentIncome = rentEntries.reduce((sum, r) => sum + r.amount, 0);
+
+    // 2. Expenses for targetMonth
+    const expenses = await Expense.find({
+      isReversed: false,
+      $or: [
+        { expenseMonth: targetMonth },
+        { expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }
+      ]
+    })
+      .populate('propertyId', 'name propertyCode')
+      .sort({ expenseDate: 1 });
+
+    const expenseEntries = expenses.map(e => ({
+      category: e.category,
+      description: e.description,
+      payee: e.vendorOrPayee || '',
+      property: e.propertyId?.name || 'General / Other',
+      amount: e.amount
+    }));
+
+    const totalExpenses = expenseEntries.reduce((sum, e) => sum + e.amount, 0);
+
+    // 3. Balance & Reconciliation
+    await syncMonthlyLedgers();
+    const ledgerDoc = await MonthlyLedger.findOne({ monthYear: targetMonth });
+    const openingBalance = ledgerDoc ? ledgerDoc.openingBalance : 0;
+    const netDifference = totalRentIncome - totalExpenses;
+    const closingBalance = ledgerDoc ? ledgerDoc.closingBalance : (openingBalance + netDifference);
+
+    // 4. Expected rent and outstanding dues for this month
+    const activeAssignments = await TenantAssignment.find({ status: 'Active' });
+    let monthExpectedRent = 0;
+    let monthOutstandingRent = 0;
+
+    for (const assign of activeAssignments) {
+      const ledger = await calculateTenantUnitLedger(assign.unitId, assign.tenantId, targetMonth);
+      const curMonthEntry = ledger.monthsBreakdown.find(entry => entry.monthYear === targetMonth);
+      if (curMonthEntry) {
+        monthExpectedRent += (curMonthEntry.expectedRate || 0);
+        monthOutstandingRent += (curMonthEntry.outstandingAmount || 0);
+      }
+    }
+
+    res.json({
+      success: true,
+      targetMonth,
+      rentEntries,
+      totalRentIncome,
+      expenseEntries,
+      totalExpenses,
+      netDifference,
+      openingBalance,
+      closingBalance,
+      monthExpectedRent,
+      monthOutstandingRent
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/reports/export-monthly-excel
+// Exports the single-sheet Excel report matching the client's familiar Excel format
+router.get('/export-monthly-excel', protect, async (req, res) => {
+  try {
+    const targetMonth = req.query.month || getCurrentMonthYear();
+    const [year, m] = targetMonth.split('-').map(Number);
+    const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+
+    // Rent allocations
+    const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+    const allocations = await PaymentAllocation.find({
+      rentMonthYear: targetMonth,
+      receiptId: { $nin: reversedReceipts }
+    })
+      .populate('tenantId', 'name')
+      .populate({ path: 'unitId', populate: { path: 'propertyId', select: 'name' } })
+      .sort({ createdAt: 1 });
+
+    let rentRows = [];
+    if (allocations.length > 0) {
+      rentRows = allocations.map(a => [
+        a.tenantId?.name || '—',
+        a.unitId?.propertyId?.name || '—',
+        a.unitId?.unitName || '—',
+        a.allocatedAmount
+      ]);
+    } else {
+      const receipts = await PaymentReceipt.find({
+        isReversed: false,
+        receiptDate: { $gte: startOfMonth, $lte: endOfMonth }
+      })
+        .populate('tenantId', 'name')
+        .populate({ path: 'unitId', populate: { path: 'propertyId', select: 'name' } })
+        .sort({ receiptDate: 1 });
+
+      rentRows = receipts.map(r => [
+        r.tenantId?.name || '—',
+        r.unitId?.propertyId?.name || '—',
+        r.unitId?.unitName || '—',
+        r.totalAmount
+      ]);
+    }
+
+    const totalRentIncome = rentRows.reduce((sum, r) => sum + Number(r[3] || 0), 0);
+
+    // Expenses
+    const expenses = await Expense.find({
+      isReversed: false,
+      $or: [
+        { expenseMonth: targetMonth },
+        { expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }
+      ]
+    })
+      .populate('propertyId', 'name propertyCode')
+      .sort({ expenseDate: 1 });
+
+    const expRows = expenses.map(e => [
+      e.category,
+      e.description + (e.vendorOrPayee ? ` (${e.vendorOrPayee})` : ''),
+      e.propertyId?.name || 'General / Other',
+      e.amount
+    ]);
+
+    const totalExpenses = expRows.reduce((sum, e) => sum + Number(e[3] || 0), 0);
+
+    // Ledger balances
+    await syncMonthlyLedgers();
+    const ledgerDoc = await MonthlyLedger.findOne({ monthYear: targetMonth });
+    const openingBalance = ledgerDoc ? ledgerDoc.openingBalance : 0;
+    const netDifference = totalRentIncome - totalExpenses;
+    const closingBalance = ledgerDoc ? ledgerDoc.closingBalance : (openingBalance + netDifference);
+
+    // Expected & outstanding
+    const activeAssignments = await TenantAssignment.find({ status: 'Active' });
+    let monthExpectedRent = 0;
+    let monthOutstandingRent = 0;
+    for (const assign of activeAssignments) {
+      const ledger = await calculateTenantUnitLedger(assign.unitId, assign.tenantId, targetMonth);
+      const curMonthEntry = ledger.monthsBreakdown.find(entry => entry.monthYear === targetMonth);
+      if (curMonthEntry) {
+        monthExpectedRent += (curMonthEntry.expectedRate || 0);
+        monthOutstandingRent += (curMonthEntry.outstandingAmount || 0);
+      }
+    }
+
+    // Single unified worksheet layout
+    const sheetData = [
+      [`MONTHLY STATEMENT · ${targetMonth}`],
+      [''],
+      ['RENT INCOME STATEMENT'],
+      ['Tenant', 'Property', 'Unit', 'Amount'],
+      ...rentRows,
+      ['Total Rent Income', '', '', totalRentIncome],
+      [''],
+      ['EXPENSES STATEMENT'],
+      ['Category', 'Description / Payee', 'Property', 'Amount'],
+      ...expRows,
+      ['Total Expenses', '', '', totalExpenses],
+      [''],
+      ['FINANCIAL RECONCILIATION SUMMARY'],
+      ['Total Rent Income Received', '', '', totalRentIncome],
+      ['Less: Total Expenses Paid', '', '', totalExpenses],
+      ['Month Net Difference', '', '', netDifference],
+      ['Previous Month Opening Balance', '', '', openingBalance],
+      ['Cumulative Closing Balance', '', '', closingBalance],
+      ['Month Outstanding Rent Balance', '', '', monthOutstandingRent]
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+    // Auto column widths
+    ws['!cols'] = [
+      { wch: 32 },
+      { wch: 36 },
+      { wch: 28 },
+      { wch: 18 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, `Statement ${targetMonth}`);
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename="Monthly_Report_${targetMonth}.xlsx"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buffer);
   } catch (error) {
