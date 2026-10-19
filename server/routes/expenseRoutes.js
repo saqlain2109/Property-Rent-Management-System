@@ -40,7 +40,7 @@ router.get('/', protect, async (req, res) => {
 
     const expenses = await Expense.find(query)
       .populate('propertyId', 'name propertyCode')
-      .populate('unitId', 'unitName unitCode')
+      .populate('unitId', 'unitName unitCode subUnitPartition')
       .sort({ expenseDate: -1 });
 
     const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
@@ -191,7 +191,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
-    const { expenseDate, expenseMonth, propertyId, category, amount, description, vendorOrPayee, paymentMode } = req.body;
+    const { expenseDate, expenseMonth, propertyId, unitId, category, amount, description, vendorOrPayee, paymentMode } = req.body;
     if (expenseMonth && !expenseDate) {
       expense.expenseMonth = expenseMonth;
       const [y, m] = expenseMonth.split('-').map(Number);
@@ -203,6 +203,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
       expense.expenseMonth = expenseMonth || `${y}-${m}`;
     }
     if (propertyId !== undefined) expense.propertyId = propertyId || null;
+    if (unitId !== undefined) expense.unitId = unitId || null;
     if (category) expense.category = category;
     if (amount !== undefined) expense.amount = Number(amount);
     if (description) expense.description = description;

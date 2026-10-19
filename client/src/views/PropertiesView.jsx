@@ -68,8 +68,28 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
     totalAreaSqFt: '',
     ownershipPercentage: '100',
     address: '',
-    description: ''
+    description: '',
+    isSingleUnit: false,
+    unitName: '',
+    subUnitPartition: '',
+    floor: 'Ground',
+    monthlyRentExpected: ''
   });
+
+  // Post-Creation Guidance Modal with 3-second lockout timer
+  const [guidanceModal, setGuidanceModal] = useState(null); // { property, createdUnit, isSingleUnit }
+  const [lockoutCountdown, setLockoutCountdown] = useState(3);
+
+  // Countdown timer effect
+  useEffect(() => {
+    let timer;
+    if (guidanceModal && lockoutCountdown > 0) {
+      timer = setTimeout(() => {
+        setLockoutCountdown(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [guidanceModal, lockoutCountdown]);
 
   const fetchData = async () => {
     try {
@@ -100,7 +120,12 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
         ownershipPercentage: Number(form.ownershipPercentage) || 100,
         // keep legacy fields with sensible defaults
         ownerOrResponsiblePerson: form.ownerOrResponsiblePerson || 'Owner',
-        city: form.city || ''
+        city: form.city || '',
+        createSingleUnit: Boolean(form.isSingleUnit),
+        unitName: form.unitName || form.name,
+        subUnitPartition: form.subUnitPartition || form.unitName || form.name,
+        floor: form.floor || 'Ground',
+        monthlyRentExpected: Number(form.monthlyRentExpected) || 0
       };
 
       if (editingProperty) {
@@ -115,13 +140,29 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
         const res = await API.post('/properties', payload);
         if (res.data.success) {
           setShowModal(false);
+          const savedProp = res.data.data;
+          const createdUnit = res.data.createdUnit;
+
+          // Open 3-second guidance modal
+          setLockoutCountdown(3);
+          setGuidanceModal({
+            property: savedProp,
+            createdUnit,
+            isSingleUnit: Boolean(form.isSingleUnit)
+          });
+
           setForm({
             name: '',
             propertyType: 'Commercial Godown',
             totalAreaSqFt: '',
             ownershipPercentage: '100',
             address: '',
-            description: ''
+            description: '',
+            isSingleUnit: false,
+            unitName: '',
+            subUnitPartition: '',
+            floor: 'Ground',
+            monthlyRentExpected: ''
           });
           fetchData();
           onDataChanged?.();
@@ -140,7 +181,12 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
       totalAreaSqFt: '',
       ownershipPercentage: '100',
       address: '',
-      description: ''
+      description: '',
+      isSingleUnit: false,
+      unitName: '',
+      subUnitPartition: '',
+      floor: 'Ground',
+      monthlyRentExpected: ''
     });
     setShowModal(true);
   };
@@ -155,7 +201,12 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
       ownerOrResponsiblePerson: p.ownerOrResponsiblePerson || 'Owner',
       city: p.city || '',
       address: p.address || '',
-      description: p.description || ''
+      description: p.description || '',
+      isSingleUnit: false,
+      unitName: '',
+      subUnitPartition: '',
+      floor: 'Ground',
+      monthlyRentExpected: ''
     });
     setShowModal(true);
   };
@@ -601,6 +652,92 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                 </div>
               </div>
 
+              {/* Single Unit vs Multi-Partition Selection (Only when creating new property) */}
+              {!editingProperty && (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">
+                        Is this property a Single Individual Unit?
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        (e.g., An individual Residential Flat, Single Shop, or Individual Godown)
+                      </span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.isSingleUnit}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setForm(f => ({
+                            ...f,
+                            isSingleUnit: checked,
+                            unitName: checked ? (f.unitName || `${f.name || 'Unit'}`) : '',
+                            subUnitPartition: checked ? (f.subUnitPartition || f.unitName || `${f.name || 'Unit'}`) : ''
+                          }));
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+
+                  {form.isSingleUnit && (
+                    <div className="pt-2.5 border-t border-slate-200/80 space-y-3 animate-fadeIn">
+                      <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-[11px] text-emerald-800 font-medium">
+                        ✓ Primary unit will be auto-created for this property. You can directly attach tenants to it without creating partitions manually.
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Unit / Flat / Shop Name *
+                          </label>
+                          <input
+                            type="text"
+                            required={form.isSingleUnit}
+                            placeholder="e.g. Flat 302, Shop 5, Godown A"
+                            value={form.unitName}
+                            onChange={(e) => setForm(f => ({
+                              ...f,
+                              unitName: e.target.value,
+                              subUnitPartition: e.target.value
+                            }))}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Floor / Level
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 3rd Floor, Ground"
+                            value={form.floor}
+                            onChange={(e) => setForm(f => ({ ...f, floor: e.target.value }))}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Expected Monthly Rent (₹) <span className="text-slate-400 font-normal">(optional)</span>
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="e.g. 15000"
+                          value={form.monthlyRentExpected}
+                          onChange={(e) => setForm(f => ({ ...f, monthlyRentExpected: e.target.value }))}
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-emerald-700"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Address */}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Address <span className="text-slate-400 font-normal">(optional)</span></label>
@@ -641,6 +778,85 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM POST-CREATION GUIDANCE POPUP WITH 3-SECOND LOCKOUT TIMER */}
+      {guidanceModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-scaleUp">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 text-center space-y-4">
+            <div className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center ${
+              guidanceModal.isSingleUnit ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+            }`}>
+              <Building2 className="w-7 h-7" />
+            </div>
+
+            <div>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide mb-2 ${
+                guidanceModal.isSingleUnit ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+              }`}>
+                {guidanceModal.isSingleUnit ? 'Individual Single Unit Created' : 'Multi-Partition Complex Created'}
+              </span>
+              <h3 className="text-lg font-black text-slate-900">
+                {guidanceModal.property?.name}
+              </h3>
+            </div>
+
+            {guidanceModal.isSingleUnit ? (
+              <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 text-xs text-emerald-950 space-y-1.5 text-left">
+                <p className="font-bold text-emerald-900">
+                  Unit auto-created successfully!
+                </p>
+                <p className="text-[11px] leading-relaxed text-emerald-800">
+                  This property was registered as an individual single unit (<strong>{guidanceModal.createdUnit?.subUnitPartition || guidanceModal.createdUnit?.unitName || guidanceModal.property?.name}</strong>). It is ready for tenant assignments and rent collection directly.
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950 space-y-2 text-left">
+                <p className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <span>Notice: Next Step for Partitions</span>
+                </p>
+                <p className="text-[11px] leading-relaxed text-amber-800">
+                  You created this property as a multi-partition building / godown. If this property has multiple shops, rooms, or partition divisions, please add them in the <strong>Unit & Partitions Master</strong>.
+                </p>
+              </div>
+            )}
+
+            {/* Lockout Timer Notice & Action Buttons */}
+            <div className="pt-2 space-y-2.5">
+              {!guidanceModal.isSingleUnit && onNavigateToPartitions && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const propId = guidanceModal.property?._id;
+                    setGuidanceModal(null);
+                    onNavigateToPartitions(propId);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold shadow-md shadow-blue-600/20 active:scale-95 transition-all"
+                >
+                  <span>Go to Unit Master & Add Partitions</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+
+              <button
+                type="button"
+                disabled={lockoutCountdown > 0}
+                onClick={() => setGuidanceModal(null)}
+                className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  lockoutCountdown > 0
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                    : 'bg-slate-900 hover:bg-slate-800 text-white shadow-md active:scale-95'
+                }`}
+              >
+                {lockoutCountdown > 0 ? (
+                  <span>Please read details ({lockoutCountdown}s remaining)...</span>
+                ) : (
+                  <span>Understood & Close</span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

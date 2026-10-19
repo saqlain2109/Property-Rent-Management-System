@@ -257,6 +257,9 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear) {
       allocatedAmount: isHistoricallySettled ? (allocated || expectedRate) : allocated,
       outstandingAmount: pending,
       advanceAmount: advance,
+      cumulativeExpected: totalExpected,
+      cumulativeAllocated: totalAllocated,
+      cumulativeOutstanding: totalOutstanding,
       status: isHistoricallySettled ? 'Fully Paid' : status,
       isHistorical: isHistoricallySettled
     });

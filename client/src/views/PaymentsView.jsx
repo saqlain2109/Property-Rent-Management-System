@@ -144,6 +144,13 @@ export default function PaymentsView() {
   const [search, setSearch] = useState('');
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState('');
 
+  // Receipts Register Filters
+  const [receiptSearch, setReceiptSearch] = useState('');
+  const [receiptPropertyFilter, setReceiptPropertyFilter] = useState('');
+  const [receiptModeFilter, setReceiptModeFilter] = useState('');
+  const [receiptSelectedMonths, setReceiptSelectedMonths] = useState([]); // array of 'YYYY-MM'
+  const [showReceiptMonthPicker, setShowReceiptMonthPicker] = useState(false);
+
   // Modals
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedLedgerModal, setSelectedLedgerModal] = useState(null);
@@ -850,6 +857,96 @@ export default function PaymentsView() {
     XLSX.writeFile(wb, `Rent_Collection_Sheet_${selectedMonth}.xlsx`);
   };
 
+  // Distinct months present across all payment receipts for multi-month filtering
+  const availableReceiptMonths = React.useMemo(() => {
+    const monthSet = new Set();
+    receipts.forEach(r => {
+      if (r.receiptDate) {
+        monthSet.add(r.receiptDate.slice(0, 7));
+      }
+      if (r.monthsCovered) {
+        const matches = r.monthsCovered.match(/\d{4}-\d{2}/g);
+        if (matches) {
+          matches.forEach(m => monthSet.add(m));
+        }
+      }
+    });
+    return Array.from(monthSet).filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
+  }, [receipts]);
+
+  // Filtered Receipts for Receipts Register
+  const filteredReceipts = React.useMemo(() => {
+    return receipts.filter(r => {
+      // 1. Search Query
+      if (receiptSearch) {
+        const q = receiptSearch.toLowerCase();
+        const tenantMatch = r.tenantId?.name?.toLowerCase().includes(q) || r.tenantId?.phone?.includes(q);
+        const propMatch = r.unitId?.propertyId?.name?.toLowerCase().includes(q);
+        const unitMatch = (r.unitId?.subUnitPartition || r.unitId?.unitName || '').toLowerCase().includes(q);
+        const refMatch = r.referenceNumber?.toLowerCase().includes(q);
+        const notesMatch = r.comments?.toLowerCase().includes(q);
+        const bankMatch = r.bankName?.toLowerCase().includes(q);
+        const modeMatch = r.paymentMode?.toLowerCase().includes(q);
+        if (!tenantMatch && !propMatch && !unitMatch && !refMatch && !notesMatch && !bankMatch && !modeMatch) {
+          return false;
+        }
+      }
+
+      // 2. Property Filter
+      if (receiptPropertyFilter) {
+        const pId = r.unitId?.propertyId?._id || r.unitId?.propertyId;
+        if (pId !== receiptPropertyFilter) {
+          return false;
+        }
+      }
+
+      // 3. Payment Mode Filter
+      if (receiptModeFilter && r.paymentMode !== receiptModeFilter) {
+        return false;
+      }
+
+      // 4. Multi-Month Filter
+      if (receiptSelectedMonths.length > 0) {
+        const receiptMonth = r.receiptDate ? r.receiptDate.slice(0, 7) : '';
+        const covered = r.monthsCovered || '';
+        const matchesAnyMonth = receiptSelectedMonths.some(m => 
+          receiptMonth === m || covered.includes(m)
+        );
+        if (!matchesAnyMonth) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [receipts, receiptSearch, receiptPropertyFilter, receiptModeFilter, receiptSelectedMonths]);
+
+  // Total collected in filtered receipts
+  const totalFilteredReceiptsAmount = filteredReceipts.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0);
+
+  // Export Filtered Receipts to Excel
+  const exportReceiptsToExcel = () => {
+    const exportRows = filteredReceipts.map((r, idx) => ({
+      '#': idx + 1,
+      'Date': formatDate(r.receiptDate),
+      'Tenant': r.tenantId?.name || '—',
+      'Tenant Phone': r.tenantId?.phone || '—',
+      'Property': r.unitId?.propertyId?.name || '—',
+      'Sub-Unit': r.unitId?.subUnitPartition || r.unitId?.unitName || '—',
+      'Rent Month(s)': r.monthsCovered || '—',
+      'Amount Paid (₹)': Number(r.totalAmount) || 0,
+      'Payment Mode': r.paymentMode || 'Cash',
+      'Ref / UTR #': r.referenceNumber || '—',
+      'Bank Name': r.bankName || '—',
+      'Notes': r.comments || '—'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Receipts_Register');
+    XLSX.writeFile(wb, `Payment_Receipts_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   // Filtered rows for Excel Grid, sorted by Property Master displayOrder
   const filteredOut = outstandingData.filter(d => {
     const matchesSearch = !search ||
@@ -1495,13 +1592,29 @@ export default function PaymentsView() {
       {/* VIEW 2: RECEIPTS REGISTER */}
       {activeTab === 'receipts' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          {/* Header & Main Actions */}
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h3 className="font-extrabold text-slate-900 text-sm">Issued Payment Receipts</h3>
-              <span className="text-xs text-slate-500">{receipts.length} total receipts recorded</span>
+              <h3 className="font-extrabold text-slate-900 text-base">Issued Payment Receipts Register</h3>
+              <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                <span>Showing <strong className="text-slate-800">{filteredReceipts.length}</strong> of {receipts.length} receipts</span>
+                <span>•</span>
+                <span>Total Collected: <strong className="text-emerald-700 font-extrabold">{formatCurrency(totalFilteredReceiptsAmount)}</strong></span>
+              </p>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={exportReceiptsToExcel}
+                disabled={filteredReceipts.length === 0}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold transition-all shadow-xs disabled:opacity-40"
+                title="Download filtered receipts list as Excel (.xlsx)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export to Excel</span>
+              </button>
+
               <ColumnManager
                 columns={RECEIPTS_COLUMNS_DEF}
                 visibleColumns={visibleReceiptsColumns}
@@ -1519,6 +1632,170 @@ export default function PaymentsView() {
                 <span className="hidden sm:inline">Reset Widths</span>
               </button>
             </div>
+          </div>
+
+          {/* Interactive Filters Bar (Search, Property, Mode, Multi-Month) */}
+          <div className="p-3.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[200px] sm:min-w-[240px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search tenant, property, partition, ref #, notes..."
+                value={receiptSearch}
+                onChange={(e) => setReceiptSearch(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-2xs"
+              />
+              {receiptSearch && (
+                <button
+                  type="button"
+                  onClick={() => setReceiptSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Property Filter */}
+            <select
+              value={receiptPropertyFilter}
+              onChange={(e) => setReceiptPropertyFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
+            >
+              <option value="">All Properties</option>
+              {properties.map(p => (
+                <option key={p._id} value={p._id}>{p.name}</option>
+              ))}
+            </select>
+
+            {/* Payment Mode Filter */}
+            <select
+              value={receiptModeFilter}
+              onChange={(e) => setReceiptModeFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
+            >
+              <option value="">All Payment Modes</option>
+              <option value="Cash">Cash</option>
+              <option value="Cheque">Cheque</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="UPI">UPI</option>
+              <option value="Other">Other</option>
+            </select>
+
+            {/* Multi-Month Selector with Popover */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowReceiptMonthPicker(prev => !prev)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all shadow-2xs cursor-pointer ${
+                  receiptSelectedMonths.length > 0
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                <span>
+                  {receiptSelectedMonths.length === 0
+                    ? 'All Rent Months'
+                    : receiptSelectedMonths.length === 1
+                    ? formatMonthYear(receiptSelectedMonths[0])
+                    : `${receiptSelectedMonths.length} Months Selected`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {showReceiptMonthPicker && (
+                <div className="absolute left-0 mt-2 z-40 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2.5 animate-scaleUp">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <span className="text-xs font-extrabold text-slate-800">Select Month(s)</span>
+                    <div className="flex items-center gap-2">
+                      {receiptSelectedMonths.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setReceiptSelectedMonths([])}
+                          className="text-[11px] font-bold text-rose-600 hover:underline"
+                        >
+                          Clear
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowReceiptMonthPicker(false)}
+                        className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                    {availableReceiptMonths.length === 0 ? (
+                      <div className="py-4 text-center text-xs text-slate-400">No receipt months recorded yet</div>
+                    ) : (
+                      availableReceiptMonths.map(m => {
+                        const isChecked = receiptSelectedMonths.includes(m);
+                        return (
+                          <label
+                            key={m}
+                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
+                              isChecked
+                                ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                                : 'hover:bg-slate-50 text-slate-700 border border-transparent'
+                            }`}
+                          >
+                            <span>{formatMonthYear(m)}</span>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                if (isChecked) {
+                                  setReceiptSelectedMonths(receiptSelectedMonths.filter(x => x !== m));
+                                } else {
+                                  setReceiptSelectedMonths([...receiptSelectedMonths, m]);
+                                }
+                              }}
+                              className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                            />
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {receiptSelectedMonths.length > 0 && (
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 font-medium">{receiptSelectedMonths.length} months active</span>
+                      <button
+                        type="button"
+                        onClick={() => setReceiptSelectedMonths([])}
+                        className="font-bold text-slate-500 hover:text-slate-800"
+                      >
+                        Show All
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Clear All Active Filters Button */}
+            {(receiptSearch || receiptPropertyFilter || receiptModeFilter || receiptSelectedMonths.length > 0) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiptSearch('');
+                  setReceiptPropertyFilter('');
+                  setReceiptModeFilter('');
+                  setReceiptSelectedMonths([]);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors"
+                title="Reset all search filters"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Filters</span>
+              </button>
+            )}
           </div>
 
           {receipts.length === 0 ? (
@@ -1577,7 +1854,26 @@ export default function PaymentsView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {receipts.map(r => (
+                  {filteredReceipts.length === 0 ? (
+                    <tr>
+                      <td colSpan={visibleReceiptsColumns.length} className="py-16 text-center text-slate-400 text-xs">
+                        <p className="font-bold text-slate-700 text-sm mb-1">No payment receipts found matching your active filters.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReceiptSearch('');
+                            setReceiptPropertyFilter('');
+                            setReceiptModeFilter('');
+                            setReceiptSelectedMonths([]);
+                          }}
+                          className="text-xs font-bold text-emerald-600 hover:underline mt-1"
+                        >
+                          Reset Filters to view all {receipts.length} receipts
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredReceipts.map(r => (
                     <tr key={r._id} className="hover:bg-slate-50/70 transition-colors">
                       {visibleReceiptsColumns.map(colId => {
                         if (colId === 'receiptDate') {
@@ -1696,7 +1992,7 @@ export default function PaymentsView() {
                         return null;
                       })}
                     </tr>
-                  ))}
+                  )))}
                 </tbody>
               </table>
             </div>
@@ -2069,30 +2365,41 @@ export default function PaymentsView() {
                         <th className="py-2.5 px-2">Month</th>
                         <th className="py-2.5 px-2 text-right">Expected</th>
                         <th className="py-2.5 px-2 text-right">Paid</th>
-                        <th className="py-2.5 px-2 text-right">Owed</th>
+                        <th className="py-2.5 px-2 text-right">This Month Due</th>
+                        <th className="py-2.5 px-2 text-right text-rose-700 bg-rose-50/50">Cumulative Due</th>
                         <th className="py-2.5 px-2 text-center">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {selectedLedgerModal.monthsBreakdown?.map((m, i) => (
-                        <tr key={i} className="hover:bg-slate-50">
-                          <td className="py-2.5 px-2 font-bold text-slate-800">{formatMonthYear(m.monthYear)}</td>
-                          <td className="py-2.5 px-2 text-right text-slate-600">{formatCurrency(m.expectedRate)}</td>
-                          <td className="py-2.5 px-2 text-right font-bold text-emerald-600">{formatCurrency(m.allocatedAmount)}</td>
-                          <td className="py-2.5 px-2 text-right font-bold text-rose-600">{formatCurrency(m.outstandingAmount)}</td>
-                          <td className="py-2.5 px-2 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              m.status === 'Fully Paid'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : m.status === 'Partially Paid'
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-rose-100 text-rose-800'
-                            }`}>
-                              {m.status === 'Fully Paid' ? '✓ Paid' : m.status === 'Partially Paid' ? 'Partial' : 'Due'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {(() => {
+                        let runningDue = 0;
+                        return selectedLedgerModal.monthsBreakdown?.map((m, i) => {
+                          runningDue += (m.outstandingAmount || 0);
+                          const cumDue = m.cumulativeOutstanding !== undefined ? m.cumulativeOutstanding : runningDue;
+                          return (
+                            <tr key={i} className="hover:bg-slate-50 transition-colors">
+                              <td className="py-2.5 px-2 font-bold text-slate-800">{formatMonthYear(m.monthYear)}</td>
+                              <td className="py-2.5 px-2 text-right text-slate-600">{formatCurrency(m.expectedRate)}</td>
+                              <td className="py-2.5 px-2 text-right font-bold text-emerald-600">{formatCurrency(m.allocatedAmount)}</td>
+                              <td className="py-2.5 px-2 text-right font-bold text-rose-600">{formatCurrency(m.outstandingAmount)}</td>
+                              <td className="py-2.5 px-2 text-right font-black text-rose-700 bg-rose-50/40">
+                                {formatCurrency(cumDue)}
+                              </td>
+                              <td className="py-2.5 px-2 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  m.status === 'Fully Paid'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : m.status === 'Partially Paid'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-rose-100 text-rose-800'
+                                }`}>
+                                  {m.status === 'Fully Paid' ? '✓ Paid' : m.status === 'Partially Paid' ? 'Partial' : 'Due'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>

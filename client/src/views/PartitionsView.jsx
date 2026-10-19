@@ -93,6 +93,15 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (initialPropertyFilter !== undefined) {
+      setSelectedPropertyFilter(initialPropertyFilter);
+    }
+    if (initialSearch !== undefined) {
+      setSearch(initialSearch);
+    }
+  }, [initialPropertyFilter, initialSearch]);
+
   const handleSave = async (e) => {
     e.preventDefault();
     try {

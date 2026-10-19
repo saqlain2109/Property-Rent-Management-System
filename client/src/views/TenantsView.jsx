@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
-import { Users, Plus, Search, Download, TrendingUp, Edit, Trash2, LogOut, RotateCcw } from 'lucide-react';
+import { Users, Plus, Search, Download, TrendingUp, Edit, Trash2, LogOut, RotateCcw, FileText } from 'lucide-react';
 
 const TENANTS_COLUMNS_DEF = [
   { id: 'tenant', label: 'Tenant Details' },
@@ -63,6 +63,7 @@ export default function TenantsView({ onDataChanged }) {
   // Modals
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [editingTenant, setEditingTenant] = useState(null);
+  const [attachContract, setAttachContract] = useState(false);
   const [showIncreaseModal, setShowIncreaseModal] = useState(false);
   const [showVacateModal, setShowVacateModal] = useState(false);
 
@@ -129,11 +130,21 @@ export default function TenantsView({ onDataChanged }) {
   const handleSaveTenant = async (e) => {
     e.preventDefault();
     try {
+      const willAttachContract = editingTenant ? Boolean(form.unitId) : attachContract;
+
       const payload = {
-        ...form,
-        monthlyRate: form.monthlyRate !== '' ? Number(form.monthlyRate) : undefined,
-        depositHeld: Number(form.depositHeld) || 0,
-        endDate: form.endDate || null
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        tenantType: form.tenantType || 'Individual',
+        notes: form.notes,
+        ...(willAttachContract && form.unitId ? {
+          unitId: form.unitId,
+          monthlyRate: form.monthlyRate !== '' ? Number(form.monthlyRate) : undefined,
+          depositHeld: Number(form.depositHeld) || 0,
+          startDate: form.startDate || new Date().toISOString().split('T')[0],
+          endDate: form.endDate || null,
+          terms: form.terms || ''
+        } : {})
       };
 
       if (editingTenant) {
@@ -159,6 +170,7 @@ export default function TenantsView({ onDataChanged }) {
 
   const openCreateTenant = () => {
     setEditingTenant(null);
+    setAttachContract(false);
     setForm({
       name: '',
       phone: '',
@@ -180,6 +192,7 @@ export default function TenantsView({ onDataChanged }) {
     const agreement = t.currentRentAgreement;
     const assignment = t.activeAssignment;
 
+    setAttachContract(Boolean(activeUnit || assignment));
     setForm({
       name: t.name || '',
       phone: t.phone || '',
@@ -592,90 +605,127 @@ export default function TenantsView({ onDataChanged }) {
                 </div>
               </div>
 
-              {/* Sub-Unit Lease Section */}
-              <div className="p-4 bg-emerald-50/40 rounded-xl border border-emerald-100 space-y-3.5">
-                <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wide">
-                  Assign to a Unit <span className="font-normal normal-case text-emerald-700">(optional — leave blank to register without a lease)</span>
-                </h4>
-
-                <div>
-                  <SearchableSelect
-                    label="Vacant Unit"
-                    placeholder={availableSubUnits.length ? 'Search property or unit...' : 'No vacant units available'}
-                    searchPlaceholder="Type a property or unit name..."
-                    options={availableSubUnits.map((unit) => ({
-                      value: unit._id,
-                      label: unit.subUnitPartition || unit.unitName,
-                      subtext: `${unit.propertyId?.name || 'Property'}${unit.areaSqFt ? ` · ${unit.areaSqFt.toLocaleString('en-IN')} sq ft` : ''}`,
-                    }))}
-                    value={form.unitId}
-                    onChange={(unitId) => setForm((prev) => ({ ...prev, unitId }))}
-                  />
-                  <p className="mt-1.5 text-[11px] text-emerald-800">
-                    {availableSubUnits.length
-                      ? 'Choose the property and unit together here. Leave blank to register the tenant without a lease.'
-                      : 'No vacant units available. Add a property and unit in the Masters panel first.'}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Monthly Rent Rate (₹) *</label>
-                    <input
-                      type="number"
-                      required={!!form.unitId}
-                      placeholder="e.g. 22000"
-                      value={form.monthlyRate}
-                      onChange={(e) => setForm({ ...form, monthlyRate: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
-                    />
+              {/* Optional Lease Contract Creation Toggle */}
+              {!editingTenant && (
+                <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-2 rounded-lg ${attachContract ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">Create Lease Contract Now? (Optional)</span>
+                      <span className="text-[11px] text-slate-500 block">Enable to assign this tenant to a vacant unit and start tenancy immediately</span>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Security Deposit Held (₹)</label>
+                  <label className="relative inline-flex items-center cursor-pointer">
                     <input
-                      type="number"
-                      placeholder="0"
-                      value={form.depositHeld}
-                      onChange={(e) => setForm({ ...form, depositHeld: e.target.value })}
+                      type="checkbox"
+                      checked={attachContract}
+                      onChange={(e) => {
+                        setAttachContract(e.target.checked);
+                        if (!e.target.checked) {
+                          setForm(f => ({ ...f, unitId: '', monthlyRate: '' }));
+                        }
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+              )}
+
+              {/* Sub-Unit Lease Section (Visible if editing or if contract toggle is ON) */}
+              {(editingTenant || attachContract) && (
+                <div className="p-4 bg-emerald-50/40 rounded-xl border border-emerald-100 space-y-3.5 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wide">
+                      Lease Contract & Unit Details
+                    </h4>
+                    <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded">
+                      Creates active contract
+                    </span>
+                  </div>
+
+                  <div>
+                    <SearchableSelect
+                      label="Vacant Unit *"
+                      placeholder={availableSubUnits.length ? 'Search property or unit...' : 'No vacant units available'}
+                      searchPlaceholder="Type a property or unit name..."
+                      options={availableSubUnits.map((unit) => ({
+                        value: unit._id,
+                        label: unit.subUnitPartition || unit.unitName,
+                        subtext: `${unit.propertyId?.name || 'Property'}${unit.areaSqFt ? ` · ${unit.areaSqFt.toLocaleString('en-IN')} sq ft` : ''}`,
+                      }))}
+                      value={form.unitId}
+                      onChange={(unitId) => setForm((prev) => ({ ...prev, unitId }))}
+                    />
+                    <p className="mt-1.5 text-[11px] text-emerald-800">
+                      {availableSubUnits.length
+                        ? 'Select the property & vacant partition to start the lease agreement.'
+                        : 'No vacant units available. Add a property and unit in the Masters panel first.'}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Monthly Rent Rate (₹) *</label>
+                      <input
+                        type="number"
+                        required={!!form.unitId}
+                        placeholder="e.g. 22000"
+                        value={form.monthlyRate}
+                        onChange={(e) => setForm({ ...form, monthlyRate: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Security Deposit Held (₹)</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={form.depositHeld}
+                        onChange={(e) => setForm({ ...form, depositHeld: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Start Date *</label>
+                      <input
+                        type="date"
+                        required={!!form.unitId}
+                        value={form.startDate}
+                        onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        End Date <span className="text-slate-400 font-normal">(Leave blank if ongoing)</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={form.endDate}
+                        onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Terms & Conditions</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 11 months contract, 5% annual escalation"
+                      value={form.terms}
+                      onChange={(e) => setForm({ ...form, terms: e.target.value })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Start Date</label>
-                    <input
-                      type="date"
-                      value={form.startDate}
-                      onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      End Date <span className="text-slate-400 font-normal">(Leave blank if ongoing)</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={form.endDate}
-                      onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Terms & Conditions</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 11 months contract, 5% annual escalation"
-                    value={form.terms}
-                    onChange={(e) => setForm({ ...form, terms: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Notes <span className="text-slate-400 font-normal">(optional)</span></label>

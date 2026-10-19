@@ -5,6 +5,7 @@ const Tenant = require('../models/Tenant');
 const TenantAssignment = require('../models/TenantAssignment');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const RentAgreement = require('../models/RentAgreement');
+const Unit = require('../models/Unit');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
 
@@ -262,6 +263,69 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     });
 
     res.json({ success: true, data: tenant });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route DELETE /api/tenants/:id
+router.delete('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
+  try {
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    // Check if tenant has payment receipts
+    const paymentCount = await PaymentReceipt.countDocuments({ tenantId: tenant._id, isReversed: { $ne: true } });
+    if (paymentCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete tenant with ${paymentCount} recorded payment receipt(s). Reverse or remove payment receipts first.`
+      });
+    }
+
+    // Find all assignments for this tenant
+    const assignments = await TenantAssignment.find({ tenantId: tenant._id });
+    const assignmentIds = assignments.map(a => a._id);
+
+    // Free up any units currently occupied by this tenant
+    const activeAssignments = assignments.filter(a => a.status === 'Active');
+    for (const asn of activeAssignments) {
+      if (asn.unitId) {
+        // Check if other active tenants are in this unit
+        const otherActive = await TenantAssignment.findOne({
+          unitId: asn.unitId,
+          _id: { $ne: asn._id },
+          status: 'Active'
+        });
+        if (!otherActive) {
+          await Unit.findByIdAndUpdate(asn.unitId, { occupancyStatus: 'Vacant' });
+        }
+      }
+    }
+
+    // Clean up rent agreements and assignments
+    if (assignmentIds.length > 0) {
+      await RentAgreement.deleteMany({ assignmentId: { $in: assignmentIds } });
+      await TenantAssignment.deleteMany({ _id: { $in: assignmentIds } });
+    }
+    await RentAgreement.deleteMany({ tenantId: tenant._id });
+
+    // Delete the tenant
+    await Tenant.findByIdAndDelete(tenant._id);
+
+    await logAudit({
+      userId: req.user._id,
+      action: 'DELETE',
+      entityType: 'Tenant',
+      entityId: req.params.id,
+      description: `Deleted tenant ${tenant.name} (${tenant.tenantCode})`,
+      previousState: tenant.toObject(),
+      req
+    });
+
+    res.json({ success: true, message: 'Tenant deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

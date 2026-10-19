@@ -99,7 +99,39 @@ router.post('/', protect, authorize('admin', 'manager'), [
       req
     });
 
-    res.status(201).json({ success: true, data: property });
+    let createdUnit = null;
+    if (req.body.createSingleUnit) {
+      const Unit = require('../models/Unit');
+      const uCount = await Unit.countDocuments();
+      const unitCode = `UNIT-${String(uCount + 1).padStart(4, '0')}`;
+      const unitName = req.body.unitName || `${property.name} - Unit`;
+      const subUnitPartition = req.body.subUnitPartition || unitName;
+
+      createdUnit = await Unit.create({
+        unitCode,
+        propertyId: property._id,
+        unitName,
+        subUnitPartition,
+        areaSqFt: Number(req.body.unitAreaSqFt) || Number(property.totalAreaSqFt) || 0,
+        floor: req.body.floor || 'Ground',
+        monthlyRentExpected: Number(req.body.monthlyRentExpected) || 0,
+        unitType: req.body.unitType || property.propertyType,
+        occupancyStatus: 'Vacant',
+        notes: req.body.unitNotes || 'Primary unit for individual property'
+      });
+
+      await logAudit({
+        userId: req.user._id,
+        action: 'CREATE',
+        entityType: 'Unit',
+        entityId: createdUnit._id,
+        description: `Auto-created unit ${createdUnit.unitName} for single-unit property ${property.name}`,
+        newState: createdUnit.toObject(),
+        req
+      });
+    }
+
+    res.status(201).json({ success: true, data: property, createdUnit });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
