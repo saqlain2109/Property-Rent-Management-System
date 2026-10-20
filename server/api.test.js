@@ -32,6 +32,18 @@ describe('Property & Rent Management API Tests', () => {
     expect(res.body.status).toEqual('ok');
   });
 
+  test('POST /api/auth/login should accept the administrator username', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({
+        username: 'admin',
+        password: 'AdminPassword123!'
+      });
+    expect(res.statusCode).toEqual(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.user.username).toEqual('admin');
+  });
+
   test('GET /api/properties should return migrated properties', async () => {
     const res = await request(app)
       .get('/api/properties')

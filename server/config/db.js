@@ -24,6 +24,22 @@ const connectDB = async () => {
     }).then(async (mongooseInstance) => {
       console.log(`[Database] MongoDB Connected: ${mongooseInstance.connection.host}/${mongooseInstance.connection.name}`);
       
+      const User = require('../models/User');
+      const defaultAdmin = await User.findOne({ email: 'admin@propertyrent.com' });
+      if (defaultAdmin && !defaultAdmin.username) {
+        const usernameOwner = await User.findOne({
+          username: 'admin',
+          _id: { $ne: defaultAdmin._id }
+        });
+        if (usernameOwner) {
+          console.warn('[Database] Could not assign default username "admin": it is already in use.');
+        } else {
+          defaultAdmin.username = 'admin';
+          await defaultAdmin.save();
+          console.log('[Database] Added missing username to the default administrator.');
+        }
+      }
+
       // Auto-seed if database has 0 properties (first deployment / fresh server)
       try {
         const Property = require('../models/Property');
@@ -31,7 +47,6 @@ const connectDB = async () => {
         if (count === 0) {
           console.log('[Database] Database is empty. Running automatic verified migration...');
           const { executeMigration } = require('../routes/migrationRoutes');
-          const User = require('../models/User');
           let admin = await User.findOne({
             $or: [{ email: 'admin@propertyrent.com' }, { username: 'admin' }]
           });

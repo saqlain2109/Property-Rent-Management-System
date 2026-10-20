@@ -100,7 +100,7 @@ cd server
 node seed.js
 ```
 This automatically:
-1. Creates the administrator account (`admin@propertyrent.com` / `AdminPassword123!`).
+1. Creates the administrator account (`admin` or `admin@propertyrent.com` / `AdminPassword123!`).
 2. Extracts and migrates all 10 properties, 25 units, 25 tenants, 31 verified payment receipts, 36 allocations, 4 PG settlements, 12 expenses, and 3 monthly ledgers from `Rent Details 2026.xlsx`, `Jan 26.xlsx`, `Feb 26.xlsx`, and `Mar 26.xlsx`.
 
 ### 4. Run Automated Backend Tests

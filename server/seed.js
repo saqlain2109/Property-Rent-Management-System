@@ -17,12 +17,24 @@ async function runSeed() {
       console.log('[Seed] Creating default administrator user...');
       admin = await User.create({
         name: 'Administrator',
+        username: 'admin',
         email: 'admin@propertyrent.com',
         password: 'AdminPassword123!',
         role: 'admin'
       });
       console.log('[Seed] Admin created: admin@propertyrent.com / AdminPassword123!');
     } else {
+      if (!admin.username) {
+        const usernameOwner = await User.findOne({
+          username: 'admin',
+          _id: { $ne: admin._id }
+        });
+        if (usernameOwner) {
+          throw new Error('Cannot assign default username "admin": it is already in use');
+        }
+        admin.username = 'admin';
+        await admin.save();
+      }
       console.log('[Seed] Admin user already exists:', admin.email);
     }
 

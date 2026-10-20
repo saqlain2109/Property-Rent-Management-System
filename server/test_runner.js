@@ -67,6 +67,17 @@ async function runStandaloneTests() {
     token = res.body.token;
   });
 
+  await assert('Admin Username Login POST /api/auth/login', async () => {
+    const res = await request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { username: 'admin', password: 'AdminPassword123!' }
+    });
+    if (res.status !== 200 || !res.body.token || res.body.user.username !== 'admin') {
+      throw new Error(`Username login failed: ${JSON.stringify(res.body)}`);
+    }
+  });
+
   const authHeaders = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`
