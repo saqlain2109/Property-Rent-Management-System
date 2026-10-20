@@ -332,29 +332,49 @@ export default function ContractsView() {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">Active Leases</p>
-          <p className="text-2xl font-extrabold text-slate-900 mt-1">{totalActive}</p>
-          <p className="text-[11px] text-teal-600 font-medium mt-0.5">Currently Occupying Units</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-teal-50 text-teal-600">
+            <Building2 className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Active Leases</p>
+            <p className="text-2xl font-extrabold mt-0.5 text-slate-900">{totalActive}</p>
+            <p className="text-xs text-teal-600 font-medium mt-0.5 leading-tight">Currently Occupying Units</p>
+          </div>
         </div>
 
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">Total Expected To Date</p>
-          <p className="text-2xl font-extrabold text-blue-700 mt-1">{formatCurrency(totalExpectedAll)}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Prorated through current month</p>
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-blue-50 text-blue-600">
+            <TrendingUp className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Total Expected</p>
+            <p className="text-2xl font-extrabold mt-0.5 text-blue-700">{formatCurrency(totalExpectedAll)}</p>
+            <p className="text-xs text-slate-400 mt-0.5 leading-tight">Prorated through current month</p>
+          </div>
         </div>
 
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">Total Rent Received</p>
-          <p className="text-2xl font-extrabold text-emerald-600 mt-1">{formatCurrency(totalReceivedAll)}</p>
-          <p className="text-[11px] text-emerald-600 font-medium mt-0.5">Allocated payment receipts</p>
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-600">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Total Received</p>
+            <p className="text-2xl font-extrabold mt-0.5 text-emerald-600">{formatCurrency(totalReceivedAll)}</p>
+            <p className="text-xs text-emerald-600 font-medium mt-0.5 leading-tight">Allocated payment receipts</p>
+          </div>
         </div>
 
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">Outstanding Balance</p>
-          <p className="text-2xl font-extrabold text-rose-600 mt-1">{formatCurrency(totalOutstandingAll)}</p>
-          <p className="text-[11px] text-rose-500 font-medium mt-0.5">Net overdue across contracts</p>
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-rose-50 text-rose-600">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Outstanding Balance</p>
+            <p className="text-2xl font-extrabold mt-0.5 text-rose-600">{formatCurrency(totalOutstandingAll)}</p>
+            <p className="text-xs text-rose-500 font-medium mt-0.5 leading-tight">Net overdue across contracts</p>
+          </div>
         </div>
       </div>
 
