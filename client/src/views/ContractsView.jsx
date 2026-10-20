@@ -1,12 +1,45 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
+import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
 import {
   FileText, Plus, Search, Building2, Layers, Users, Calendar,
   TrendingUp, CheckCircle2, AlertCircle, Edit2, LogOut, History,
-  IndianRupee, X, Check, ArrowRight, Clock, ShieldCheck
+  IndianRupee, X, Check, ArrowRight, Clock, ShieldCheck, Download, RotateCcw
 } from 'lucide-react';
+
+const CONTRACTS_COLUMNS_DEF = [
+  { id: 'assignmentCode', label: 'Contract Code' },
+  { id: 'tenant', label: 'Tenant Details' },
+  { id: 'property', label: 'Property & Partition' },
+  { id: 'dates', label: 'Tenancy Dates' },
+  { id: 'currentRate', label: 'Current Rate' },
+  { id: 'totalExpected', label: 'Expected To Date' },
+  { id: 'totalReceived', label: 'Received' },
+  { id: 'outstanding', label: 'Outstanding' },
+  { id: 'history', label: 'Rate History' },
+  { id: 'actions', label: 'Actions' },
+];
+
+const DEFAULT_CONTRACTS_COLS = [
+  'assignmentCode', 'tenant', 'property', 'dates',
+  'currentRate', 'totalExpected', 'totalReceived', 'outstanding', 'history', 'actions'
+];
+
+const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
+  assignmentCode: 130,
+  tenant: 170,
+  property: 170,
+  dates: 140,
+  currentRate: 120,
+  totalExpected: 125,
+  totalReceived: 120,
+  outstanding: 125,
+  history: 105,
+  actions: 145
+};
 
 export default function ContractsView() {
   const [contracts, setContracts] = useState([]);
@@ -15,6 +48,25 @@ export default function ContractsView() {
   const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // Column management & resizable widths with localStorage persistence
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('cols_contracts_v1');
+    if (!saved) return DEFAULT_CONTRACTS_COLS;
+    try {
+      const allowed = CONTRACTS_COLUMNS_DEF.map((c) => c.id);
+      return JSON.parse(saved).filter((c) => allowed.includes(c));
+    } catch {
+      return DEFAULT_CONTRACTS_COLS;
+    }
+  });
+
+  const {
+    columnWidths,
+    handleResizeStart,
+    resetColumnWidths,
+    hasCustomWidths
+  } = useResizableColumns('contracts_v1', DEFAULT_CONTRACTS_COLUMN_WIDTHS);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -195,6 +247,35 @@ export default function ContractsView() {
   const totalReceivedAll = contracts.reduce((s, c) => s + (c.totalReceived || 0), 0);
   const totalOutstandingAll = contracts.reduce((s, c) => s + (c.outstandingBalance || 0), 0);
 
+  const exportToExcel = () => {
+    try {
+      const dataToExport = filteredContracts.map((c) => ({
+        'Contract Code': c.assignmentCode || '',
+        'Status': c.status || 'Active',
+        'Tenant Name': c.tenantId?.name || '',
+        'Tenant Phone': c.tenantId?.phone || '',
+        'Tenant Email': c.tenantId?.email || '',
+        'Property': c.unitId?.propertyId?.name || '',
+        'Partition / Unit': c.unitId?.unitName || '',
+        'Start Date': c.startDate ? formatDate(c.startDate) : '',
+        'End Date': c.endDate ? formatDate(c.endDate) : 'Ongoing',
+        'Current Monthly Rate (₹)': c.currentMonthlyRate || 0,
+        'Expected Rent To Date (₹)': c.totalExpected || 0,
+        'Total Received (₹)': c.totalReceived || 0,
+        'Outstanding Balance (₹)': c.outstandingBalance || 0,
+        'Deposit Held (₹)': c.depositHeld || 0,
+        'Notes': c.notes || ''
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Contracts');
+      XLSX.writeFile(workbook, `Contracts_Register_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err) {
+      console.error('Failed to export contracts to Excel:', err);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -213,13 +294,41 @@ export default function ContractsView() {
           </div>
         </div>
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold transition-all shadow-md shadow-teal-600/20 active:scale-95 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          Create Contract
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <ColumnManager
+            columns={CONTRACTS_COLUMNS_DEF}
+            visibleColumns={visibleColumns}
+            onChangeVisible={setVisibleColumns}
+            storageKey="contracts_v1"
+            onResetWidths={resetColumnWidths}
+          />
+
+          <button
+            type="button"
+            onClick={resetColumnWidths}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
+            title="Reset column widths"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Reset Widths</span>
+          </button>
+
+          <button
+            onClick={exportToExcel}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
+          >
+            <Download className="w-4 h-4 text-teal-600" />
+            <span>Export to Excel</span>
+          </button>
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-teal-600/20 active:scale-95 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            Create Contract
+          </button>
+        </div>
       </div>
 
       {/* Metrics Row */}
@@ -316,19 +425,41 @@ export default function ContractsView() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
-                <tr>
-                  <th className="py-3.5 px-4">Contract Code</th>
-                  <th className="py-3.5 px-4">Tenant Details</th>
-                  <th className="py-3.5 px-4">Property & Partition</th>
-                  <th className="py-3.5 px-4">Tenancy Dates</th>
-                  <th className="py-3.5 px-4 text-right">Current Rate</th>
-                  <th className="py-3.5 px-4 text-right">Expected To Date</th>
-                  <th className="py-3.5 px-4 text-right">Received</th>
-                  <th className="py-3.5 px-4 text-right">Outstanding</th>
-                  <th className="py-3.5 px-4 text-center">Rate History</th>
-                  <th className="py-3.5 px-4 text-center">Actions</th>
+            <table
+              className="w-full text-left text-xs border-collapse table-fixed"
+              style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
+            >
+              <colgroup>
+                {visibleColumns.map((colId) => (
+                  <col
+                    key={colId}
+                    style={{ width: `${columnWidths[colId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[colId] || 100}px` }}
+                  />
+                ))}
+              </colgroup>
+              <thead>
+                <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200 select-none">
+                  {visibleColumns.map((colId) => {
+                    const def = CONTRACTS_COLUMNS_DEF.find((c) => c.id === colId);
+                    if (!def) return null;
+                    const width = columnWidths[colId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[colId] || 100;
+                    let alignClass = 'text-left';
+                    if (['history'].includes(colId)) alignClass = 'text-center';
+                    if (['currentRate', 'totalExpected', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
+                    if (colId === 'actions') alignClass = 'text-center';
+
+                    return (
+                      <th
+                        key={colId}
+                        {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'contracts_v1')}
+                        style={{ width: `${width}px` }}
+                        className={`py-3 px-4 border-r border-slate-200 relative group ${alignClass}`}
+                      >
+                        <span className="truncate block pr-2">{def.label}</span>
+                        <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -340,130 +471,164 @@ export default function ContractsView() {
                       key={c._id}
                       className={`hover:bg-slate-50/70 transition-colors ${isVacated ? 'bg-slate-50/40 opacity-70' : ''}`}
                     >
-                      {/* Contract Code & Status */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className="font-mono font-bold text-slate-800 text-xs block">
-                          {c.assignmentCode}
-                        </span>
-                        <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          !isVacated ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                        }`}>
-                          {c.status}
-                        </span>
-                      </td>
+                      {visibleColumns.map((colId) => {
+                        if (colId === 'assignmentCode') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 whitespace-nowrap">
+                              <span className="font-mono font-bold text-slate-800 text-xs block">
+                                {c.assignmentCode}
+                              </span>
+                              <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                !isVacated ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                              }`}>
+                                {c.status}
+                              </span>
+                            </td>
+                          );
+                        }
 
-                      {/* Tenant (Separate Entity) */}
-                      <td className="py-3.5 px-4">
-                        <span className="font-bold text-slate-900 text-sm block">
-                          {c.tenantId?.name || '—'}
-                        </span>
-                        {c.tenantId?.phone && (
-                          <span className="text-slate-500 text-[11px] block">{c.tenantId.phone}</span>
-                        )}
-                        {c.tenantId?.email && (
-                          <span className="text-slate-400 text-[10px] block">{c.tenantId.email}</span>
-                        )}
-                      </td>
+                        if (colId === 'tenant') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200">
+                              <span className="font-bold text-slate-900 text-sm block">
+                                {c.tenantId?.name || '—'}
+                              </span>
+                              {c.tenantId?.phone && (
+                                <span className="text-slate-500 text-[11px] block">{c.tenantId.phone}</span>
+                              )}
+                              {c.tenantId?.email && (
+                                <span className="text-slate-400 text-[10px] block">{c.tenantId.email}</span>
+                              )}
+                            </td>
+                          );
+                        }
 
-                      {/* Property & Unit */}
-                      <td className="py-3.5 px-4">
-                        <span className="font-semibold text-slate-800 block">
-                          {c.unitId?.propertyId?.name || '—'}
-                        </span>
-                        <span className="text-teal-700 font-medium text-[11px] block">
-                          {c.unitId?.unitName || '—'}
-                        </span>
-                      </td>
+                        if (colId === 'property') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200">
+                              <span className="font-semibold text-slate-800 block">
+                                {c.unitId?.propertyId?.name || '—'}
+                              </span>
+                              <span className="text-teal-700 font-medium text-[11px] block">
+                                {c.unitId?.unitName || '—'}
+                              </span>
+                            </td>
+                          );
+                        }
 
-                      {/* Dates */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-slate-700 font-medium">
-                          <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{formatDate(c.startDate)}</span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {c.endDate ? `Ended: ${formatDate(c.endDate)}` : 'Ongoing Tenancy'}
-                        </div>
-                      </td>
+                        if (colId === 'dates') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 text-slate-700 font-medium">
+                                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{formatDate(c.startDate)}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                {c.endDate ? `Ended: ${formatDate(c.endDate)}` : 'Ongoing Tenancy'}
+                              </div>
+                            </td>
+                          );
+                        }
 
-                      {/* Current Monthly Rate */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap font-bold text-slate-900">
-                        {formatCurrency(c.currentMonthlyRate || 0)}
-                        <span className="text-[10px] text-slate-400 font-normal block">/ month</span>
-                      </td>
+                        if (colId === 'currentRate') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900">
+                              {formatCurrency(c.currentMonthlyRate || 0)}
+                              <span className="text-[10px] text-slate-400 font-normal block">/ month</span>
+                            </td>
+                          );
+                        }
 
-                      {/* Total Expected To Date */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-semibold text-blue-800">
-                        {formatCurrency(c.totalExpected || 0)}
-                      </td>
+                        if (colId === 'totalExpected') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-blue-800">
+                              {formatCurrency(c.totalExpected || 0)}
+                            </td>
+                          );
+                        }
 
-                      {/* Total Received To Date */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-semibold text-emerald-700">
-                        {formatCurrency(c.totalReceived || 0)}
-                      </td>
+                        if (colId === 'totalReceived') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-emerald-700">
+                              {formatCurrency(c.totalReceived || 0)}
+                            </td>
+                          );
+                        }
 
-                      {/* Outstanding Balance */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-bold">
-                        <span className={c.outstandingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
-                          {formatCurrency(c.outstandingBalance || 0)}
-                        </span>
-                      </td>
+                        if (colId === 'outstanding') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-mono font-bold">
+                              <span className={c.outstandingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                                {formatCurrency(c.outstandingBalance || 0)}
+                              </span>
+                            </td>
+                          );
+                        }
 
-                      {/* Rate History Button */}
-                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        <button
-                          onClick={() => {
-                            setSelectedContract(c);
-                            setShowHistoryModal(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition-colors"
-                          title="View rate revision timeline"
-                        >
-                          <History className="w-3 h-3 text-slate-500" />
-                          <span>{rateCount} rate{rateCount > 1 ? 's' : ''}</span>
-                        </button>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {!isVacated && (
-                            <>
+                        if (colId === 'history') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-center whitespace-nowrap">
                               <button
                                 onClick={() => {
                                   setSelectedContract(c);
-                                  setReviseForm({
-                                    newRate: String(c.currentMonthlyRate || ''),
-                                    effectiveFrom: new Date().toISOString().split('T')[0],
-                                    reason: '',
-                                  });
-                                  setShowReviseModal(true);
+                                  setShowHistoryModal(true);
                                 }}
-                                className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors"
-                                title="Revise or Increase Rent"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition-colors"
+                                title="View rate revision timeline"
                               >
-                                Revise Rate
+                                <History className="w-3 h-3 text-slate-500" />
+                                <span>{rateCount} rate{rateCount > 1 ? 's' : ''}</span>
                               </button>
+                            </td>
+                          );
+                        }
 
-                              <button
-                                onClick={() => {
-                                  setSelectedContract(c);
-                                  setVacateForm({
-                                    endDate: new Date().toISOString().split('T')[0],
-                                    depositRefunded: c.depositHeld || 0,
-                                    notes: '',
-                                  });
-                                  setShowVacateModal(true);
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] transition-colors"
-                                title="Vacate / End Tenancy"
-                              >
-                                Vacate
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
+                        if (colId === 'actions') {
+                          return (
+                            <td key={colId} className="py-3.5 px-4 text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {!isVacated && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedContract(c);
+                                        setReviseForm({
+                                          newRate: String(c.currentMonthlyRate || ''),
+                                          effectiveFrom: new Date().toISOString().split('T')[0],
+                                          reason: '',
+                                        });
+                                        setShowReviseModal(true);
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors"
+                                      title="Revise or Increase Rent"
+                                    >
+                                      Revise Rate
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setSelectedContract(c);
+                                        setVacateForm({
+                                          endDate: new Date().toISOString().split('T')[0],
+                                          depositRefunded: c.depositHeld || 0,
+                                          notes: '',
+                                        });
+                                        setShowVacateModal(true);
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] transition-colors"
+                                      title="Vacate / End Tenancy"
+                                    >
+                                      Vacate
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        return null;
+                      })}
                     </tr>
                   );
                 })}
