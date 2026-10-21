@@ -3,12 +3,14 @@ import API from '../services/api';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
 import SearchableSelect from '../components/SearchableSelect';
+import ApexToolbar from '../components/ApexToolbar';
+import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
 import { 
   Plus, Search, RotateCcw, X, Edit2, Trash2, 
   Calendar, ChevronLeft, ChevronRight, Download, Check, 
   Layers, Receipt, IndianRupee, ArrowRight, Building, 
-  Sparkles, Filter, CheckCircle2, Clock
+  Sparkles, Filter, CheckCircle2, Clock, ArrowUp, ArrowDown, ArrowUpDown
 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
@@ -112,6 +114,32 @@ export default function ExpensesView() {
   const [registerPropFilter, setRegisterPropFilter] = useState('');
   const [registerCatFilter, setRegisterCatFilter] = useState('');
   const [registerMonthFilter, setRegisterMonthFilter] = useState('');
+
+  // APEX Toolbar & Table States for Sheet
+  const [sheetFilters, setSheetFilters] = useState([]);
+  const [sheetSortConfig, setSheetSortConfig] = useState({ key: null, direction: null });
+  const [isSheetHeaderSticky, setIsSheetHeaderSticky] = useState(true);
+  const [sheetRowsPerPage, setSheetRowsPerPage] = useState('All');
+  const [sheetCurrentPage, setSheetCurrentPage] = useState(1);
+  const [sheetActiveViewId, setSheetActiveViewId] = useState(null);
+
+  // APEX Toolbar & Table States for Register
+  const [registerFilters, setRegisterFilters] = useState([]);
+  const [registerSortConfig, setRegisterSortConfig] = useState({ key: 'date', direction: 'desc' });
+  const [isRegisterHeaderSticky, setIsRegisterHeaderSticky] = useState(true);
+  const [registerRowsPerPage, setRegisterRowsPerPage] = useState(25);
+  const [registerCurrentPage, setRegisterCurrentPage] = useState(1);
+  const [registerActiveViewId, setRegisterActiveViewId] = useState(null);
+
+  const handleSheetHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setSheetSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
+
+  const handleRegisterHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setRegisterSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
 
   // Modals & Inline Edit States
   const [showModal, setShowModal] = useState(false);
@@ -268,26 +296,96 @@ export default function ExpensesView() {
   };
 
   // Month-Specific Expenses for the Excel Grid
-  const monthExpenses = expenses.filter(e => {
-    if (e.isReversed) return false;
-    const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
-    return expM === selectedMonth;
-  });
+  const monthExpenses = React.useMemo(() => {
+    return expenses.filter(e => {
+      if (e.isReversed) return false;
+      const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
+      return expM === selectedMonth;
+    });
+  }, [expenses, selectedMonth]);
 
-  const filteredMonthExpenses = monthExpenses.filter(e => {
-    const matchesSearch = !sheetSearch ||
-      e.description?.toLowerCase().includes(sheetSearch.toLowerCase()) ||
-      e.vendorOrPayee?.toLowerCase().includes(sheetSearch.toLowerCase()) ||
-      e.propertyId?.name?.toLowerCase().includes(sheetSearch.toLowerCase()) ||
-      e.category?.toLowerCase().includes(sheetSearch.toLowerCase());
+  const sheetFilterSuggestions = React.useMemo(() => {
+    return {
+      property: extractUniqueValues(monthExpenses, e => e.propertyId?.name || 'General (Common)'),
+      category: extractUniqueValues(monthExpenses, e => e.category || 'Maintenance'),
+      description: extractUniqueValues(monthExpenses, e => e.description),
+      payee: extractUniqueValues(monthExpenses, e => e.vendorOrPayee),
+      paymentMode: ['Cash', 'UPI', 'Bank Transfer', 'Cheque']
+    };
+  }, [monthExpenses]);
 
-    const matchesProp = !sheetPropFilter || String(e.propertyId?._id || e.propertyId || '') === sheetPropFilter;
-    const matchesCat = !sheetCatFilter || e.category === sheetCatFilter;
+  const filteredMonthExpenses = React.useMemo(() => {
+    return monthExpenses.filter(e => {
+      const propName = e.propertyId?.name || 'General (Common)';
+      const subUnitName = e.unitId?.subUnitPartition || e.unitId?.unitName || 'Entire Property';
+      const cat = e.category || 'Maintenance';
+      const desc = e.description || '';
+      const payee = e.vendorOrPayee || '';
+      const mode = e.paymentMode || 'Cash';
+      const amt = String(e.amount || 0);
 
-    return matchesSearch && matchesProp && matchesCat;
-  });
+      const matchesSearch = !sheetSearch ||
+        desc.toLowerCase().includes(sheetSearch.toLowerCase()) ||
+        payee.toLowerCase().includes(sheetSearch.toLowerCase()) ||
+        propName.toLowerCase().includes(sheetSearch.toLowerCase()) ||
+        cat.toLowerCase().includes(sheetSearch.toLowerCase());
 
-  const monthTotalSum = filteredMonthExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+      const matchesProp = !sheetPropFilter || String(e.propertyId?._id || e.propertyId || '') === sheetPropFilter;
+      const matchesCat = !sheetCatFilter || cat === sheetCatFilter;
+
+      if (!matchesSearch || !matchesProp || !matchesCat) return false;
+
+      // APEX Filters
+      for (const f of sheetFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'property') fieldVal = `${propName} ${subUnitName}`;
+        else if (f.columnId === 'category') fieldVal = cat;
+        else if (f.columnId === 'description') fieldVal = desc;
+        else if (f.columnId === 'payee') fieldVal = payee;
+        else if (f.columnId === 'paymentMode') fieldVal = mode;
+        else if (f.columnId === 'amount') fieldVal = amt;
+        else if (f.columnId === 'createdAt') fieldVal = e.createdAt ? formatDate(e.createdAt) : '';
+        else if (f.columnId === 'updatedAt') fieldVal = e.updatedAt ? formatDate(e.updatedAt) : '';
+
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
+      return true;
+    });
+  }, [monthExpenses, sheetSearch, sheetPropFilter, sheetCatFilter, sheetFilters]);
+
+  // Sorted Month Expenses
+  const sortedMonthExpenses = React.useMemo(() => {
+    return sortDataRows(filteredMonthExpenses, sheetSortConfig, {
+      index: (_, idx) => idx + 1,
+      property: e => e.propertyId?.name || '',
+      category: e => e.category || '',
+      description: e => e.description || '',
+      payee: e => e.vendorOrPayee || '',
+      paymentMode: e => e.paymentMode || '',
+      amount: e => Number(e.amount) || 0,
+      createdAt: e => e.createdAt,
+      updatedAt: e => e.updatedAt
+    });
+  }, [filteredMonthExpenses, sheetSortConfig]);
+
+  // Sheet Pagination
+  const totalSheetItems = sortedMonthExpenses.length;
+  const isAllSheetRows = sheetRowsPerPage === 'All';
+  const effectiveSheetPageSize = isAllSheetRows ? totalSheetItems || 1 : Number(sheetRowsPerPage);
+  const totalSheetPages = Math.ceil(totalSheetItems / effectiveSheetPageSize) || 1;
+
+  useEffect(() => {
+    if (sheetCurrentPage > totalSheetPages) setSheetCurrentPage(1);
+  }, [totalSheetPages, sheetCurrentPage]);
+
+  const paginatedMonthExpenses = React.useMemo(() => {
+    if (isAllSheetRows) return sortedMonthExpenses;
+    const startIndex = (sheetCurrentPage - 1) * effectiveSheetPageSize;
+    return sortedMonthExpenses.slice(startIndex, startIndex + effectiveSheetPageSize);
+  }, [sortedMonthExpenses, isAllSheetRows, sheetCurrentPage, effectiveSheetPageSize]);
+
+  const monthTotalSum = sortedMonthExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
 
   // Fast Inline Expense Entry (Direct in the Sheet)
   const handleFastAddExpense = async (e) => {
@@ -369,12 +467,12 @@ export default function ExpensesView() {
 
   // Export Month's Expense Sheet to Excel (.xlsx)
   const exportMonthExpensesToExcel = () => {
-    if (filteredMonthExpenses.length === 0) {
+    if (sortedMonthExpenses.length === 0) {
       alert(`No expenses recorded for ${formatMonthYear(selectedMonth)} to export.`);
       return;
     }
 
-    const exportRows = filteredMonthExpenses.map((e, idx) => ({
+    const exportRows = sortedMonthExpenses.map((e, idx) => ({
       'Sr. No.': idx + 1,
       'Month': formatMonthYear(selectedMonth),
       'Property': e.propertyId?.name || 'General / Common',
@@ -383,7 +481,9 @@ export default function ExpensesView() {
       'What it was for': e.description || '',
       'Paid To / Vendor': e.vendorOrPayee || '—',
       'Payment Mode': e.paymentMode || 'Cash',
-      'Amount (₹)': e.amount || 0
+      'Amount (₹)': e.amount || 0,
+      'Created Date': e.createdAt ? formatDate(e.createdAt) : '',
+      'Modified Date': e.updatedAt ? formatDate(e.updatedAt) : ''
     }));
 
     // Add Grand Total Row
@@ -396,7 +496,9 @@ export default function ExpensesView() {
       'What it was for': 'TOTAL EXPENSES',
       'Paid To / Vendor': '',
       'Payment Mode': '',
-      'Amount (₹)': monthTotalSum
+      'Amount (₹)': monthTotalSum,
+      'Created Date': '',
+      'Modified Date': ''
     });
 
     const ws = XLSX.utils.json_to_sheet(exportRows);
@@ -484,24 +586,118 @@ export default function ExpensesView() {
     }
   };
 
+  // Register Filter Suggestions
+  const registerFilterSuggestions = React.useMemo(() => {
+    return {
+      property: extractUniqueValues(expenses, e => e.propertyId?.name || 'General'),
+      category: extractUniqueValues(expenses, e => e.category || 'Maintenance'),
+      description: extractUniqueValues(expenses, e => e.description),
+      payee: extractUniqueValues(expenses, e => e.vendorOrPayee),
+      date: extractUniqueValues(expenses, e => e.expenseMonth ? formatMonthYear(e.expenseMonth) : formatDate(e.expenseDate))
+    };
+  }, [expenses]);
+
   // Full Register Filtered List
-  const filteredRegister = expenses.filter((e) => {
-    const matchesSearch =
-      !registerSearch ||
-      e.description?.toLowerCase().includes(registerSearch.toLowerCase()) ||
-      e.vendorOrPayee?.toLowerCase().includes(registerSearch.toLowerCase()) ||
-      e.propertyId?.name?.toLowerCase().includes(registerSearch.toLowerCase()) ||
-      e.category?.toLowerCase().includes(registerSearch.toLowerCase());
+  const filteredRegister = React.useMemo(() => {
+    return expenses.filter((e) => {
+      const propName = e.propertyId?.name || 'General';
+      const subUnitName = e.unitId?.subUnitPartition || e.unitId?.unitName || 'Entire Property';
+      const cat = e.category || 'Maintenance';
+      const desc = e.description || '';
+      const payee = e.vendorOrPayee || '';
+      const mode = e.paymentMode || 'Cash';
+      const amt = String(e.amount || 0);
+      const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
+      const dateStr = e.expenseMonth ? formatMonthYear(e.expenseMonth) : (e.expenseDate ? formatDate(e.expenseDate) : '');
 
-    const matchesCategory = !registerCatFilter || e.category === registerCatFilter;
-    const matchesProp = !registerPropFilter || String(e.propertyId?._id || e.propertyId || '') === registerPropFilter;
-    const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
-    const matchesMonth = !registerMonthFilter || expM === registerMonthFilter;
+      const matchesSearch =
+        !registerSearch ||
+        desc.toLowerCase().includes(registerSearch.toLowerCase()) ||
+        payee.toLowerCase().includes(registerSearch.toLowerCase()) ||
+        propName.toLowerCase().includes(registerSearch.toLowerCase()) ||
+        cat.toLowerCase().includes(registerSearch.toLowerCase());
 
-    return matchesSearch && matchesCategory && matchesProp && matchesMonth;
-  });
+      const matchesCategory = !registerCatFilter || cat === registerCatFilter;
+      const matchesProp = !registerPropFilter || String(e.propertyId?._id || e.propertyId || '') === registerPropFilter;
+      const matchesMonth = !registerMonthFilter || expM === registerMonthFilter;
 
-  const totalRegisterShown = filteredRegister.reduce((s, e) => s + (e.isReversed ? 0 : e.amount), 0);
+      if (!matchesSearch || !matchesCategory || !matchesProp || !matchesMonth) return false;
+
+      // APEX Filters
+      for (const f of registerFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'date') fieldVal = dateStr;
+        else if (f.columnId === 'property') fieldVal = `${propName} ${subUnitName}`;
+        else if (f.columnId === 'category') fieldVal = cat;
+        else if (f.columnId === 'description') fieldVal = desc;
+        else if (f.columnId === 'payee') fieldVal = `${payee} ${mode}`;
+        else if (f.columnId === 'amount') fieldVal = amt;
+        else if (f.columnId === 'createdAt') fieldVal = e.createdAt ? formatDate(e.createdAt) : '';
+        else if (f.columnId === 'updatedAt') fieldVal = e.updatedAt ? formatDate(e.updatedAt) : '';
+
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
+      return true;
+    });
+  }, [expenses, registerSearch, registerCatFilter, registerPropFilter, registerMonthFilter, registerFilters]);
+
+  // Sorted Register
+  const sortedRegister = React.useMemo(() => {
+    return sortDataRows(filteredRegister, registerSortConfig, {
+      date: e => e.expenseDate || e.expenseMonth || '',
+      property: e => e.propertyId?.name || '',
+      category: e => e.category || '',
+      description: e => e.description || '',
+      payee: e => e.vendorOrPayee || '',
+      amount: e => Number(e.amount) || 0,
+      createdAt: e => e.createdAt,
+      updatedAt: e => e.updatedAt
+    });
+  }, [filteredRegister, registerSortConfig]);
+
+  // Register Pagination
+  const totalRegisterItems = sortedRegister.length;
+  const isAllRegisterRows = registerRowsPerPage === 'All';
+  const effectiveRegisterPageSize = isAllRegisterRows ? totalRegisterItems || 1 : Number(registerRowsPerPage);
+  const totalRegisterPages = Math.ceil(totalRegisterItems / effectiveRegisterPageSize) || 1;
+
+  useEffect(() => {
+    if (registerCurrentPage > totalRegisterPages) setRegisterCurrentPage(1);
+  }, [totalRegisterPages, registerCurrentPage]);
+
+  const paginatedRegister = React.useMemo(() => {
+    if (isAllRegisterRows) return sortedRegister;
+    const startIndex = (registerCurrentPage - 1) * effectiveRegisterPageSize;
+    return sortedRegister.slice(startIndex, startIndex + effectiveRegisterPageSize);
+  }, [sortedRegister, isAllRegisterRows, registerCurrentPage, effectiveRegisterPageSize]);
+
+  const totalRegisterShown = sortedRegister.reduce((s, e) => s + (e.isReversed ? 0 : e.amount), 0);
+
+  // Export Register to Excel (.xlsx)
+  const exportRegisterToExcel = () => {
+    if (sortedRegister.length === 0) {
+      alert('No expenses match the current filters to export.');
+      return;
+    }
+    const exportRows = sortedRegister.map((e, idx) => ({
+      '#': idx + 1,
+      'Month / Date': e.expenseMonth ? formatMonthYear(e.expenseMonth) : formatDate(e.expenseDate),
+      'Property': e.propertyId?.name || 'General',
+      'Partition': e.unitId?.subUnitPartition || e.unitId?.unitName || 'Entire Property',
+      'Expense Type': e.category || 'Maintenance',
+      'What it was for': e.description || '',
+      'Paid To / Payee': e.vendorOrPayee || '—',
+      'Payment Mode': e.paymentMode || 'Cash',
+      'Amount (₹)': Number(e.amount) || 0,
+      'Created Date': e.createdAt ? formatDate(e.createdAt) : '',
+      'Modified Date': e.updatedAt ? formatDate(e.updatedAt) : ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Expenses_Register');
+    XLSX.writeFile(wb, `Expenses_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
   const allCategories = [...new Set([
     ...CATEGORY_OPTIONS,
     ...categories.map(c => (typeof c === 'string' ? c : c.name)).filter(Boolean)
@@ -802,70 +998,37 @@ export default function ExpensesView() {
             </form>
           </div>
 
-          {/* Action & Filter Bar for Sheet */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-            {/* Search Input */}
-            <div className="flex items-center gap-2.5 flex-1 bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200/80">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                placeholder="Search this month's expenses by description, payee, or property..."
-                value={sheetSearch}
-                onChange={(e) => setSheetSearch(e.target.value)}
-                className="flex-1 text-xs sm:text-sm bg-transparent border-none focus:outline-none text-slate-800 placeholder:text-slate-400"
-              />
-              {sheetSearch && (
-                <button onClick={() => setSheetSearch('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Filter Dropdowns */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <select
-                value={sheetPropFilter}
-                onChange={(e) => setSheetPropFilter(e.target.value)}
-                className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
-              >
-                <option value="">All Properties</option>
-                {properties.map(p => (
-                  <option key={p._id} value={p._id}>{p.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={sheetCatFilter}
-                onChange={(e) => setSheetCatFilter(e.target.value)}
-                className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
-              >
-                <option value="">All Heads</option>
-                {allCategories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-
-              {/* Column Customizer */}
-              <ColumnManager
-                columns={EXPENSES_SHEET_COLUMNS_DEF}
-                visibleColumns={visibleSheetColumns}
-                onChangeVisible={setVisibleSheetColumns}
-                storageKey="expenses_sheet_v1"
-                onResetWidths={resetSheetColumnWidths}
-              />
-
-              {/* Reset Column Widths */}
-              <button
-                type="button"
-                onClick={resetSheetColumnWidths}
-                className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs cursor-pointer"
-                title="Reset column widths"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">Reset</span>
-              </button>
-            </div>
-          </div>
+          {/* APEX Interactive Toolbar for Sheet */}
+          <ApexToolbar
+            searchPlaceholder="Search this month's expenses by description, payee, or property..."
+            searchValue={sheetSearch}
+            onSearchChange={setSheetSearch}
+            columns={EXPENSES_SHEET_COLUMNS_DEF}
+            visibleColumns={visibleSheetColumns}
+            onVisibleColumnsChange={setVisibleSheetColumns}
+            columnWidths={sheetColumnWidths}
+            onResetWidths={resetSheetColumnWidths}
+            activeFilters={sheetFilters}
+            onFiltersChange={setSheetFilters}
+            filterSuggestions={sheetFilterSuggestions}
+            rowsPerPage={sheetRowsPerPage}
+            onRowsPerPageChange={setSheetRowsPerPage}
+            isHeaderSticky={isSheetHeaderSticky}
+            onToggleHeaderSticky={() => setIsSheetHeaderSticky(prev => !prev)}
+            activeViewId={sheetActiveViewId}
+            onSaveView={(view) => {
+              setSheetActiveViewId(view.id);
+            }}
+            onLoadView={(view) => {
+              setSheetActiveViewId(view.id);
+              if (view.visibleColumns) setVisibleSheetColumns(view.visibleColumns);
+              if (view.filters) setSheetFilters(view.filters);
+              if (view.rowsPerPage) setSheetRowsPerPage(view.rowsPerPage);
+              if (view.isHeaderSticky !== undefined) setIsSheetHeaderSticky(view.isHeaderSticky);
+            }}
+            onExportExcel={exportMonthExpensesToExcel}
+            storageKeyPrefix="expenses_sheet_view"
+          />
 
           {/* THE EXCEL SPREADSHEET TABLE */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -889,7 +1052,9 @@ export default function ExpensesView() {
                       />
                     ))}
                   </colgroup>
-                  <thead className="bg-slate-100/80 border-b border-slate-200 text-[11px] text-slate-600 uppercase tracking-wider font-extrabold select-none">
+                  <thead className={`border-b border-slate-200 text-[11px] text-slate-600 uppercase tracking-wider font-extrabold select-none ${
+                    isSheetHeaderSticky ? 'sticky top-0 z-20 shadow-sm' : ''
+                  }`}>
                     <tr>
                       {visibleSheetColumns.map(colId => {
                         const dragProps = getHeaderDragProps(colId, visibleSheetColumns, setVisibleSheetColumns, 'expenses_sheet_v1');
@@ -908,16 +1073,37 @@ export default function ExpensesView() {
                         else if (colId === 'updatedAt') { label = 'Modified Date'; }
                         else if (colId === 'actions') { label = 'Actions'; align = 'text-center'; }
 
+                        const isSortable = colId !== 'actions';
+                        const isSorted = sheetSortConfig.key === colId;
+                        const sortDirection = isSorted ? sheetSortConfig.direction : null;
+
                         return (
                           <th
                             key={colId}
                             {...dragProps}
-                            style={{ width: `${width}px` }}
-                            className={`px-3 py-3.5 border-r border-slate-200 relative group ${align}`}
+                            onClick={() => isSortable && handleSheetHeaderSort(colId)}
+                            style={{ minWidth: `${Math.max(width, 95)}px`, width: `${Math.max(width, 95)}px` }}
+                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
+                              isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
+                            }`}
+                            title={isSortable ? `${label} (Click: 1st Desc, 2nd Asc, 3rd Off)` : label}
                           >
-                            <span className="truncate block font-extrabold text-[11px] text-slate-700 pr-2">
-                              {label}
-                            </span>
+                            <div className={`flex items-center gap-1.5 w-full overflow-hidden ${align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'}`}>
+                              <span className="truncate font-extrabold text-[11px] text-slate-700 tracking-wider">
+                                {label}
+                              </span>
+                              {isSortable && (
+                                <span className="shrink-0 flex items-center text-slate-400">
+                                  {sortDirection === 'asc' ? (
+                                    <ArrowUp className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                                  ) : sortDirection === 'desc' ? (
+                                    <ArrowDown className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60 text-slate-400 transition-opacity" />
+                                  )}
+                                </span>
+                              )}
+                            </div>
                             <ResizeHandle colId={colId} onResizeStart={handleSheetResizeStart} />
                           </th>
                         );
@@ -925,8 +1111,9 @@ export default function ExpensesView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredMonthExpenses.map((e, idx) => {
+                    {paginatedMonthExpenses.map((e, idx) => {
                       const isInlineEditing = editingRowAmount[e._id] !== undefined;
+                      const rowNum = (isAllSheetRows ? 0 : (sheetCurrentPage - 1) * Number(sheetRowsPerPage)) + idx + 1;
 
                       return (
                         <tr key={e._id} className="hover:bg-slate-50/80 transition-colors">
@@ -934,7 +1121,7 @@ export default function ExpensesView() {
                             if (colId === 'index') {
                               return (
                                 <td key={colId} className="px-3 py-3 border-r border-slate-100 text-center text-xs text-slate-400 font-mono">
-                                  {idx + 1}
+                                  {rowNum}
                                 </td>
                               );
                             }
@@ -1127,6 +1314,63 @@ export default function ExpensesView() {
                 </table>
               </div>
             )}
+
+            {/* Sheet Pagination Footer */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 shrink-0">
+              <div className="flex items-center gap-2">
+                <span>
+                  Showing {sortedMonthExpenses.length === 0 ? 0 : isAllSheetRows ? 1 : ((sheetCurrentPage - 1) * Number(sheetRowsPerPage)) + 1}
+                  - {isAllSheetRows ? sortedMonthExpenses.length : Math.min(sheetCurrentPage * Number(sheetRowsPerPage), sortedMonthExpenses.length)} of {sortedMonthExpenses.length} entries
+                </span>
+                {sheetSortConfig.key && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px] border border-emerald-200">
+                    Sorted: {sheetSortConfig.key} ({sheetSortConfig.direction?.toUpperCase()})
+                  </span>
+                )}
+              </div>
+
+              {!isAllSheetRows && totalSheetPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={sheetCurrentPage === 1}
+                    onClick={() => setSheetCurrentPage(1)}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="First Page"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sheetCurrentPage === 1}
+                    onClick={() => setSheetCurrentPage(p => Math.max(1, p - 1))}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-3 py-1 text-slate-700">
+                    Page {sheetCurrentPage} of {totalSheetPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={sheetCurrentPage >= totalSheetPages}
+                    onClick={() => setSheetCurrentPage(p => Math.min(totalSheetPages, p + 1))}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sheetCurrentPage >= totalSheetPages}
+                    onClick={() => setSheetCurrentPage(totalSheetPages)}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Last Page"
+                  >
+                    »
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1136,84 +1380,58 @@ export default function ExpensesView() {
       {/* ======================================================== */}
       {activeTab === 'register' && (
         <div className="space-y-4">
-          {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-            {/* Search */}
-            <div className="flex items-center gap-2.5 flex-1 bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200/80">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                placeholder="Search description, payee, or property..."
-                value={registerSearch}
-                onChange={(e) => setRegisterSearch(e.target.value)}
-                className="flex-1 text-xs sm:text-sm bg-transparent border-none focus:outline-none text-slate-800 placeholder:text-slate-400"
-              />
-              {registerSearch && (
-                <button onClick={() => setRegisterSearch('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            <SearchableSelect
-              className="w-full sm:w-56"
-              value={registerPropFilter}
-              onChange={setRegisterPropFilter}
-              placeholder="All Properties"
-              searchPlaceholder="Search properties..."
-              options={properties.map((property) => ({ value: property._id, label: property.name }))}
-            />
-
-            <SearchableSelect
-              className="w-full sm:w-44"
-              value={registerMonthFilter}
-              onChange={setRegisterMonthFilter}
-              placeholder="All Months"
-              searchPlaceholder="Search month..."
-              options={availableExpenseMonths.map((m) => ({ value: m, label: formatMonthYear(m) }))}
-            />
-
-            <SearchableSelect
-              className="w-full sm:w-52"
-              value={registerCatFilter}
-              onChange={setRegisterCatFilter}
-              placeholder="All Expense Types"
-              searchPlaceholder="Search expense types..."
-              options={allCategories.map((category) => ({ value: category, label: category }))}
-            />
-
-            {/* Column Manager & Reset */}
-            <div className="flex items-center gap-2">
-              <ColumnManager
-                columns={EXPENSES_REGISTER_COLUMNS_DEF}
-                visibleColumns={visibleRegisterColumns}
-                onChangeVisible={setVisibleRegisterColumns}
-                storageKey="expenses_register_v1"
-                onResetWidths={resetRegisterColumnWidths}
-              />
-              <button
-                type="button"
-                onClick={resetRegisterColumnWidths}
-                className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs cursor-pointer"
-                title="Reset column widths"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Reset Widths</span>
-              </button>
-            </div>
-
-            <div className="sm:ml-auto text-xs font-semibold text-slate-700 whitespace-nowrap pl-1">
-              Total: <span className="text-rose-600 font-bold">{formatCurrency(totalRegisterShown)}</span>
-            </div>
-          </div>
+          {/* APEX Interactive Toolbar for Register */}
+          <ApexToolbar
+            searchPlaceholder="Search description, payee, or property..."
+            searchValue={registerSearch}
+            onSearchChange={setRegisterSearch}
+            columns={EXPENSES_REGISTER_COLUMNS_DEF}
+            visibleColumns={visibleRegisterColumns}
+            onVisibleColumnsChange={setVisibleRegisterColumns}
+            columnWidths={registerColumnWidths}
+            onResetWidths={resetRegisterColumnWidths}
+            activeFilters={registerFilters}
+            onFiltersChange={setRegisterFilters}
+            filterSuggestions={registerFilterSuggestions}
+            rowsPerPage={registerRowsPerPage}
+            onRowsPerPageChange={setRegisterRowsPerPage}
+            isHeaderSticky={isRegisterHeaderSticky}
+            onToggleHeaderSticky={() => setIsRegisterHeaderSticky(prev => !prev)}
+            activeViewId={registerActiveViewId}
+            onSaveView={(view) => {
+              setRegisterActiveViewId(view.id);
+            }}
+            onLoadView={(view) => {
+              setRegisterActiveViewId(view.id);
+              if (view.visibleColumns) setVisibleRegisterColumns(view.visibleColumns);
+              if (view.filters) setRegisterFilters(view.filters);
+              if (view.rowsPerPage) setRegisterRowsPerPage(view.rowsPerPage);
+              if (view.isHeaderSticky !== undefined) setIsRegisterHeaderSticky(view.isHeaderSticky);
+            }}
+            onExportExcel={exportRegisterToExcel}
+            storageKeyPrefix="expenses_register_view"
+          />
 
           {/* Historical Register Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             {loading ? (
               <div className="py-16 text-center text-slate-400 text-sm">Loading expenses...</div>
-            ) : filteredRegister.length === 0 ? (
-              <div className="py-16 text-center text-slate-400 text-sm">
-                No expenses found matching the selected filters.
+            ) : sortedRegister.length === 0 ? (
+              <div className="py-16 text-center text-slate-400 text-xs">
+                <p className="font-bold text-slate-700 text-sm mb-1">No expenses found matching the selected filters.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegisterSearch('');
+                    setRegisterPropFilter('');
+                    setRegisterCatFilter('');
+                    setRegisterMonthFilter('');
+                    setRegisterFilters([]);
+                  }}
+                  className="text-xs font-bold text-emerald-600 hover:underline mt-1 cursor-pointer"
+                >
+                  Reset Filters to view all {expenses.length} expenses
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1229,7 +1447,9 @@ export default function ExpensesView() {
                       />
                     ))}
                   </colgroup>
-                  <thead className="bg-slate-50 border-b border-slate-200">
+                  <thead className={`border-b border-slate-200 ${
+                    isRegisterHeaderSticky ? 'sticky top-0 z-20 shadow-sm' : ''
+                  }`}>
                     <tr className="text-[11px] text-slate-500 uppercase tracking-wide font-extrabold select-none">
                       {visibleRegisterColumns.map(colId => {
                         const dragProps = getHeaderDragProps(colId, visibleRegisterColumns, setVisibleRegisterColumns, 'expenses_register_v1');
@@ -1246,14 +1466,37 @@ export default function ExpensesView() {
                         else if (colId === 'updatedAt') label = 'Modified Date';
                         else if (colId === 'actions') { label = 'Action'; align = 'text-center'; }
 
+                        const isSortable = colId !== 'actions';
+                        const isSorted = registerSortConfig.key === colId;
+                        const sortDirection = isSorted ? registerSortConfig.direction : null;
+
                         return (
                           <th
                             key={colId}
                             {...dragProps}
-                            style={{ width: `${width}px` }}
-                            className={`px-4 py-3.5 border-r border-slate-200 relative group ${align}`}
+                            onClick={() => isSortable && handleRegisterHeaderSort(colId)}
+                            style={{ minWidth: `${Math.max(width, 100)}px`, width: `${Math.max(width, 100)}px` }}
+                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
+                              isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
+                            }`}
+                            title={isSortable ? `${label} (Click: 1st Desc, 2nd Asc, 3rd Off)` : label}
                           >
-                            <span className="truncate block pr-2">{label}</span>
+                            <div className={`flex items-center gap-1.5 w-full overflow-hidden ${align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'}`}>
+                              <span className="truncate font-extrabold text-[11px] text-slate-700 tracking-wider">
+                                {label}
+                              </span>
+                              {isSortable && (
+                                <span className="shrink-0 flex items-center text-slate-400">
+                                  {sortDirection === 'asc' ? (
+                                    <ArrowUp className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                                  ) : sortDirection === 'desc' ? (
+                                    <ArrowDown className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60 text-slate-400 transition-opacity" />
+                                  )}
+                                </span>
+                              )}
+                            </div>
                             <ResizeHandle colId={colId} onResizeStart={handleRegisterResizeStart} />
                           </th>
                         );
@@ -1261,7 +1504,7 @@ export default function ExpensesView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredRegister.map((e) => (
+                    {paginatedRegister.map((e) => (
                       <tr key={e._id} className={`hover:bg-slate-50/60 transition-colors ${e.isReversed ? 'opacity-50' : ''}`}>
                         {visibleRegisterColumns.map(colId => {
                           if (colId === 'date') {
@@ -1383,6 +1626,63 @@ export default function ExpensesView() {
                 </table>
               </div>
             )}
+
+            {/* Register Pagination Footer */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 shrink-0">
+              <div className="flex items-center gap-2">
+                <span>
+                  Showing {sortedRegister.length === 0 ? 0 : isAllRegisterRows ? 1 : ((registerCurrentPage - 1) * Number(registerRowsPerPage)) + 1}
+                  - {isAllRegisterRows ? sortedRegister.length : Math.min(registerCurrentPage * Number(registerRowsPerPage), sortedRegister.length)} of {sortedRegister.length} expenses
+                </span>
+                {registerSortConfig.key && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px] border border-emerald-200">
+                    Sorted: {registerSortConfig.key} ({registerSortConfig.direction?.toUpperCase()})
+                  </span>
+                )}
+              </div>
+
+              {!isAllRegisterRows && totalRegisterPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={registerCurrentPage === 1}
+                    onClick={() => setRegisterCurrentPage(1)}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="First Page"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    disabled={registerCurrentPage === 1}
+                    onClick={() => setRegisterCurrentPage(p => Math.max(1, p - 1))}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-3 py-1 text-slate-700">
+                    Page {registerCurrentPage} of {totalRegisterPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={registerCurrentPage >= totalRegisterPages}
+                    onClick={() => setRegisterCurrentPage(p => Math.min(totalRegisterPages, p + 1))}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    disabled={registerCurrentPage >= totalRegisterPages}
+                    onClick={() => setRegisterCurrentPage(totalRegisterPages)}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Last Page"
+                  >
+                    »
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

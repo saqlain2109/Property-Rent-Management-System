@@ -5,9 +5,10 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
 import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import {
   FileText, Plus, Search, Calendar, TrendingUp, Edit2, LogOut, History,
-  X, Download, RotateCcw, ChevronLeft, ChevronRight
+  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown
 } from 'lucide-react';
 
 const CONTRACTS_COLUMNS_DEF = [
@@ -21,6 +22,8 @@ const CONTRACTS_COLUMNS_DEF = [
   { id: 'totalReceived', label: 'Received' },
   { id: 'outstanding', label: 'Outstanding' },
   { id: 'history', label: 'Rate History' },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Actions' },
 ];
 
@@ -40,6 +43,8 @@ const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
   totalReceived: 120,
   outstanding: 125,
   history: 105,
+  createdAt: 110,
+  updatedAt: 110,
   actions: 220
 };
 
@@ -112,6 +117,25 @@ export default function ContractsView() {
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+
+  // Dynamic suggestions for APEX filter builder dropdown
+  const filterSuggestions = useMemo(() => {
+    return {
+      assignmentCode: extractUniqueValues(contracts, c => c.assignmentCode),
+      tenant: extractUniqueValues(contracts, c => c.tenantId?.name),
+      property: extractUniqueValues(contracts, c => `${c.unitId?.propertyId?.name || ''} - ${c.unitId?.unitName || ''}`.trim()),
+      rentType: ['Monthly Fixed', 'Annual Fixed'],
+      status: ['Active', 'Vacated'],
+      startDate: extractUniqueValues(contracts, c => c.startDate ? formatDate(c.startDate) : ''),
+      endDate: extractUniqueValues(contracts, c => c.endDate ? formatDate(c.endDate) : 'Ongoing')
+    };
+  }, [contracts]);
+
+  const handleHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
 
   // Pagination State
   const [rowsPerPage, setRowsPerPage] = useState(10); // default 10 or 'All'
@@ -366,23 +390,35 @@ export default function ContractsView() {
         else if (f.columnId === 'currentRate') fieldVal = rentAmount;
         else if (f.columnId === 'totalReceived') fieldVal = String(c.totalReceived || 0);
         else if (f.columnId === 'outstanding') fieldVal = String(c.outstandingBalance || 0);
+        else if (f.columnId === 'createdAt') fieldVal = c.createdAt ? formatDate(c.createdAt) : '';
+        else if (f.columnId === 'updatedAt') fieldVal = c.updatedAt ? formatDate(c.updatedAt) : '';
 
-        const target = (f.value || '').toLowerCase().trim();
-        const src = fieldVal.toLowerCase().trim();
-
-        if (f.operator === 'contains' && !src.includes(target)) return false;
-        if (f.operator === 'equals' && src !== target) return false;
-        if (f.operator === 'starts_with' && !src.startsWith(target)) return false;
-        if (f.operator === 'greater_than' && Number(src.replace(/[^\d.-]/g, '')) <= Number(target)) return false;
-        if (f.operator === 'less_than' && Number(src.replace(/[^\d.-]/g, '')) >= Number(target)) return false;
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
       }
 
       return true;
     });
   }, [contracts, search, propertyFilter, statusFilter, activeFilters]);
 
+  // Sorted Contracts based on 3-state sortConfig
+  const sortedContracts = useMemo(() => {
+    return sortDataRows(filteredContracts, sortConfig, {
+      assignmentCode: c => c.assignmentCode,
+      tenant: c => c.tenantId?.name,
+      property: c => `${c.unitId?.propertyId?.name || ''} ${c.unitId?.unitName || ''}`,
+      startDate: c => c.startDate,
+      endDate: c => c.endDate,
+      rentType: c => getContractRentType(c),
+      currentRate: c => getContractRentAmount(c),
+      totalReceived: c => c.totalReceived || 0,
+      outstanding: c => c.outstandingBalance || 0,
+      createdAt: c => c.createdAt,
+      updatedAt: c => c.updatedAt
+    });
+  }, [filteredContracts, sortConfig]);
+
   // Pagination Slice
-  const totalItems = filteredContracts.length;
+  const totalItems = sortedContracts.length;
   const isAllRows = rowsPerPage === 'All';
   const effectivePageSize = isAllRows ? totalItems || 1 : Number(rowsPerPage);
   const totalPages = Math.ceil(totalItems / effectivePageSize) || 1;
@@ -393,10 +429,10 @@ export default function ContractsView() {
   }, [totalPages, currentPage]);
 
   const paginatedContracts = useMemo(() => {
-    if (isAllRows) return filteredContracts;
+    if (isAllRows) return sortedContracts;
     const startIndex = (currentPage - 1) * effectivePageSize;
-    return filteredContracts.slice(startIndex, startIndex + effectivePageSize);
-  }, [filteredContracts, isAllRows, currentPage, effectivePageSize]);
+    return sortedContracts.slice(startIndex, startIndex + effectivePageSize);
+  }, [sortedContracts, isAllRows, currentPage, effectivePageSize]);
 
   // Export ONLY the currently filtered data
   const exportToExcel = () => {
@@ -501,6 +537,7 @@ export default function ContractsView() {
         onToggleHeaderSticky={setIsHeaderSticky}
         filters={activeFilters}
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
+        filterSuggestions={filterSuggestions}
         onExport={exportToExcel}
         storageKey="contracts_v1"
         activeViewName={activeViewId}
@@ -547,7 +584,7 @@ export default function ContractsView() {
                     if (!def) return null;
                     const width = getContractColumnWidth(colId, columnWidths);
                     let alignClass = 'text-left';
-                    if (['history'].includes(colId)) alignClass = 'text-center';
+                    if (['history', 'createdAt', 'updatedAt'].includes(colId)) alignClass = 'text-center';
                     if (['currentRate', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
                     if (colId === 'actions') alignClass = 'text-center';
 
@@ -555,10 +592,36 @@ export default function ContractsView() {
                       <th
                         key={colId}
                         {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'contracts_v1')}
-                        style={{ width: `${width}px` }}
-                        className={`py-3 px-3.5 border-r border-slate-200 relative group bg-slate-100/95 ${alignClass}`}
+                        style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                        className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 whitespace-nowrap overflow-hidden select-none ${alignClass}`}
                       >
-                        <span className="truncate block pr-2">{def.label}</span>
+                        <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                          alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'
+                        }`}>
+                          {colId === 'actions' ? (
+                            <span className="truncate text-xs font-bold text-slate-700">{def.label}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleHeaderSort(colId)}
+                              className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                              title={`Sort by ${def.label} (Click: Descending → Ascending → Clear)`}
+                            >
+                              <span className="truncate">{def.label}</span>
+                              <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                                {sortConfig.key === colId ? (
+                                  sortConfig.direction === 'desc' ? (
+                                    <span className="text-teal-600 font-extrabold text-[13px] leading-none">↓</span>
+                                  ) : (
+                                    <span className="text-teal-600 font-extrabold text-[13px] leading-none">↑</span>
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                                )}
+                              </span>
+                            </button>
+                          )}
+                        </div>
                         <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                       </th>
                     );
@@ -694,6 +757,14 @@ export default function ContractsView() {
                                 <History className="w-3 h-3 text-slate-500" />
                                 <span>{rateCount} rate{rateCount > 1 ? 's' : ''}</span>
                               </button>
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'createdAt' || colId === 'updatedAt') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap text-slate-500 font-medium text-xs">
+                              {formatDate(c[colId])}
                             </td>
                           );
                         }

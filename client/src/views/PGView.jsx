@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
+import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
-import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
-import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit, RotateCcw, ArrowUpDown } from 'lucide-react';
+import ApexToolbar from '../components/ApexToolbar';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
+import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit, RotateCcw, ArrowUpDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 
 const PG_COLUMNS_DEF = [
   { id: 'month', label: 'Month', defaultVisible: true },
@@ -45,6 +48,25 @@ export default function PGView() {
   const [showModal, setShowModal] = useState(false);
   const [editingSettlement, setEditingSettlement] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [search, setSearch] = useState('');
+  const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [activeViewId, setActiveViewId] = useState(null);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Suggestions for APEX filter builder dropdown
+  const filterSuggestions = useMemo(() => {
+    return {
+      month: extractUniqueValues(settlements, s => formatMonthYear(s.monthYear)),
+      notes: extractUniqueValues(settlements, s => s.notes)
+    };
+  }, [settlements]);
+
+  const handleHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_pg_settlements');
@@ -125,88 +147,179 @@ export default function PGView() {
 
   const calculatedDeductions = Number(form.altafShare || 0) + Number(form.anandShare || 0) + Number(form.bisleriWaterShare || 0) + Number(form.rehanShare || 0);
   const calculatedNet = Number(form.pgGrossCollection || 0) - calculatedDeductions;
-  const sortedSettlements = [...settlements].sort((a, b) => {
-    const getValue = (settlement) => ({
-      month: settlement.monthYear,
-      gross: settlement.pgGrossCollection,
-      altaf: settlement.altafShare,
-      anand: settlement.anandShare,
-      bisleri: settlement.bisleriWaterShare,
-      deductions: settlement.totalOperatorDeductions,
-      net: settlement.netReceivedByOwner,
-      rehan: settlement.rehanShare,
-      actualBank: settlement.actualBankReceived,
-      difference: settlement.actualBankReceived == null
-        ? null
-        : settlement.actualBankReceived - settlement.netReceivedByOwner,
-      notes: settlement.notes,
-      createdAt: settlement.createdAt,
-      updatedAt: settlement.updatedAt,
-    })[sortConfig.key];
-    const left = getValue(a);
-    const right = getValue(b);
-    const comparison = typeof left === 'number' && typeof right === 'number'
-      ? left - right
-      : String(left || '').localeCompare(String(right || ''), undefined, { numeric: true, sensitivity: 'base' });
-    return comparison * (sortConfig.direction === 'asc' ? 1 : -1);
-  });
+  const filteredSettlements = useMemo(() => {
+    return settlements.filter(s => {
+      const monthStr = formatMonthYear(s.monthYear) || '';
+      const grossStr = String(s.pgGrossCollection || 0);
+      const netStr = String(s.netReceivedByOwner || 0);
+      const notesStr = s.notes || '';
+      const sDate = s.createdAt ? formatDate(s.createdAt) : '';
+      const eDate = s.updatedAt ? formatDate(s.updatedAt) : '';
+
+      // 1. Text Search Box
+      const q = search.toLowerCase();
+      const matchesSearch = !search ||
+        monthStr.toLowerCase().includes(q) ||
+        grossStr.includes(q) ||
+        netStr.includes(q) ||
+        notesStr.toLowerCase().includes(q);
+
+      if (!matchesSearch) return false;
+
+      // 2. APEX Filters
+      for (const f of activeFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'month') fieldVal = monthStr;
+        else if (f.columnId === 'gross') fieldVal = grossStr;
+        else if (f.columnId === 'altaf') fieldVal = String(s.altafShare || 0);
+        else if (f.columnId === 'anand') fieldVal = String(s.anandShare || 0);
+        else if (f.columnId === 'bisleri') fieldVal = String(s.bisleriWaterShare || 0);
+        else if (f.columnId === 'deductions') fieldVal = String(s.totalOperatorDeductions || 0);
+        else if (f.columnId === 'net') fieldVal = netStr;
+        else if (f.columnId === 'rehan') fieldVal = String(s.rehanShare || 0);
+        else if (f.columnId === 'actualBank') fieldVal = String(s.actualBankReceived || 0);
+        else if (f.columnId === 'notes') fieldVal = notesStr;
+        else if (f.columnId === 'createdAt') fieldVal = sDate;
+        else if (f.columnId === 'updatedAt') fieldVal = eDate;
+
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
+      return true;
+    });
+  }, [settlements, search, activeFilters]);
+
+  const sortedSettlements = useMemo(() => {
+    return sortDataRows(filteredSettlements, sortConfig, {
+      month: s => s.monthYear,
+      gross: s => s.pgGrossCollection || 0,
+      altaf: s => s.altafShare || 0,
+      anand: s => s.anandShare || 0,
+      bisleri: s => s.bisleriWaterShare || 0,
+      deductions: s => s.totalOperatorDeductions || 0,
+      net: s => s.netReceivedByOwner || 0,
+      rehan: s => s.rehanShare || 0,
+      actualBank: s => s.actualBankReceived || 0,
+      difference: s => (s.actualBankReceived || 0) - (s.netReceivedByOwner || 0),
+      notes: s => s.notes || '',
+      createdAt: s => s.createdAt,
+      updatedAt: s => s.updatedAt
+    });
+  }, [filteredSettlements, sortConfig]);
+
+  // Export ONLY the filtered PG settlements
+  const exportToExcel = () => {
+    try {
+      const rows = sortedSettlements.map((s, idx) => ({
+        'Sr No': idx + 1,
+        'Month': formatMonthYear(s.monthYear),
+        'Gross Collection (₹)': s.pgGrossCollection || 0,
+        'Altaf Share (₹)': s.altafShare || 0,
+        'Anand Share (₹)': s.anandShare || 0,
+        'Bisleri Water (₹)': s.bisleriWaterShare || 0,
+        'Rehan Share (₹)': s.rehanShare || 0,
+        'Total Deductions (₹)': s.totalOperatorDeductions || 0,
+        'Net Received by Owner (₹)': s.netReceivedByOwner || 0,
+        'Actual Bank Received (₹)': s.actualBankReceived != null ? s.actualBankReceived : '',
+        'Bank Variance (₹)': s.actualBankReceived != null ? s.actualBankReceived - s.netReceivedByOwner : '',
+        'Notes': s.notes || '',
+        'Created Date': s.createdAt ? formatDate(s.createdAt) : '',
+        'Modified Date': s.updatedAt ? formatDate(s.updatedAt) : ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'PG_Settlements');
+      XLSX.writeFile(wb, `PG_Settlements_Filtered_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err) {
+      console.error('Failed to export PG settlements to Excel:', err);
+    }
+  };
+
+  // Pagination Slice
+  const totalItems = sortedSettlements.length;
+  const isAllRows = rowsPerPage === 'All';
+  const effectivePageSize = isAllRows ? totalItems || 1 : Number(rowsPerPage);
+  const totalPages = Math.ceil(totalItems / effectivePageSize) || 1;
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(1);
+  }, [totalPages, currentPage]);
+
+  const paginatedSettlements = useMemo(() => {
+    if (isAllRows) return sortedSettlements;
+    const startIndex = (currentPage - 1) * effectivePageSize;
+    return sortedSettlements.slice(startIndex, startIndex + effectivePageSize);
+  }, [sortedSettlements, isAllRows, currentPage, effectivePageSize]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Paying Guest (PG) Master & Settlement</h2>
-          <p className="text-sm text-slate-500">
-            Multi-occupant PG gross revenue tracking with operator deductions (Altaf, Anand, Bisleri water)
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingSettlement(null);
-            setForm({
-              monthYear: '2026-04',
-              pgGrossCollection: '81050',
-              altafShare: '22000',
-              anandShare: '10000',
-              bisleriWaterShare: '20250',
-              rehanShare: '0',
-              actualBankReceived: '',
-              notes: ''
-            });
-            setShowModal(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New PG Monthly Settlement</span>
-        </button>
-      </div>
-
-      {/* Settlements Table */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="font-bold text-slate-800 text-base">Historical PG Collections & Deductions</h3>
-          <div className="flex items-center gap-2">
-            <ColumnManager
-              columns={PG_COLUMNS_DEF}
-              visibleColumns={visibleColumns}
-              onChangeVisible={setVisibleColumns}
-              storageKey="pg_settlements"
-              onResetWidths={resetColumnWidths}
-            />
-            <button
-              type="button"
-              onClick={resetColumnWidths}
-              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
-              title="Reset column widths"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Reset Widths</span>
-            </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
+            <Users className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Paying Guest (PG) Master & Settlement</h2>
+            <p className="text-xs text-slate-500">
+              Multi-occupant PG gross revenue tracking with operator deductions (Altaf, Anand, Bisleri water)
+            </p>
           </div>
         </div>
-        <div className="overflow-x-auto">
+
+        <div className="text-xs text-slate-500 font-semibold px-2">
+          <b>{filteredSettlements.length}</b> Monthly Records
+        </div>
+      </div>
+
+      {/* Oracle APEX-Style Toolbar */}
+      <ApexToolbar
+        search={search}
+        onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+        availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+        columns={PG_COLUMNS_DEF}
+        visibleColumns={visibleColumns}
+        onChangeVisibleColumns={setVisibleColumns}
+        onResetWidths={resetColumnWidths}
+        isHeaderSticky={isHeaderSticky}
+        onToggleHeaderSticky={setIsHeaderSticky}
+        filters={activeFilters}
+        onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
+        filterSuggestions={filterSuggestions}
+        onExport={exportToExcel}
+        storageKey="pg_settlements"
+        activeViewName={activeViewId}
+        onViewChange={setActiveViewId}
+        primaryAction={
+          <button
+            onClick={() => {
+              setEditingSettlement(null);
+              setForm({
+                monthYear: '2026-04',
+                pgGrossCollection: '81050',
+                altafShare: '22000',
+                anandShare: '10000',
+                bisleriWaterShare: '20250',
+                rehanShare: '0',
+                actualBankReceived: '',
+                notes: ''
+              });
+              setShowModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>New PG Settlement</span>
+          </button>
+        }
+      />
+
+      {/* Settlements Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
           <table
             className="w-full text-left text-xs border-collapse table-fixed"
             style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_PG_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
@@ -219,53 +332,51 @@ export default function PGView() {
                 />
               ))}
             </colgroup>
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-500 uppercase font-extrabold select-none">
+            <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
+              <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200 select-none">
                 {visibleColumns.map((colId) => {
-                  const dragProps = getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'pg_settlements');
                   const width = columnWidths[colId] || DEFAULT_PG_COLUMN_WIDTHS[colId] || 100;
                   let align = 'text-left';
+                  if (colId === 'month' || colId === 'createdAt' || colId === 'updatedAt') align = 'text-center';
                   if (colId === 'actions') align = 'text-right';
-                  let label = colId;
-                  if (colId === 'month') label = 'Month';
-                  else if (colId === 'gross') label = 'Gross Collection';
-                  else if (colId === 'altaf') label = 'Altaf Share';
-                  else if (colId === 'anand') label = 'Anand Share';
-                  else if (colId === 'bisleri') label = 'Bisleri Water';
-                  else if (colId === 'deductions') label = 'Total Deductions';
-                  else if (colId === 'net') label = 'Net Received by Owner';
-                  else if (colId === 'rehan') label = 'Rehan Share';
-                  else if (colId === 'actualBank') label = 'Actual Bank Received';
-                  else if (colId === 'difference') label = 'Variance';
-                  else if (colId === 'notes') label = 'Notes';
-                  else if (colId === 'actions') label = 'Actions';
-                  else {
-                    const colDef = PG_COLUMNS_DEF.find(c => c.id === colId);
-                    if (colDef) label = colDef.label;
-                  }
+                  const colDef = PG_COLUMNS_DEF.find(c => c.id === colId);
+                  const label = colDef?.label || colId;
 
+                  const isSortable = colId !== 'actions';
                   return (
                     <th
                       key={colId}
-                      {...dragProps}
-                      style={{ width: `${width}px` }}
-                      className={`pb-3 pr-2 border-r border-slate-100 relative group ${align}`}
+                      {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'pg_settlements')}
+                      style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                      className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align}`}
                     >
-                      <button
-                        type="button"
-                        disabled={colId === 'actions'}
-                        onClick={() => colId !== 'actions' && setSortConfig((current) => ({
-                          key: colId,
-                          direction: current.key === colId
-                            ? (current.direction === 'asc' ? 'desc' : 'asc')
-                            : (colId === 'createdAt' ? 'desc' : 'asc')
-                        }))}
-                        className={`truncate flex items-center gap-1 pr-2 ${colId === 'actions' ? 'cursor-default' : 'cursor-pointer hover:text-emerald-700'}`}
-                        title={colId === 'actions' ? undefined : `Sort by ${label}`}
-                      >
-                        <span>{label}</span>
-                        {colId !== 'actions' && <ArrowUpDown className={`w-3 h-3 shrink-0 ${sortConfig.key === colId ? 'text-emerald-600' : 'text-slate-400'}`} />}
-                      </button>
+                      <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                        align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'
+                      }`}>
+                        {colId === 'actions' ? (
+                          <span className="truncate text-xs font-bold text-slate-700">{label}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleHeaderSort(colId)}
+                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                            title={`Sort by ${label} (Click: Descending → Ascending → Clear)`}
+                          >
+                            <span className="truncate">{label}</span>
+                            <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                              {sortConfig.key === colId ? (
+                                sortConfig.direction === 'desc' ? (
+                                  <span className="text-teal-600 font-extrabold text-[13px] leading-none">↓</span>
+                                ) : (
+                                  <span className="text-teal-600 font-extrabold text-[13px] leading-none">↑</span>
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                              )}
+                            </span>
+                          </button>
+                        )}
+                      </div>
                       <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                     </th>
                   );
@@ -273,14 +384,16 @@ export default function PGView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {settlements.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={visibleColumns.length} className="py-8 text-center text-slate-400">Loading settlements...</td></tr>
+              ) : filteredSettlements.length === 0 ? (
                 <tr>
                   <td colSpan={visibleColumns.length} className="py-8 text-center text-slate-400">
-                    No PG settlements recorded yet.
+                    No PG settlements found matching your filters.
                   </td>
                 </tr>
               ) : (
-                sortedSettlements.map((s) => {
+                paginatedSettlements.map((s) => {
                   const actualBank = s.actualBankReceived != null ? Number(s.actualBankReceived) : null;
                   const variance = actualBank != null ? actualBank - Number(s.netReceivedByOwner || 0) : null;
 
@@ -400,6 +513,49 @@ export default function PGView() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {totalItems > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-50/80 border-t border-slate-200 text-xs text-slate-500 font-semibold select-none">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing {isAllRows ? 'all' : Math.min((currentPage - 1) * effectivePageSize + 1, totalItems)} to{' '}
+                {isAllRows ? totalItems : Math.min(currentPage * effectivePageSize, totalItems)} of {totalItems} settlements
+              </span>
+              {activeFilters.length > 0 && (
+                <span className="text-teal-700 font-bold bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
+                  (Filtered from {settlements.length} total)
+                </span>
+              )}
+            </div>
+
+            {!isAllRows && totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Previous page"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-800 font-bold">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Next page"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* New / Edit Settlement Modal */}

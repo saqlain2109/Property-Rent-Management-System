@@ -23,7 +23,8 @@ export default function ApexToolbar({
   storageKey = 'default_grid',
   activeViewName,
   onViewChange,
-  primaryAction
+  primaryAction,
+  filterSuggestions = {} // { [columnId]: ['Value1', 'Value2'] }
 }) {
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [activeSubMenu, setActiveSubMenu] = useState(null); // 'columns' | 'filter' | 'report'
@@ -34,6 +35,7 @@ export default function ApexToolbar({
   // Filter Builder Dialog state
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filterDraft, setFilterDraft] = useState([]);
+  const [manualInputMap, setManualInputMap] = useState({});
 
   // Load Saved Views from localStorage
   useEffect(() => {
@@ -124,22 +126,30 @@ export default function ApexToolbar({
   };
 
   const openFilterModal = () => {
+    const firstCol = columns.find(c => c.id !== 'actions') || columns[0];
     setFilterDraft(filters.length > 0 ? [...filters] : [{
       id: 'f_' + Date.now(),
-      columnId: columns[0]?.id || '',
+      columnId: firstCol?.id || '',
       operator: 'contains',
       value: ''
     }]);
+    setManualInputMap({});
     setShowFilterModal(true);
     setShowActionsMenu(false);
     setActiveSubMenu(null);
   };
 
   const handleApplyFilters = () => {
-    const valid = filterDraft.filter(f => f.columnId && f.value.trim() !== '');
+    const valid = filterDraft.filter(f => {
+      if (!f.columnId) return false;
+      if (f.operator === 'is_empty' || f.operator === 'is_not_empty') return true;
+      return f.value !== undefined && f.value !== null && String(f.value).trim() !== '';
+    });
     onFiltersChange?.(valid);
     setShowFilterModal(false);
   };
+
+  const filterableColumns = columns.filter(c => c.id !== 'actions');
 
   return (
     <div className="space-y-3">
@@ -204,7 +214,7 @@ export default function ApexToolbar({
 
             {/* APEX Context Menu */}
             {showActionsMenu && (
-              <div className="absolute left-0 top-full mt-1.5 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute left-0 top-full mt-1.5 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
                 {/* 1. Columns Submenu Trigger */}
                 <button
                   type="button"
@@ -442,16 +452,33 @@ export default function ApexToolbar({
           </span>
           {filters.map(f => {
             const col = columns.find(c => c.id === f.columnId);
+            const isUnary = f.operator === 'is_empty' || f.operator === 'is_not_empty';
+            const operatorLabels = {
+              contains: 'contains',
+              does_not_contain: 'does not contain',
+              equals: '=',
+              not_equals: '≠',
+              starts_with: 'starts with',
+              ends_with: 'ends with',
+              greater_than: '>',
+              greater_than_or_equal: '≥',
+              less_than: '<',
+              less_than_or_equal: '≤',
+              is_empty: 'is empty',
+              is_not_empty: 'is not empty'
+            };
             return (
               <span
                 key={f.id}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50 border border-teal-200 text-teal-900 text-xs font-semibold animate-in fade-in"
               >
                 <span className="text-teal-700 font-bold">{col?.label || f.columnId}</span>
-                <span className="text-teal-600 font-mono text-[11px]">{f.operator}</span>
-                <span className="bg-white px-1.5 py-0.2 rounded text-slate-800 font-bold border border-teal-200/60">
-                  "{f.value}"
-                </span>
+                <span className="text-teal-600 font-mono text-[11px]">{operatorLabels[f.operator] || f.operator}</span>
+                {!isUnary && (
+                  <span className="bg-white px-1.5 py-0.2 rounded text-slate-800 font-bold border border-teal-200/60">
+                    "{f.value}"
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => onFiltersChange(filters.filter(item => item.id !== f.id))}
@@ -472,10 +499,10 @@ export default function ApexToolbar({
         </div>
       )}
 
-      {/* APEX-style Filter Modal */}
+      {/* APEX-style Filter Modal with Value Dropdown & Condition Builder */}
       {showFilterModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-teal-600" />
@@ -490,75 +517,145 @@ export default function ApexToolbar({
             </div>
 
             <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-              {filterDraft.map((f, idx) => (
-                <div key={f.id} className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                  {/* Column Picker */}
-                  <select
-                    value={f.columnId}
-                    onChange={(e) => {
-                      const updated = [...filterDraft];
-                      updated[idx].columnId = e.target.value;
-                      setFilterDraft(updated);
-                    }}
-                    className="w-1/3 px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  >
-                    {columns.map(col => (
-                      <option key={col.id} value={col.id}>{col.label}</option>
-                    ))}
-                  </select>
+              {filterDraft.map((f, idx) => {
+                const suggestions = filterSuggestions[f.columnId] || [];
+                const isUnary = f.operator === 'is_empty' || f.operator === 'is_not_empty';
+                const isManual = manualInputMap[f.id] || suggestions.length === 0;
 
-                  {/* Operator */}
-                  <select
-                    value={f.operator}
-                    onChange={(e) => {
-                      const updated = [...filterDraft];
-                      updated[idx].operator = e.target.value;
-                      setFilterDraft(updated);
-                    }}
-                    className="w-1/4 px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  >
-                    <option value="contains">contains</option>
-                    <option value="equals">=</option>
-                    <option value="starts_with">starts with</option>
-                    <option value="greater_than">&gt;</option>
-                    <option value="less_than">&lt;</option>
-                  </select>
+                return (
+                  <div key={f.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                    {/* Column Picker */}
+                    <select
+                      value={f.columnId}
+                      onChange={(e) => {
+                        const updated = [...filterDraft];
+                        updated[idx].columnId = e.target.value;
+                        updated[idx].value = ''; // Reset value when column changes
+                        setFilterDraft(updated);
+                        // Reset manual mode if suggestions exist for the new column
+                        const newSuggestions = filterSuggestions[e.target.value] || [];
+                        setManualInputMap(prev => ({ ...prev, [f.id]: newSuggestions.length === 0 }));
+                      }}
+                      className="w-full sm:w-1/3 px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    >
+                      {filterableColumns.map(col => (
+                        <option key={col.id} value={col.id}>{col.label}</option>
+                      ))}
+                    </select>
 
-                  {/* Value */}
-                  <input
-                    type="text"
-                    placeholder="Value..."
-                    value={f.value}
-                    onChange={(e) => {
-                      const updated = [...filterDraft];
-                      updated[idx].value = e.target.value;
-                      setFilterDraft(updated);
-                    }}
-                    className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  />
+                    {/* Operator */}
+                    <select
+                      value={f.operator}
+                      onChange={(e) => {
+                        const updated = [...filterDraft];
+                        updated[idx].operator = e.target.value;
+                        setFilterDraft(updated);
+                      }}
+                      className="w-full sm:w-1/4 px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                    >
+                      <option value="contains">contains</option>
+                      <option value="does_not_contain">does not contain</option>
+                      <option value="equals">=</option>
+                      <option value="not_equals">≠</option>
+                      <option value="starts_with">starts with</option>
+                      <option value="ends_with">ends with</option>
+                      <option value="greater_than">&gt;</option>
+                      <option value="greater_than_or_equal">≥</option>
+                      <option value="less_than">&lt;</option>
+                      <option value="less_than_or_equal">≤</option>
+                      <option value="is_empty">is empty / null</option>
+                      <option value="is_not_empty">is not empty / filled</option>
+                    </select>
 
-                  {/* Delete row */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (filterDraft.length <= 1) {
-                        setFilterDraft([{ id: 'f_' + Date.now(), columnId: columns[0]?.id || '', operator: 'contains', value: '' }]);
-                      } else {
-                        setFilterDraft(filterDraft.filter((_, i) => i !== idx));
-                      }
-                    }}
-                    className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                    {/* Value Field with Dropdown (Suggestions) OR Free Text Input */}
+                    <div className="flex-1 relative">
+                      {isUnary ? (
+                        <div className="px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 text-slate-400 italic font-medium">
+                          (No value needed)
+                        </div>
+                      ) : !isManual ? (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={suggestions.includes(f.value) ? f.value : (f.value ? '__custom__' : '')}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '__custom__') {
+                                setManualInputMap(prev => ({ ...prev, [f.id]: true }));
+                              } else {
+                                const updated = [...filterDraft];
+                                updated[idx].value = val;
+                                setFilterDraft(updated);
+                              }
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                          >
+                            <option value="">-- Choose from existing values ({suggestions.length}) --</option>
+                            {suggestions.map((val, i) => (
+                              <option key={i} value={val}>{val}</option>
+                            ))}
+                            <option value="__custom__">✏️ Type custom text...</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            list={`suggestions_${f.columnId}`}
+                            placeholder="Type value..."
+                            value={f.value}
+                            onChange={(e) => {
+                              const updated = [...filterDraft];
+                              updated[idx].value = e.target.value;
+                              setFilterDraft(updated);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                            autoFocus={isManual && suggestions.length > 0}
+                          />
+                          {suggestions.length > 0 && (
+                            <>
+                              <datalist id={`suggestions_${f.columnId}`}>
+                                {suggestions.map((val, i) => (
+                                  <option key={i} value={val} />
+                                ))}
+                              </datalist>
+                              <button
+                                type="button"
+                                onClick={() => setManualInputMap(prev => ({ ...prev, [f.id]: false }))}
+                                className="px-2 py-1 text-[10px] font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 rounded border border-teal-200 shrink-0"
+                                title="Switch back to dropdown list"
+                              >
+                                List
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Delete row */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (filterDraft.length <= 1) {
+                          setFilterDraft([{ id: 'f_' + Date.now(), columnId: filterableColumns[0]?.id || '', operator: 'contains', value: '' }]);
+                        } else {
+                          setFilterDraft(filterDraft.filter((_, i) => i !== idx));
+                        }
+                      }}
+                      className="self-end sm:self-center p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      title="Remove filter rule"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
 
               <button
                 type="button"
                 onClick={() => setFilterDraft([...filterDraft, {
                   id: 'f_' + Date.now(),
-                  columnId: columns[0]?.id || '',
+                  columnId: filterableColumns[0]?.id || '',
                   operator: 'contains',
                   value: ''
                 }])}

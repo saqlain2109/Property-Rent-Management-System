@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import * as XLSX from 'xlsx';
 import SearchableSelect from '../components/SearchableSelect';
-import { Layers, Plus, Search, Download, Edit, Trash2, RotateCcw, ArrowUpDown } from 'lucide-react';
+import ApexToolbar from '../components/ApexToolbar';
+import { Layers, Plus, Search, Download, Edit, Trash2, RotateCcw, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 
 const PARTITIONS_COLUMNS_DEF = [
   { id: 'property', label: 'Main Property' },
@@ -32,7 +34,9 @@ const DEFAULT_PARTITIONS_COLUMN_WIDTHS = {
   rent: 95,
   actions: 100,
   area: 90,
-  notes: 140
+  notes: 140,
+  createdAt: 110,
+  updatedAt: 110
 };
 
 export default function PartitionsView({ initialPropertyFilter, initialSearch = '', onClearPropertyFilter, onDataChanged }) {
@@ -43,6 +47,26 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState(initialPropertyFilter || '');
   const [occupancyFilter, setOccupancyFilter] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [activeViewId, setActiveViewId] = useState(null);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Suggestions for APEX filter builder dropdown
+  const filterSuggestions = useMemo(() => {
+    return {
+      property: extractUniqueValues(units, u => u.propertyId?.name),
+      partition: extractUniqueValues(units, u => u.subUnitPartition || u.unitName),
+      status: ['Vacant', 'Occupied', 'Maintenance', 'Under Notice'],
+      tenant: extractUniqueValues(units, u => u.currentTenant?.name)
+    };
+  }, [units]);
+
+  const handleHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_partitions');
@@ -187,171 +211,190 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
     }
   };
 
-  const exportToExcel = () => {
-    const rows = filteredUnits.map((u, idx) => ({
-      'Sr No': idx + 1,
-      'Property': u.propertyId?.name || '',
-      'Sub Unit (Partition)': u.subUnitPartition || u.unitName,
-      'Partition Area (Sq Ft)': u.areaSqFt || 0,
-      'Floor': u.floor || '',
-      'Status': u.occupancyStatus,
-      'Current Tenant': u.currentTenant ? u.currentTenant.name : 'Vacant',
-      'Monthly Rent Rate': u.currentRentAgreement ? u.currentRentAgreement.monthlyRate : 0,
-      'Notes': u.notes || ''
-    }));
+  const filteredUnits = useMemo(() => {
+    return units.filter(u => {
+      const pName = u.propertyId?.name || '';
+      const partName = u.subUnitPartition || u.unitName || '';
+      const area = String(u.areaSqFt || 0);
+      const floor = u.floor || u.unitType || '';
+      const status = u.occupancyStatus || 'Vacant';
+      const tenant = u.currentTenant?.name || '';
+      const rent = String(u.currentRentAgreement?.monthlyRate ?? u.monthlyRentExpected ?? '');
+      const notes = u.notes || '';
+      const sDate = u.createdAt ? formatDate(u.createdAt) : '';
+      const eDate = u.updatedAt ? formatDate(u.updatedAt) : '';
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Partitions');
-    XLSX.writeFile(wb, `Partitions_Master_${new Date().toISOString().split('T')[0]}.xlsx`);
+      // 1. Text Search Box
+      const q = search.toLowerCase();
+      const matchesSearch = !search ||
+        partName.toLowerCase().includes(q) ||
+        pName.toLowerCase().includes(q) ||
+        tenant.toLowerCase().includes(q) ||
+        rent.includes(q);
+
+      // 2. Property & Status Quick Filters
+      const matchesProp = !selectedPropertyFilter || (u.propertyId?._id === selectedPropertyFilter || u.propertyId === selectedPropertyFilter);
+      const matchesOccupancy = !occupancyFilter || status === occupancyFilter;
+
+      if (!matchesSearch || !matchesProp || !matchesOccupancy) return false;
+
+      // 3. APEX Filters
+      for (const f of activeFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'property') fieldVal = pName;
+        else if (f.columnId === 'partition') fieldVal = partName;
+        else if (f.columnId === 'area') fieldVal = area;
+        else if (f.columnId === 'floor') fieldVal = floor;
+        else if (f.columnId === 'status') fieldVal = status;
+        else if (f.columnId === 'tenant') fieldVal = tenant;
+        else if (f.columnId === 'rent') fieldVal = rent;
+        else if (f.columnId === 'notes') fieldVal = notes;
+        else if (f.columnId === 'createdAt') fieldVal = sDate;
+        else if (f.columnId === 'updatedAt') fieldVal = eDate;
+
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
+      return true;
+    });
+  }, [units, search, selectedPropertyFilter, occupancyFilter, activeFilters]);
+
+  const sortedUnits = useMemo(() => {
+    return sortDataRows(filteredUnits, sortConfig, {
+      property: u => u.propertyId?.name,
+      partition: u => u.subUnitPartition || u.unitName,
+      area: u => u.areaSqFt || 0,
+      floor: u => u.floor || u.unitType || '',
+      status: u => u.occupancyStatus || 'Vacant',
+      tenant: u => u.currentTenant?.name || '',
+      rent: u => u.currentRentAgreement?.monthlyRate ?? u.monthlyRentExpected ?? 0,
+      notes: u => u.notes || '',
+      createdAt: u => u.createdAt,
+      updatedAt: u => u.updatedAt
+    });
+  }, [filteredUnits, sortConfig]);
+
+  // Export ONLY the filtered partitions
+  const exportToExcel = () => {
+    try {
+      const rows = sortedUnits.map((u, idx) => ({
+        'Sr No': idx + 1,
+        'Property': u.propertyId?.name || '',
+        'Sub Unit (Partition)': u.subUnitPartition || u.unitName,
+        'Partition Area (Sq Ft)': u.areaSqFt || 0,
+        'Floor': u.floor || '',
+        'Status': u.occupancyStatus || 'Vacant',
+        'Current Tenant': u.currentTenant ? u.currentTenant.name : 'Vacant',
+        'Monthly Rent Rate (₹)': u.currentRentAgreement ? u.currentRentAgreement.monthlyRate : (u.monthlyRentExpected || 0),
+        'Notes': u.notes || '',
+        'Created Date': u.createdAt ? formatDate(u.createdAt) : '',
+        'Modified Date': u.updatedAt ? formatDate(u.updatedAt) : ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Partitions');
+      XLSX.writeFile(wb, `Partitions_Filtered_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (err) {
+      console.error('Failed to export partitions to Excel:', err);
+    }
   };
 
-  const filteredUnits = units.filter(u => {
-    const matchesProp = !selectedPropertyFilter || (u.propertyId?._id === selectedPropertyFilter || u.propertyId === selectedPropertyFilter);
-    const matchesOccupancy = !occupancyFilter || (u.occupancyStatus || 'Vacant') === occupancyFilter;
-    const q = search.toLowerCase();
-    const matchesSearch = 
-      (u.subUnitPartition || '').toLowerCase().includes(q) ||
-      (u.unitName || '').toLowerCase().includes(q) ||
-      (u.propertyId?.name || '').toLowerCase().includes(q) ||
-      (u.currentTenant?.name || '').toLowerCase().includes(q);
-    return matchesProp && matchesOccupancy && matchesSearch;
-  });
-  const sortedUnits = [...filteredUnits].sort((a, b) => {
-    const getValue = (unit) => ({
-      property: unit.propertyId?.name,
-      partition: unit.subUnitPartition || unit.unitName,
-      area: unit.areaSqFt,
-      floor: unit.floor || unit.unitType,
-      status: unit.occupancyStatus,
-      tenant: unit.currentTenant?.name,
-      rent: unit.currentRentAgreement?.monthlyRate ?? unit.monthlyRentExpected,
-      notes: unit.notes,
-      createdAt: unit.createdAt,
-      updatedAt: unit.updatedAt,
-    })[sortConfig.key];
-    const left = getValue(a);
-    const right = getValue(b);
-    const comparison = typeof left === 'number' && typeof right === 'number'
-      ? left - right
-      : String(left || '').localeCompare(String(right || ''), undefined, { numeric: true, sensitivity: 'base' });
-    return comparison * (sortConfig.direction === 'asc' ? 1 : -1);
-  });
+  // Pagination Slice
+  const totalItems = sortedUnits.length;
+  const isAllRows = rowsPerPage === 'All';
+  const effectivePageSize = isAllRows ? totalItems || 1 : Number(rowsPerPage);
+  const totalPages = Math.ceil(totalItems / effectivePageSize) || 1;
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(1);
+  }, [totalPages, currentPage]);
+
+  const paginatedUnits = useMemo(() => {
+    if (isAllRows) return sortedUnits;
+    const startIndex = (currentPage - 1) * effectivePageSize;
+    return sortedUnits.slice(startIndex, startIndex + effectivePageSize);
+  }, [sortedUnits, isAllRows, currentPage, effectivePageSize]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-            <Layers className="w-5 h-5 text-emerald-600" />
-            <span>Property-Unit (Partitions) Master</span>
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Dedicated master for sub-units and partitions with individual area (sq ft) and occupancy status
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Property-Unit (Partitions) Master</h2>
+            <p className="text-xs text-slate-500">
+              Dedicated master for sub-units and partitions with individual area (sq ft) and occupancy status
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2.5">
-          <ColumnManager
-            columns={PARTITIONS_COLUMNS_DEF}
-            visibleColumns={visibleColumns}
-            onChangeVisible={setVisibleColumns}
-            storageKey="partitions"
-            onResetWidths={resetColumnWidths}
-          />
-          <button
-            type="button"
-            onClick={resetColumnWidths}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
-            title="Reset column widths"
+
+        {/* Quick Filter Selects */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedPropertyFilter}
+            onChange={(e) => { setSelectedPropertyFilter(e.target.value); setCurrentPage(1); }}
+            className="w-44 sm:w-52 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Reset Widths</span>
-          </button>
-          <button
-            onClick={exportToExcel}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
+            <option value="">All Properties ({properties.length})</option>
+            {properties.map(p => (
+              <option key={p._id} value={p._id}>{p.name}</option>
+            ))}
+          </select>
+          <select
+            value={occupancyFilter}
+            onChange={(e) => { setOccupancyFilter(e.target.value); setCurrentPage(1); }}
+            className="w-36 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
-            <Download className="w-4 h-4 text-emerald-600" />
-            <span>Export to Excel</span>
-          </button>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Sub Unit / Partition</span>
-          </button>
+            <option value="">All statuses</option>
+            <option value="Vacant">Vacant</option>
+            <option value="Occupied">Occupied</option>
+            <option value="Maintenance">Maintenance</option>
+            <option value="Under Notice">Under Notice</option>
+          </select>
+          <div className="text-xs text-slate-500 font-medium px-2">
+            <b>{filteredUnits.length}</b> Partitions
+          </div>
         </div>
       </div>
 
+      {/* Oracle APEX-Style Toolbar */}
+      <ApexToolbar
+        search={search}
+        onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+        availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+        columns={PARTITIONS_COLUMNS_DEF}
+        visibleColumns={visibleColumns}
+        onChangeVisibleColumns={setVisibleColumns}
+        onResetWidths={resetColumnWidths}
+        isHeaderSticky={isHeaderSticky}
+        onToggleHeaderSticky={setIsHeaderSticky}
+        filters={activeFilters}
+        onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
+        filterSuggestions={filterSuggestions}
+        onExport={exportToExcel}
+        storageKey="partitions"
+        activeViewName={activeViewId}
+        onViewChange={setActiveViewId}
+        primaryAction={
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Partition</span>
+          </button>
+        }
+      />
+
       {/* Excel-Style Grid Card */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* Filters Bar */}
-        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/50">
-          <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto flex-1">
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search partition name, tenant..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <select
-              value={selectedPropertyFilter}
-              onChange={(e) => setSelectedPropertyFilter(e.target.value)}
-              className="w-full sm:w-60 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-700"
-            >
-              <option value="">All Properties ({properties.length})</option>
-              {properties.map(p => (
-                <option key={p._id} value={p._id}>{p.name}</option>
-              ))}
-            </select>
-            <select
-              value={occupancyFilter}
-              onChange={(e) => setOccupancyFilter(e.target.value)}
-              className="w-full sm:w-44 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-700"
-            >
-              <option value="">All statuses</option>
-              <option value="Vacant">Vacant</option>
-              <option value="Occupied">Occupied</option>
-              <option value="Maintenance">Maintenance</option>
-              <option value="Under Notice">Under Notice</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-4 text-xs text-slate-500">
-            <span>Partitions: <b className="text-slate-800">{filteredUnits.length}</b></span>
-            <span>Total Partition Area: <b className="text-slate-800">{filteredUnits.reduce((acc, u) => acc + (u.areaSqFt || 0), 0).toLocaleString('en-IN')} sq ft</b></span>
-          </div>
-        </div>
-
-        {/* Active Property Filter Banner */}
-        {selectedPropertyFilter && (
-          <div className="flex items-center justify-between px-4 py-2.5 bg-emerald-50 border-b border-emerald-200 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-emerald-800">Filtered by Property:</span>
-              <strong className="text-emerald-950 font-bold bg-emerald-200/70 px-2 py-0.5 rounded-md">
-                {properties.find(p => p._id === selectedPropertyFilter)?.name || 'Selected Property'}
-              </strong>
-              <span className="text-emerald-700">({filteredUnits.length} partitions)</span>
-            </div>
-            <button
-              onClick={() => {
-                setSelectedPropertyFilter('');
-                if (onClearPropertyFilter) onClearPropertyFilter();
-              }}
-              className="text-xs font-bold text-emerald-800 hover:text-emerald-950 underline px-2 py-1 rounded hover:bg-emerald-100 transition-colors cursor-pointer"
-            >
-              Clear Filter (Show All Properties)
-            </button>
-          </div>
-        )}
-
-        {/* Excel Table */}
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
           <table
             className="w-full text-left text-xs border-collapse table-fixed"
             style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_PARTITIONS_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
@@ -364,14 +407,14 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
                 />
               ))}
             </colgroup>
-            <thead>
-              <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200 select-none">
+            <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
+              <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200 select-none">
                 {visibleColumns.map(colId => {
                   const def = PARTITIONS_COLUMNS_DEF.find(c => c.id === colId);
                   if (!def) return null;
                   const width = columnWidths[colId] || DEFAULT_PARTITIONS_COLUMN_WIDTHS[colId] || 100;
                   let alignClass = 'text-left';
-                  if (colId === 'status') alignClass = 'text-center';
+                  if (['status', 'createdAt', 'updatedAt'].includes(colId)) alignClass = 'text-center';
                   if (['area', 'rent', 'actions'].includes(colId)) alignClass = 'text-right';
 
                   const isSortable = colId !== 'actions';
@@ -379,24 +422,36 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
                     <th 
                       key={colId} 
                       {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'partitions')}
-                      style={{ width: `${width}px` }}
-                      className={`py-3 px-4 border-r border-slate-200 relative group ${alignClass}`}
+                      style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                      className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${alignClass}`}
                     >
-                      <button
-                        type="button"
-                        disabled={!isSortable}
-                        onClick={() => isSortable && setSortConfig((current) => ({
-                          key: colId,
-                          direction: current.key === colId
-                            ? (current.direction === 'asc' ? 'desc' : 'asc')
-                            : (colId === 'createdAt' ? 'desc' : 'asc')
-                        }))}
-                        className={`truncate flex items-center gap-1 pr-2 ${isSortable ? 'cursor-pointer hover:text-emerald-700' : 'cursor-default'}`}
-                        title={isSortable ? `Sort by ${def.label}` : undefined}
-                      >
-                        <span>{def.label}</span>
-                        {isSortable && <ArrowUpDown className={`w-3 h-3 shrink-0 ${sortConfig.key === colId ? 'text-emerald-600' : 'text-slate-400'}`} />}
-                      </button>
+                      <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                        alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'
+                      }`}>
+                        {colId === 'actions' ? (
+                          <span className="truncate text-xs font-bold text-slate-700">{def.label}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleHeaderSort(colId)}
+                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                            title={`Sort by ${def.label} (Click: Descending → Ascending → Clear)`}
+                          >
+                            <span className="truncate">{def.label}</span>
+                            <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                              {sortConfig.key === colId ? (
+                                sortConfig.direction === 'desc' ? (
+                                  <span className="text-teal-600 font-extrabold text-[13px] leading-none">↓</span>
+                                ) : (
+                                  <span className="text-teal-600 font-extrabold text-[13px] leading-none">↑</span>
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                              )}
+                            </span>
+                          </button>
+                        )}
+                      </div>
                       <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                     </th>
                   );
@@ -409,11 +464,11 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
               ) : filteredUnits.length === 0 ? (
                 <tr>
                   <td colSpan={visibleColumns.length} className="py-8 text-center text-slate-400">
-                    No sub-units or partitions found
+                    No sub-units or partitions found matching your filters.
                   </td>
                 </tr>
               ) : (
-                sortedUnits.map((u) => (
+                paginatedUnits.map((u) => (
                   <tr key={u._id} className="hover:bg-emerald-50/30 transition-colors">
                     {visibleColumns.map(colId => {
                       if (colId === 'property') {
@@ -528,6 +583,49 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {totalItems > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-50/80 border-t border-slate-200 text-xs text-slate-500 font-semibold select-none">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing {isAllRows ? 'all' : Math.min((currentPage - 1) * effectivePageSize + 1, totalItems)} to{' '}
+                {isAllRows ? totalItems : Math.min(currentPage * effectivePageSize, totalItems)} of {totalItems} partitions
+              </span>
+              {activeFilters.length > 0 && (
+                <span className="text-teal-700 font-bold bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
+                  (Filtered from {units.length} total)
+                </span>
+              )}
+            </div>
+
+            {!isAllRows && totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Previous page"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-800 font-bold">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Next page"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Add / Edit Modal */}

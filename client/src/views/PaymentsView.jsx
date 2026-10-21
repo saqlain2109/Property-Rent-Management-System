@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import ApexToolbar from '../components/ApexToolbar';
+import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
 import { 
   Receipt, Plus, Search, AlertCircle, 
   RotateCcw, CheckCircle2, Eye, Sparkles, Clock, X,
   Edit2, Filter, Layers, ListFilter, Trash2,
   Calendar, ChevronLeft, ChevronRight, Download, Check,
-  IndianRupee, ArrowRight, ChevronDown
+  IndianRupee, ArrowRight, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 
 const RENT_SHEET_COLUMNS_DEF = [
@@ -158,6 +160,57 @@ export default function PaymentsView() {
   const [receiptModeFilter, setReceiptModeFilter] = useState('');
   const [receiptSelectedMonths, setReceiptSelectedMonths] = useState([]); // array of 'YYYY-MM'
   const [showReceiptMonthPicker, setShowReceiptMonthPicker] = useState(false);
+
+  // Sheet Toolbar & Table State
+  const [sheetFilters, setSheetFilters] = useState([]);
+  const [sheetSortConfig, setSheetSortConfig] = useState({ key: null, direction: null });
+  const [isSheetHeaderSticky, setIsSheetHeaderSticky] = useState(true);
+  const [sheetRowsPerPage, setSheetRowsPerPage] = useState('All');
+  const [sheetCurrentPage, setSheetCurrentPage] = useState(1);
+  const [sheetActiveViewId, setSheetActiveViewId] = useState(null);
+
+  // Receipts Toolbar & Table State
+  const [receiptActiveFilters, setReceiptActiveFilters] = useState([]);
+  const [receiptSortConfig, setReceiptSortConfig] = useState({ key: 'receiptDate', direction: 'desc' });
+  const [isReceiptsHeaderSticky, setIsReceiptsHeaderSticky] = useState(true);
+  const [receiptRowsPerPage, setReceiptRowsPerPage] = useState(25);
+  const [receiptCurrentPage, setReceiptCurrentPage] = useState(1);
+  const [receiptActiveViewId, setReceiptActiveViewId] = useState(null);
+
+  const handleSheetHeaderSort = (colId) => {
+    if (['actions', 'paidForMonth', 'amount'].includes(colId)) return;
+    setSheetSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
+
+  const handleReceiptHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setReceiptSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
+
+  const sheetFilterSuggestions = React.useMemo(() => {
+    return {
+      tenant: extractUniqueValues(outstandingData, d => d.tenant?.name),
+      property: extractUniqueValues(outstandingData, d => d.property?.name),
+      subUnit: extractUniqueValues(outstandingData, d => d.unit?.subUnitPartition || d.unit?.unitName),
+      tenantPhone: extractUniqueValues(outstandingData, d => d.tenant?.phone),
+      floor: extractUniqueValues(outstandingData, d => d.unit?.floor),
+      paidUpTo: extractUniqueValues(outstandingData, d => d.paidTillMonth && d.paidTillMonth !== 'None' ? formatMonthYear(d.paidTillMonth) : 'None'),
+      nextUnpaid: extractUniqueValues(outstandingData, d => d.nextUnpaidMonth && d.nextUnpaidMonth !== 'Up to date' ? formatMonthYear(d.nextUnpaidMonth) : 'Up to date')
+    };
+  }, [outstandingData]);
+
+  const receiptFilterSuggestions = React.useMemo(() => {
+    return {
+      tenant: extractUniqueValues(receipts, r => r.tenantId?.name),
+      propertyName: extractUniqueValues(receipts, r => r.unitId?.propertyId?.name),
+      subUnitName: extractUniqueValues(receipts, r => r.unitId?.subUnitPartition || r.unitId?.unitName),
+      paymentMode: ['Cash', 'UPI', 'Bank Transfer', 'Cheque'],
+      bankName: extractUniqueValues(receipts, r => r.bankName),
+      referenceNumber: extractUniqueValues(receipts, r => r.referenceNumber),
+      monthsCovered: extractUniqueValues(receipts, r => r.monthsCovered),
+      receiptDate: extractUniqueValues(receipts, r => formatDate(r.receiptDate))
+    };
+  }, [receipts]);
 
   // Modals
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -837,34 +890,6 @@ export default function PaymentsView() {
     }
   };
 
-  // Excel Export of the Monthly Grid
-  const exportSheetToExcel = () => {
-    const exportRows = filteredOut.map((item, idx) => {
-      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-      const monthlyExpected = monthData ? monthData.expectedRate : (item.unit?.monthlyRentExpected || 0);
-      const paidThisMonth = monthData ? monthData.allocatedAmount : 0;
-      const outstandingThroughMonth = item.totalOutstanding || 0;
-
-      return {
-        '#': idx + 1,
-        'Tenant Details': item.tenant?.name || 'Unknown',
-        'Phone': item.tenant?.phone || '—',
-        'Property': item.property?.name || '—',
-        'Sub-Unit': item.unit?.subUnitPartition || item.unit?.unitName || '—',
-        'Monthly Rent': monthlyExpected,
-        'Outstanding due': outstandingThroughMonth,
-        'Paid Up To': item.paidTillMonth && item.paidTillMonth !== 'None' ? formatMonthYear(item.paidTillMonth) : 'None',
-        'Paid for Month': formatMonthYear(selectedMonth),
-        'Amount Paid': paidThisMonth
-      };
-    });
-
-    const ws = XLSX.utils.json_to_sheet(exportRows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `Rent_${selectedMonth}`);
-    XLSX.writeFile(wb, `Rent_Collection_Sheet_${selectedMonth}.xlsx`);
-  };
-
   // Distinct months present across all payment receipts for multi-month filtering
   const availableReceiptMonths = React.useMemo(() => {
     const monthSet = new Set();
@@ -885,17 +910,29 @@ export default function PaymentsView() {
   // Filtered Receipts for Receipts Register
   const filteredReceipts = React.useMemo(() => {
     return receipts.filter(r => {
+      const tenantName = r.tenantId?.name || '';
+      const tenantPhone = r.tenantId?.phone || '';
+      const propName = r.unitId?.propertyId?.name || '';
+      const unitName = r.unitId?.subUnitPartition || r.unitId?.unitName || '';
+      const refMatch = r.referenceNumber || '';
+      const notesMatch = r.comments || '';
+      const bankMatch = r.bankName || '';
+      const modeMatch = r.paymentMode || 'Cash';
+      const rDate = r.receiptDate ? formatDate(r.receiptDate) : '';
+      const months = r.monthsCovered || '';
+      const amount = String(r.totalAmount || 0);
+
       // 1. Search Query
       if (receiptSearch) {
         const q = receiptSearch.toLowerCase();
-        const tenantMatch = r.tenantId?.name?.toLowerCase().includes(q) || r.tenantId?.phone?.includes(q);
-        const propMatch = r.unitId?.propertyId?.name?.toLowerCase().includes(q);
-        const unitMatch = (r.unitId?.subUnitPartition || r.unitId?.unitName || '').toLowerCase().includes(q);
-        const refMatch = r.referenceNumber?.toLowerCase().includes(q);
-        const notesMatch = r.comments?.toLowerCase().includes(q);
-        const bankMatch = r.bankName?.toLowerCase().includes(q);
-        const modeMatch = r.paymentMode?.toLowerCase().includes(q);
-        if (!tenantMatch && !propMatch && !unitMatch && !refMatch && !notesMatch && !bankMatch && !modeMatch) {
+        const tMatch = tenantName.toLowerCase().includes(q) || tenantPhone.includes(q);
+        const pMatch = propName.toLowerCase().includes(q);
+        const uMatch = unitName.toLowerCase().includes(q);
+        const rfMatch = refMatch.toLowerCase().includes(q);
+        const nMatch = notesMatch.toLowerCase().includes(q);
+        const bMatch = bankMatch.toLowerCase().includes(q);
+        const mMatch = modeMatch.toLowerCase().includes(q);
+        if (!tMatch && !pMatch && !uMatch && !rfMatch && !nMatch && !bMatch && !mMatch) {
           return false;
         }
       }
@@ -925,16 +962,71 @@ export default function PaymentsView() {
         }
       }
 
+      // 5. APEX Filters
+      for (const f of receiptActiveFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'receiptDate') fieldVal = rDate;
+        else if (f.columnId === 'tenant') fieldVal = `${tenantName} ${propName} ${unitName}`;
+        else if (f.columnId === 'monthsCovered') fieldVal = months;
+        else if (f.columnId === 'totalAmount') fieldVal = amount;
+        else if (f.columnId === 'paymentMode') fieldVal = modeMatch;
+        else if (f.columnId === 'referenceNumber') fieldVal = refMatch;
+        else if (f.columnId === 'bankName') fieldVal = bankMatch;
+        else if (f.columnId === 'comments') fieldVal = notesMatch;
+        else if (f.columnId === 'tenantPhone') fieldVal = tenantPhone;
+        else if (f.columnId === 'propertyName') fieldVal = propName;
+        else if (f.columnId === 'subUnitName') fieldVal = unitName;
+        else if (f.columnId === 'createdAt') fieldVal = r.createdAt ? formatDate(r.createdAt) : '';
+        else if (f.columnId === 'updatedAt') fieldVal = r.updatedAt ? formatDate(r.updatedAt) : '';
+
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
       return true;
     });
-  }, [receipts, receiptSearch, receiptPropertyFilter, receiptModeFilter, receiptSelectedMonths]);
+  }, [receipts, receiptSearch, receiptPropertyFilter, receiptModeFilter, receiptSelectedMonths, receiptActiveFilters]);
 
   // Total collected in filtered receipts
   const totalFilteredReceiptsAmount = filteredReceipts.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0);
 
+  // Sorted Receipts for Receipts Register
+  const sortedReceipts = React.useMemo(() => {
+    return sortDataRows(filteredReceipts, receiptSortConfig, {
+      receiptDate: r => r.receiptDate,
+      tenant: r => r.tenantId?.name || '',
+      monthsCovered: r => r.monthsCovered || '',
+      totalAmount: r => Number(r.totalAmount) || 0,
+      paymentMode: r => r.paymentMode || '',
+      referenceNumber: r => r.referenceNumber || '',
+      bankName: r => r.bankName || '',
+      comments: r => r.comments || '',
+      tenantPhone: r => r.tenantId?.phone || '',
+      propertyName: r => r.unitId?.propertyId?.name || '',
+      subUnitName: r => r.unitId?.subUnitPartition || r.unitId?.unitName || '',
+      createdAt: r => r.createdAt,
+      updatedAt: r => r.updatedAt
+    });
+  }, [filteredReceipts, receiptSortConfig]);
+
+  // Receipts Pagination Slice
+  const totalReceiptItems = sortedReceipts.length;
+  const isAllReceiptRows = receiptRowsPerPage === 'All';
+  const effectiveReceiptPageSize = isAllReceiptRows ? totalReceiptItems || 1 : Number(receiptRowsPerPage);
+  const totalReceiptPages = Math.ceil(totalReceiptItems / effectiveReceiptPageSize) || 1;
+
+  useEffect(() => {
+    if (receiptCurrentPage > totalReceiptPages) setReceiptCurrentPage(1);
+  }, [totalReceiptPages, receiptCurrentPage]);
+
+  const paginatedReceipts = React.useMemo(() => {
+    if (isAllReceiptRows) return sortedReceipts;
+    const startIndex = (receiptCurrentPage - 1) * effectiveReceiptPageSize;
+    return sortedReceipts.slice(startIndex, startIndex + effectiveReceiptPageSize);
+  }, [sortedReceipts, isAllReceiptRows, receiptCurrentPage, effectiveReceiptPageSize]);
+
   // Export Filtered Receipts to Excel
   const exportReceiptsToExcel = () => {
-    const exportRows = filteredReceipts.map((r, idx) => ({
+    const exportRows = sortedReceipts.map((r, idx) => ({
       '#': idx + 1,
       'Date': formatDate(r.receiptDate),
       'Tenant': r.tenantId?.name || '—',
@@ -946,7 +1038,9 @@ export default function PaymentsView() {
       'Payment Mode': r.paymentMode || 'Cash',
       'Ref / UTR #': r.referenceNumber || '—',
       'Bank Name': r.bankName || '—',
-      'Notes': r.comments || '—'
+      'Notes': r.comments || '—',
+      'Created Date': r.createdAt ? formatDate(r.createdAt) : '',
+      'Modified Date': r.updatedAt ? formatDate(r.updatedAt) : ''
     }));
 
     const ws = XLSX.utils.json_to_sheet(exportRows);
@@ -955,46 +1049,135 @@ export default function PaymentsView() {
     XLSX.writeFile(wb, `Payment_Receipts_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  // Filtered rows for Excel Grid, sorted by Property Master displayOrder
-  const filteredOut = outstandingData.filter(d => {
-    const matchesSearch = !search ||
-      d.tenant?.name?.toLowerCase().includes(search.toLowerCase()) ||
-      d.property?.name?.toLowerCase().includes(search.toLowerCase()) ||
-      (d.unit?.subUnitPartition && d.unit.subUnitPartition.toLowerCase().includes(search.toLowerCase())) ||
-      (d.unit?.unitName && d.unit.unitName.toLowerCase().includes(search.toLowerCase()));
+  // Filtered rows for Excel Grid
+  const filteredOut = React.useMemo(() => {
+    return outstandingData.filter(d => {
+      const tenantName = d.tenant?.name || '';
+      const propName = d.property?.name || '';
+      const unitName = d.unit?.subUnitPartition || d.unit?.unitName || '';
+      const phone = d.tenant?.phone || '';
+      const monthlyRate = String(d.monthsBreakdown?.find(m => m.monthYear === selectedMonth)?.expectedRate ?? (d.unit?.monthlyRentExpected || 0));
+      const outstanding = String(d.totalOutstanding || 0);
+      const paidUpTo = d.paidTillMonth && d.paidTillMonth !== 'None' ? formatMonthYear(d.paidTillMonth) : 'None';
 
-    const matchesProp = !selectedPropertyFilter ||
-      d.property?._id === selectedPropertyFilter ||
-      d.property?.name === selectedPropertyFilter;
+      const matchesSearch = !search ||
+        tenantName.toLowerCase().includes(search.toLowerCase()) ||
+        propName.toLowerCase().includes(search.toLowerCase()) ||
+        unitName.toLowerCase().includes(search.toLowerCase()) ||
+        phone.includes(search);
 
-    return matchesSearch && matchesProp;
-  }).sort((a, b) => {
-    // Sort rows by Property Master displayOrder
-    const orderA = a.property?.displayOrder ?? 9999;
-    const orderB = b.property?.displayOrder ?? 9999;
-    if (orderA !== orderB) return orderA - orderB;
-    const nameA = a.property?.name || '';
-    const nameB = b.property?.name || '';
-    if (nameA.localeCompare(nameB) !== 0) return nameA.localeCompare(nameB);
-    const unitA = a.unit?.subUnitPartition || a.unit?.unitName || '';
-    const unitB = b.unit?.subUnitPartition || b.unit?.unitName || '';
-    return unitA.localeCompare(unitB);
-  });
+      const matchesProp = !selectedPropertyFilter ||
+        d.property?._id === selectedPropertyFilter ||
+        d.property?.name === selectedPropertyFilter;
 
-  // Calculate summary metrics for selected month
-  const totalExpectedSum = filteredOut.reduce((sum, item) => {
-    const md = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-    return sum + (md ? md.expectedRate : (item.unit?.monthlyRentExpected || 0));
-  }, 0);
+      if (!matchesSearch || !matchesProp) return false;
 
-  const totalPaidSum = filteredOut.reduce((sum, item) => {
-    const md = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-    return sum + (md ? md.allocatedAmount : 0);
-  }, 0);
+      // APEX filters
+      for (const f of sheetFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'tenant') fieldVal = tenantName;
+        else if (f.columnId === 'property') fieldVal = propName;
+        else if (f.columnId === 'subUnit') fieldVal = unitName;
+        else if (f.columnId === 'monthlyRent') fieldVal = monthlyRate;
+        else if (f.columnId === 'outstanding') fieldVal = outstanding;
+        else if (f.columnId === 'paidUpTo') fieldVal = paidUpTo;
+        else if (f.columnId === 'tenantPhone') fieldVal = phone;
+        else if (f.columnId === 'floor') fieldVal = d.unit?.floor || '';
+        else if (f.columnId === 'deposit') fieldVal = String(d.tenant?.securityDeposit || 0);
+        else if (f.columnId === 'nextUnpaid') fieldVal = d.nextUnpaidMonth && d.nextUnpaidMonth !== 'Up to date' ? formatMonthYear(d.nextUnpaidMonth) : 'Up to date';
+        else if (f.columnId === 'totalCollected') fieldVal = String(d.totalAllocated || 0);
+        else if (f.columnId === 'createdAt') fieldVal = d.createdAt ? formatDate(d.createdAt) : '';
+        else if (f.columnId === 'updatedAt') fieldVal = d.updatedAt ? formatDate(d.updatedAt) : '';
 
-  const totalOutstandingSum = filteredOut.reduce((sum, item) => {
-    return sum + (item.totalOutstanding || 0);
-  }, 0);
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
+      return true;
+    });
+  }, [outstandingData, search, selectedPropertyFilter, sheetFilters, selectedMonth]);
+
+  // Sorted rows for Sheet
+  const sortedSheetRows = React.useMemo(() => {
+    if (!sheetSortConfig.key || !sheetSortConfig.direction) {
+      // Natural order: Property Master displayOrder, then property name, then unit name
+      return [...filteredOut].sort((a, b) => {
+        const orderA = a.property?.displayOrder ?? 9999;
+        const orderB = b.property?.displayOrder ?? 9999;
+        if (orderA !== orderB) return orderA - orderB;
+        const nameA = a.property?.name || '';
+        const nameB = b.property?.name || '';
+        if (nameA.localeCompare(nameB) !== 0) return nameA.localeCompare(nameB);
+        const unitA = a.unit?.subUnitPartition || a.unit?.unitName || '';
+        const unitB = b.unit?.subUnitPartition || b.unit?.unitName || '';
+        return unitA.localeCompare(unitB);
+      });
+    }
+
+    return sortDataRows(filteredOut, sheetSortConfig, {
+      index: (d, idx) => idx,
+      tenant: d => d.tenant?.name || '',
+      property: d => d.property?.name || '',
+      subUnit: d => d.unit?.subUnitPartition || d.unit?.unitName || '',
+      monthlyRent: d => d.monthsBreakdown?.find(m => m.monthYear === selectedMonth)?.expectedRate ?? (d.unit?.monthlyRentExpected || 0),
+      outstanding: d => d.totalOutstanding || 0,
+      paidUpTo: d => d.paidTillMonth || '',
+      tenantPhone: d => d.tenant?.phone || '',
+      propertyType: d => d.property?.type || '',
+      subUnitArea: d => d.unit?.areaSqFt || 0,
+      floor: d => d.unit?.floor || '',
+      deposit: d => d.tenant?.securityDeposit || 0,
+      nextUnpaid: d => d.nextUnpaidMonth || '',
+      totalCollected: d => d.totalAllocated || 0,
+      createdAt: d => d.createdAt,
+      updatedAt: d => d.updatedAt
+    });
+  }, [filteredOut, sheetSortConfig, selectedMonth]);
+
+  // Sheet Pagination Slice
+  const totalSheetItems = sortedSheetRows.length;
+  const isAllSheetRows = sheetRowsPerPage === 'All';
+  const effectiveSheetPageSize = isAllSheetRows ? totalSheetItems || 1 : Number(sheetRowsPerPage);
+  const totalSheetPages = Math.ceil(totalSheetItems / effectiveSheetPageSize) || 1;
+
+  useEffect(() => {
+    if (sheetCurrentPage > totalSheetPages) setSheetCurrentPage(1);
+  }, [totalSheetPages, sheetCurrentPage]);
+
+  const paginatedSheetRows = React.useMemo(() => {
+    if (isAllSheetRows) return sortedSheetRows;
+    const startIndex = (sheetCurrentPage - 1) * effectiveSheetPageSize;
+    return sortedSheetRows.slice(startIndex, startIndex + effectiveSheetPageSize);
+  }, [sortedSheetRows, isAllSheetRows, sheetCurrentPage, effectiveSheetPageSize]);
+
+  // Excel Export of the Monthly Grid
+  const exportSheetToExcel = () => {
+    const exportRows = sortedSheetRows.map((item, idx) => {
+      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
+      const monthlyExpected = monthData ? monthData.expectedRate : (item.unit?.monthlyRentExpected || 0);
+      const paidThisMonth = monthData ? monthData.allocatedAmount : 0;
+      const outstandingThroughMonth = item.totalOutstanding || 0;
+
+      return {
+        '#': idx + 1,
+        'Tenant Details': item.tenant?.name || 'Unknown',
+        'Phone': item.tenant?.phone || '—',
+        'Property': item.property?.name || '—',
+        'Sub-Unit': item.unit?.subUnitPartition || item.unit?.unitName || '—',
+        'Monthly Rent': monthlyExpected,
+        'Outstanding due': outstandingThroughMonth,
+        'Paid Up To': item.paidTillMonth && item.paidTillMonth !== 'None' ? formatMonthYear(item.paidTillMonth) : 'None',
+        'Paid for Month': formatMonthYear(selectedMonth),
+        'Amount Paid': paidThisMonth,
+        'Created Date': item.createdAt ? formatDate(item.createdAt) : '',
+        'Modified Date': item.updatedAt ? formatDate(item.updatedAt) : ''
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Rent_${selectedMonth}`);
+    XLSX.writeFile(wb, `Rent_Collection_Sheet_${selectedMonth}.xlsx`);
+  };
 
   const totalTableWidth = visibleSheetColumns.reduce((sum, colId) => {
     return sum + (columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120);
@@ -1111,81 +1294,51 @@ export default function PaymentsView() {
       {/* VIEW 1: EXCEL-TEMPLATE-STYLE GRID */}
       {activeTab === 'sheet' && (
         <div className="space-y-4">
-          {/* Action & Filter Bar */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-            {/* Search Input */}
-            <div className="flex items-center gap-2.5 flex-1 bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200/80">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                placeholder="Search tenant, property, or partition..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="flex-1 text-xs sm:text-sm bg-transparent border-none focus:outline-none text-slate-800 placeholder:text-slate-400"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Filter Dropdowns */}
-            <div className="flex items-center gap-2">
+          {/* APEX Toolbar for Rent Sheet */}
+          <ApexToolbar
+            search={search}
+            onSearchChange={(val) => { setSearch(val); setSheetCurrentPage(1); }}
+            rowsPerPage={sheetRowsPerPage}
+            onRowsPerPageChange={(val) => { setSheetRowsPerPage(val); setSheetCurrentPage(1); }}
+            availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+            columns={RENT_SHEET_COLUMNS_DEF}
+            visibleColumns={visibleSheetColumns}
+            onChangeVisibleColumns={setVisibleSheetColumns}
+            onResetWidths={resetColumnWidths}
+            isHeaderSticky={isSheetHeaderSticky}
+            onToggleHeaderSticky={setIsSheetHeaderSticky}
+            filters={sheetFilters}
+            onFiltersChange={(flts) => { setSheetFilters(flts); setSheetCurrentPage(1); }}
+            filterSuggestions={sheetFilterSuggestions}
+            onExport={exportSheetToExcel}
+            storageKey="payments_sheet_v5"
+            activeViewName={sheetActiveViewId}
+            onViewChange={setSheetActiveViewId}
+            primaryAction={
               <select
                 value={selectedPropertyFilter}
-                onChange={(e) => setSelectedPropertyFilter(e.target.value)}
-                className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
+                onChange={(e) => { setSelectedPropertyFilter(e.target.value); setSheetCurrentPage(1); }}
+                className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
               >
                 <option value="">All Properties</option>
                 {properties.map(p => (
                   <option key={p._id} value={p._id}>{p.name}</option>
                 ))}
               </select>
-
-              {/* Excel Export Button */}
-              <button
-                onClick={exportSheetToExcel}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0"
-                title="Download Excel Sheet"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export Excel</span>
-              </button>
-
-              {/* Column Customizer */}
-              <ColumnManager
-                columns={RENT_SHEET_COLUMNS_DEF}
-                visibleColumns={visibleSheetColumns}
-                onChangeVisible={setVisibleSheetColumns}
-                storageKey="payments_sheet_v5"
-                onResetWidths={resetColumnWidths}
-              />
-
-              {/* Reset Column Widths */}
-              <button
-                type="button"
-                onClick={resetColumnWidths}
-                className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs shrink-0"
-                title="Reset all column widths to default"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">Reset Widths</span>
-              </button>
-            </div>
-          </div>
+            }
+          />
 
           {/* The Excel Grid Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
             {loading ? (
               <div className="py-20 text-center text-slate-400 text-sm">Loading collection sheet for {formatMonthYear(selectedMonth)}...</div>
-            ) : filteredOut.length === 0 ? (
+            ) : sortedSheetRows.length === 0 ? (
               <div className="py-20 text-center text-slate-400 text-sm">No tenant records found matching your filters.</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
                 <table
                   className="w-full text-left text-sm border-collapse table-fixed"
-                  style={{ minWidth: `${totalTableWidth}px` }}
+                  style={{ minWidth: `${visibleSheetColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120), 0)}px` }}
                 >
                   <colgroup>
                     {visibleSheetColumns.map(colId => (
@@ -1195,8 +1348,8 @@ export default function PaymentsView() {
                       />
                     ))}
                   </colgroup>
-                  <thead className="bg-slate-100/80 border-b border-slate-200 text-[11px] text-slate-600 uppercase tracking-wider font-extrabold select-none">
-                    <tr>
+                  <thead className={`bg-slate-100/90 border-b border-slate-200 select-none ${isSheetHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}`}>
+                    <tr className="text-[11px] text-slate-700 font-extrabold">
                       {visibleSheetColumns.map((colId) => {
                         const dragProps = getHeaderDragProps(colId, visibleSheetColumns, setVisibleSheetColumns, 'payments_sheet_v5');
                         const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
@@ -1221,22 +1374,50 @@ export default function PaymentsView() {
                         else if (colId === 'deposit') { label = 'Deposit'; align = 'text-right'; }
                         else if (colId === 'nextUnpaid') { label = 'Next Unpaid'; align = 'text-center'; }
                         else if (colId === 'totalCollected') { label = 'Lifetime Paid'; align = 'text-right'; }
+                        else if (colId === 'createdAt') { label = 'Created Date'; align = 'text-center'; }
+                        else if (colId === 'updatedAt') { label = 'Modified Date'; align = 'text-center'; }
                         else if (colId === 'actions') { label = 'Collection'; align = 'text-right'; }
                         else {
                           const colDef = RENT_SHEET_COLUMNS_DEF.find(c => c.id === colId);
                           if (colDef?.label) label = colDef.label;
                         }
 
+                        const isSortable = !['actions', 'paidForMonth', 'amount'].includes(colId);
+
                         return (
                           <th
                             key={colId}
                             {...dragProps}
-                            style={{ width: `${width}px` }}
-                            className={`px-3 py-3.5 border-r border-slate-200 relative group ${align} ${extraClass}`}
+                            style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${extraClass}`}
                           >
-                            <span className="truncate block font-extrabold text-[11px] text-slate-700 pr-2">
-                              {label}
-                            </span>
+                            <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                              align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'
+                            }`}>
+                              {!isSortable ? (
+                                <span className="truncate text-xs font-bold text-slate-700">{label}</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSheetHeaderSort(colId)}
+                                  className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                                  title={`Sort by ${label} (Click: Descending → Ascending → Clear)`}
+                                >
+                                  <span className="truncate">{label}</span>
+                                  <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                                    {sheetSortConfig.key === colId ? (
+                                      sheetSortConfig.direction === 'desc' ? (
+                                        <span className="text-teal-600 font-extrabold text-[13px] leading-none">↓</span>
+                                      ) : (
+                                        <span className="text-teal-600 font-extrabold text-[13px] leading-none">↑</span>
+                                      )
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                                    )}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
                             <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                           </th>
                         );
@@ -1244,7 +1425,7 @@ export default function PaymentsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredOut.map((item, idx) => {
+                    {paginatedSheetRows.map((item, idx) => {
                       const rowKey = getRowKey(item);
                       const draft = getRowDraft(item);
                       const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
@@ -1600,218 +1781,215 @@ export default function PaymentsView() {
                 </table>
               </div>
             )}
+
+            {/* Sheet Pagination Footer */}
+            {totalSheetItems > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-50/80 border-t border-slate-200 text-xs text-slate-500 font-semibold select-none">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Showing {isAllSheetRows ? 'all' : Math.min((sheetCurrentPage - 1) * effectiveSheetPageSize + 1, totalSheetItems)} to{' '}
+                    {isAllSheetRows ? totalSheetItems : Math.min(sheetCurrentPage * effectiveSheetPageSize, totalSheetItems)} of {totalSheetItems} units
+                  </span>
+                  {(sheetFilters.length > 0 || search || selectedPropertyFilter) && (
+                    <span className="text-teal-700 font-bold bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
+                      (Filtered from {outstandingData.length} total)
+                    </span>
+                  )}
+                </div>
+
+                {!isAllSheetRows && totalSheetPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={sheetCurrentPage <= 1}
+                      onClick={() => setSheetCurrentPage(prev => Math.max(prev - 1, 1))}
+                      className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Previous page"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-800 font-bold">
+                      Page {sheetCurrentPage} of {totalSheetPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={sheetCurrentPage >= totalSheetPages}
+                      onClick={() => setSheetCurrentPage(prev => Math.min(prev + 1, totalSheetPages))}
+                      className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Next page"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* VIEW 2: RECEIPTS REGISTER */}
       {activeTab === 'receipts' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          {/* Header & Main Actions */}
-          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h3 className="font-extrabold text-slate-900 text-base">Issued Payment Receipts Register</h3>
-              <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                <span>Showing <strong className="text-slate-800">{filteredReceipts.length}</strong> of {receipts.length} receipts</span>
-                <span>•</span>
-                <span>Total Collected: <strong className="text-emerald-700 font-extrabold">{formatCurrency(totalFilteredReceiptsAmount)}</strong></span>
-              </p>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={exportReceiptsToExcel}
-                disabled={filteredReceipts.length === 0}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold transition-all shadow-xs disabled:opacity-40"
-                title="Download filtered receipts list as Excel (.xlsx)"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export to Excel</span>
-              </button>
-
-              <ColumnManager
-                columns={RECEIPTS_COLUMNS_DEF}
-                visibleColumns={visibleReceiptsColumns}
-                onChangeVisible={setVisibleReceiptsColumns}
-                storageKey="payments_receipts"
-                onResetWidths={resetReceiptsWidths}
-              />
-              <button
-                type="button"
-                onClick={resetReceiptsWidths}
-                className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
-                title="Reset column widths"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Reset Widths</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive Filters Bar (Search, Property, Mode, Multi-Month) */}
-          <div className="p-3.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center gap-3">
-            {/* Search Input */}
-            <div className="relative flex-1 min-w-[200px] sm:min-w-[240px]">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search tenant, property, partition, ref #, notes..."
-                value={receiptSearch}
-                onChange={(e) => setReceiptSearch(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-2xs"
-              />
-              {receiptSearch && (
-                <button
-                  type="button"
-                  onClick={() => setReceiptSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+        <div className="space-y-4">
+          {/* APEX Toolbar for Receipts */}
+          <ApexToolbar
+            search={receiptSearch}
+            onSearchChange={(val) => { setReceiptSearch(val); setReceiptCurrentPage(1); }}
+            rowsPerPage={receiptRowsPerPage}
+            onRowsPerPageChange={(val) => { setReceiptRowsPerPage(val); setReceiptCurrentPage(1); }}
+            availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+            columns={RECEIPTS_COLUMNS_DEF}
+            visibleColumns={visibleReceiptsColumns}
+            onChangeVisibleColumns={setVisibleReceiptsColumns}
+            onResetWidths={resetReceiptsWidths}
+            isHeaderSticky={isReceiptsHeaderSticky}
+            onToggleHeaderSticky={setIsReceiptsHeaderSticky}
+            filters={receiptActiveFilters}
+            onFiltersChange={(flts) => { setReceiptActiveFilters(flts); setReceiptCurrentPage(1); }}
+            filterSuggestions={receiptFilterSuggestions}
+            onExport={exportReceiptsToExcel}
+            storageKey="payments_receipts"
+            activeViewName={receiptActiveViewId}
+            onViewChange={setReceiptActiveViewId}
+            primaryAction={
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Property Filter */}
+                <select
+                  value={receiptPropertyFilter}
+                  onChange={(e) => { setReceiptPropertyFilter(e.target.value); setReceiptCurrentPage(1); }}
+                  className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
                 >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+                  <option value="">All Properties</option>
+                  {properties.map(p => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
+                  ))}
+                </select>
 
-            {/* Property Filter */}
-            <select
-              value={receiptPropertyFilter}
-              onChange={(e) => setReceiptPropertyFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
-            >
-              <option value="">All Properties</option>
-              {properties.map(p => (
-                <option key={p._id} value={p._id}>{p.name}</option>
-              ))}
-            </select>
+                {/* Payment Mode Filter */}
+                <select
+                  value={receiptModeFilter}
+                  onChange={(e) => { setReceiptModeFilter(e.target.value); setReceiptCurrentPage(1); }}
+                  className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
+                >
+                  <option value="">All Payment Modes</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Other">Other</option>
+                </select>
 
-            {/* Payment Mode Filter */}
-            <select
-              value={receiptModeFilter}
-              onChange={(e) => setReceiptModeFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
-            >
-              <option value="">All Payment Modes</option>
-              <option value="Cash">Cash</option>
-              <option value="Cheque">Cheque</option>
-              <option value="Bank Transfer">Bank Transfer</option>
-              <option value="UPI">UPI</option>
-              <option value="Other">Other</option>
-            </select>
+                {/* Multi-Month Selector with Popover */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowReceiptMonthPicker(prev => !prev)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all shadow-2xs cursor-pointer ${
+                      receiptSelectedMonths.length > 0
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>
+                      {receiptSelectedMonths.length === 0
+                        ? 'All Rent Months'
+                        : receiptSelectedMonths.length === 1
+                        ? formatMonthYear(receiptSelectedMonths[0])
+                        : `${receiptSelectedMonths.length} Months Selected`}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
 
-            {/* Multi-Month Selector with Popover */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowReceiptMonthPicker(prev => !prev)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-                  receiptSelectedMonths.length > 0
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                    : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                <span>
-                  {receiptSelectedMonths.length === 0
-                    ? 'All Rent Months'
-                    : receiptSelectedMonths.length === 1
-                    ? formatMonthYear(receiptSelectedMonths[0])
-                    : `${receiptSelectedMonths.length} Months Selected`}
-                </span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              {showReceiptMonthPicker && (
-                <div className="absolute left-0 mt-2 z-40 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2.5 animate-scaleUp">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <span className="text-xs font-extrabold text-slate-800">Select Month(s)</span>
-                    <div className="flex items-center gap-2">
-                      {receiptSelectedMonths.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setReceiptSelectedMonths([])}
-                          className="text-[11px] font-bold text-rose-600 hover:underline"
-                        >
-                          Clear
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setShowReceiptMonthPicker(false)}
-                        className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
-                      >
-                        Done
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
-                    {availableReceiptMonths.length === 0 ? (
-                      <div className="py-4 text-center text-xs text-slate-400">No receipt months recorded yet</div>
-                    ) : (
-                      availableReceiptMonths.map(m => {
-                        const isChecked = receiptSelectedMonths.includes(m);
-                        return (
-                          <label
-                            key={m}
-                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
-                              isChecked
-                                ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
-                                : 'hover:bg-slate-50 text-slate-700 border border-transparent'
-                            }`}
+                  {showReceiptMonthPicker && (
+                    <div className="absolute left-0 mt-2 z-40 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 space-y-2.5 animate-scaleUp">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <span className="text-xs font-extrabold text-slate-800">Select Month(s)</span>
+                        <div className="flex items-center gap-2">
+                          {receiptSelectedMonths.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => { setReceiptSelectedMonths([]); setReceiptCurrentPage(1); }}
+                              className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowReceiptMonthPicker(false)}
+                            className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer"
                           >
-                            <span>{formatMonthYear(m)}</span>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setReceiptSelectedMonths(receiptSelectedMonths.filter(x => x !== m));
-                                } else {
-                                  setReceiptSelectedMonths([...receiptSelectedMonths, m]);
-                                }
-                              }}
-                              className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                            />
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
+                            Done
+                          </button>
+                        </div>
+                      </div>
 
-                  {receiptSelectedMonths.length > 0 && (
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 font-medium">{receiptSelectedMonths.length} months active</span>
-                      <button
-                        type="button"
-                        onClick={() => setReceiptSelectedMonths([])}
-                        className="font-bold text-slate-500 hover:text-slate-800"
-                      >
-                        Show All
-                      </button>
+                      <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                        {availableReceiptMonths.length === 0 ? (
+                          <div className="py-4 text-center text-xs text-slate-400">No receipt months recorded yet</div>
+                        ) : (
+                          availableReceiptMonths.map(m => {
+                            const isChecked = receiptSelectedMonths.includes(m);
+                            return (
+                              <label
+                                key={m}
+                                className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
+                                  isChecked
+                                    ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                                    : 'hover:bg-slate-50 text-slate-700 border border-transparent'
+                                }`}
+                              >
+                                <span>{formatMonthYear(m)}</span>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    if (isChecked) {
+                                      setReceiptSelectedMonths(receiptSelectedMonths.filter(x => x !== m));
+                                    } else {
+                                      setReceiptSelectedMonths([...receiptSelectedMonths, m]);
+                                    }
+                                    setReceiptCurrentPage(1);
+                                  }}
+                                  className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                />
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {receiptSelectedMonths.length > 0 && (
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                          <span className="text-slate-500 font-medium">{receiptSelectedMonths.length} months active</span>
+                          <button
+                            type="button"
+                            onClick={() => { setReceiptSelectedMonths([]); setReceiptCurrentPage(1); }}
+                            className="font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                          >
+                            Show All
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            }
+          />
 
-            {/* Clear All Active Filters Button */}
-            {(receiptSearch || receiptPropertyFilter || receiptModeFilter || receiptSelectedMonths.length > 0) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setReceiptSearch('');
-                  setReceiptPropertyFilter('');
-                  setReceiptModeFilter('');
-                  setReceiptSelectedMonths([]);
-                }}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors"
-                title="Reset all search filters"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset Filters</span>
-              </button>
-            )}
-          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+
+
+
+
+
+
+
+
+
+
 
           {receipts.length === 0 ? (
             <div className="py-16 text-center text-slate-400 text-sm">No payment receipts found.</div>
@@ -1829,7 +2007,9 @@ export default function PaymentsView() {
                     />
                   ))}
                 </colgroup>
-                <thead className="bg-slate-50 border-b border-slate-200 text-[11px] text-slate-500 uppercase tracking-wide font-extrabold select-none">
+                <thead className={`border-b border-slate-200 text-[11px] text-slate-500 uppercase tracking-wide font-extrabold select-none ${
+                  isReceiptsHeaderSticky ? 'sticky top-0 z-20 shadow-sm' : ''
+                }`}>
                   <tr>
                     {visibleReceiptsColumns.map(colId => {
                       const dragProps = getHeaderDragProps(colId, visibleReceiptsColumns, setVisibleReceiptsColumns, 'payments_receipts');
@@ -1848,20 +2028,45 @@ export default function PaymentsView() {
                       else if (colId === 'tenantPhone') label = 'Tenant Phone';
                       else if (colId === 'propertyName') label = 'Property';
                       else if (colId === 'subUnitName') label = 'Sub-Unit';
+                      else if (colId === 'createdAt') label = 'Created Date';
+                      else if (colId === 'updatedAt') label = 'Modified Date';
                       else if (colId === 'actions') label = 'Actions';
                       else {
                         const colDef = RECEIPTS_COLUMNS_DEF.find(c => c.id === colId);
                         if (colDef?.label) label = colDef.label;
                       }
 
+                      const isSortable = colId !== 'actions';
+                      const isSorted = receiptSortConfig.key === colId;
+                      const sortDirection = isSorted ? receiptSortConfig.direction : null;
+
                       return (
                         <th
                           key={colId}
                           {...dragProps}
-                          style={{ width: `${width}px` }}
-                          className={`px-4 py-3.5 border-r border-slate-200 relative group ${align}`}
+                          onClick={() => isSortable && handleReceiptHeaderSort(colId)}
+                          style={{ minWidth: `${Math.max(width, 105)}px`, width: `${Math.max(width, 105)}px` }}
+                          className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
+                            isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
+                          }`}
+                          title={isSortable ? `${label} (Click: 1st Desc, 2nd Asc, 3rd Off)` : label}
                         >
-                          <span className="truncate block pr-2 font-extrabold text-[11px] text-slate-700">{label}</span>
+                          <div className={`flex items-center gap-1.5 w-full overflow-hidden ${align === 'text-right' ? 'justify-end' : 'justify-start'}`}>
+                            <span className="truncate font-extrabold text-[11px] text-slate-700 tracking-wider">
+                              {label}
+                            </span>
+                            {isSortable && (
+                              <span className="shrink-0 flex items-center text-slate-400">
+                                {sortDirection === 'asc' ? (
+                                  <ArrowUp className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                                ) : sortDirection === 'desc' ? (
+                                  <ArrowDown className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60 text-slate-400 transition-opacity" />
+                                )}
+                              </span>
+                            )}
+                          </div>
                           <ResizeHandle colId={colId} onResizeStart={handleReceiptsResizeStart} />
                         </th>
                       );
@@ -1869,7 +2074,7 @@ export default function PaymentsView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredReceipts.length === 0 ? (
+                  {sortedReceipts.length === 0 ? (
                     <tr>
                       <td colSpan={visibleReceiptsColumns.length} className="py-16 text-center text-slate-400 text-xs">
                         <p className="font-bold text-slate-700 text-sm mb-1">No payment receipts found matching your active filters.</p>
@@ -1880,6 +2085,7 @@ export default function PaymentsView() {
                             setReceiptPropertyFilter('');
                             setReceiptModeFilter('');
                             setReceiptSelectedMonths([]);
+                            setReceiptActiveFilters([]);
                           }}
                           className="text-xs font-bold text-emerald-600 hover:underline mt-1"
                         >
@@ -1888,7 +2094,7 @@ export default function PaymentsView() {
                       </td>
                     </tr>
                   ) : (
-                    filteredReceipts.map(r => (
+                    paginatedReceipts.map(r => (
                     <tr key={r._id} className="hover:bg-slate-50/70 transition-colors">
                       {visibleReceiptsColumns.map(colId => {
                         if (colId === 'receiptDate') {
@@ -2019,6 +2225,64 @@ export default function PaymentsView() {
               </table>
             </div>
           )}
+
+          {/* Receipts Pagination Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 shrink-0">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing {sortedReceipts.length === 0 ? 0 : isAllReceiptRows ? 1 : ((receiptCurrentPage - 1) * Number(receiptRowsPerPage)) + 1}
+                - {isAllReceiptRows ? sortedReceipts.length : Math.min(receiptCurrentPage * Number(receiptRowsPerPage), sortedReceipts.length)} of {sortedReceipts.length} receipts
+              </span>
+              {receiptSortConfig.key && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px] border border-emerald-200">
+                  Sorted: {receiptSortConfig.key} ({receiptSortConfig.direction?.toUpperCase()})
+                </span>
+              )}
+            </div>
+
+            {!isAllReceiptRows && totalReceiptPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={receiptCurrentPage === 1}
+                  onClick={() => setReceiptCurrentPage(1)}
+                  className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="First Page"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={receiptCurrentPage === 1}
+                  onClick={() => setReceiptCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Prev
+                </button>
+                <span className="px-3 py-1 text-slate-700">
+                  Page {receiptCurrentPage} of {totalReceiptPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={receiptCurrentPage >= totalReceiptPages}
+                  onClick={() => setReceiptCurrentPage(p => Math.min(totalReceiptPages, p + 1))}
+                  className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  disabled={receiptCurrentPage >= totalReceiptPages}
+                  onClick={() => setReceiptCurrentPage(totalReceiptPages)}
+                  className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Last Page"
+                >
+                  »
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
         </div>
       )}
 
