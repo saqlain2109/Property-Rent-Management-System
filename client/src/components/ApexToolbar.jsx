@@ -7,6 +7,8 @@ import {
 
 export default function ApexToolbar({
   search,
+  searchValue,
+  searchPlaceholder = 'Search...',
   onSearchChange,
   rowsPerPage,
   onRowsPerPageChange,
@@ -14,18 +16,37 @@ export default function ApexToolbar({
   columns = [],
   visibleColumns = [],
   onChangeVisibleColumns,
+  onVisibleColumnsChange,
+  columnWidths,
   onResetWidths,
   isHeaderSticky = true,
   onToggleHeaderSticky,
-  filters = [],
+  filters,
+  activeFilters,
   onFiltersChange,
   onExport,
+  onExportExcel,
   storageKey = 'default_grid',
+  storageKeyPrefix,
   activeViewName,
+  activeViewId,
   onViewChange,
+  onSaveView,
+  onLoadView,
   primaryAction,
   filterSuggestions = {} // { [columnId]: ['Value1', 'Value2'] }
 }) {
+  const currentSearch = search !== undefined ? search : (searchValue !== undefined ? searchValue : '');
+  const currentFilters = activeFilters !== undefined ? activeFilters : (filters !== undefined ? filters : []);
+  const currentStorageKey = storageKeyPrefix || storageKey || 'default_grid';
+  const currentActiveView = activeViewName || activeViewId || null;
+  const triggerExport = onExport || onExportExcel;
+
+  const setVisibleCols = (cols) => {
+    onChangeVisibleColumns?.(cols);
+    onVisibleColumnsChange?.(cols);
+  };
+
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [activeSubMenu, setActiveSubMenu] = useState(null); // 'columns' | 'filter' | 'report'
   const [savedViews, setSavedViews] = useState([]);
@@ -40,10 +61,10 @@ export default function ApexToolbar({
   // Load Saved Views from localStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(`views_${storageKey}`);
+      const saved = localStorage.getItem(`views_${currentStorageKey}`);
       if (saved) setSavedViews(JSON.parse(saved));
     } catch (e) {}
-  }, [storageKey]);
+  }, [currentStorageKey]);
 
   // Close menus on click outside
   const menuRef = useRef(null);
@@ -66,7 +87,7 @@ export default function ApexToolbar({
     } else {
       next = [...visibleColumns, colId];
     }
-    onChangeVisibleColumns(next);
+    setVisibleCols(next);
   };
 
   const handleSaveView = (e) => {
@@ -76,17 +97,19 @@ export default function ApexToolbar({
       id: 'view_' + Date.now(),
       name: newViewName.trim(),
       visibleColumns,
-      filters,
+      filters: currentFilters,
       rowsPerPage,
-      search,
+      search: currentSearch,
+      isHeaderSticky,
       createdAt: new Date().toISOString()
     };
     const updated = [...savedViews, newView];
     setSavedViews(updated);
     try {
-      localStorage.setItem(`views_${storageKey}`, JSON.stringify(updated));
+      localStorage.setItem(`views_${currentStorageKey}`, JSON.stringify(updated));
     } catch (e) {}
     onViewChange?.(newView.id);
+    onSaveView?.(newView);
     setNewViewName('');
     setShowSaveViewInput(false);
     setShowActionsMenu(false);
@@ -94,11 +117,15 @@ export default function ApexToolbar({
   };
 
   const handleApplySavedView = (view) => {
-    onChangeVisibleColumns(view.visibleColumns);
+    setVisibleCols(view.visibleColumns);
     onFiltersChange?.(view.filters || []);
     if (view.rowsPerPage) onRowsPerPageChange?.(view.rowsPerPage);
     if (view.search !== undefined) onSearchChange?.(view.search);
+    if (view.isHeaderSticky !== undefined && onToggleHeaderSticky) {
+      onToggleHeaderSticky(view.isHeaderSticky);
+    }
     onViewChange?.(view.id);
+    onLoadView?.(view);
     setShowActionsMenu(false);
     setActiveSubMenu(null);
   };
@@ -108,14 +135,14 @@ export default function ApexToolbar({
     const updated = savedViews.filter(v => v.id !== viewId);
     setSavedViews(updated);
     try {
-      localStorage.setItem(`views_${storageKey}`, JSON.stringify(updated));
+      localStorage.setItem(`views_${currentStorageKey}`, JSON.stringify(updated));
     } catch (e) {}
-    if (activeViewName === viewId) onViewChange?.(null);
+    if (currentActiveView === viewId) onViewChange?.(null);
   };
 
   const handleResetToDefault = () => {
     const allColIds = columns.map(c => c.id);
-    onChangeVisibleColumns(allColIds);
+    setVisibleCols(allColIds);
     onFiltersChange?.([]);
     onRowsPerPageChange?.(10);
     onSearchChange?.('');
@@ -127,7 +154,7 @@ export default function ApexToolbar({
 
   const openFilterModal = () => {
     const firstCol = columns.find(c => c.id !== 'actions') || columns[0];
-    setFilterDraft(filters.length > 0 ? [...filters] : [{
+    setFilterDraft(currentFilters.length > 0 ? [...currentFilters] : [{
       id: 'f_' + Date.now(),
       columnId: firstCol?.id || '',
       operator: 'contains',
@@ -161,12 +188,12 @@ export default function ApexToolbar({
           <div className="relative flex-1 sm:max-w-xs min-w-[160px]">
             <input
               type="text"
-              placeholder="Search..."
-              value={search}
+              placeholder={searchPlaceholder || 'Search...'}
+              value={currentSearch}
               onChange={(e) => onSearchChange(e.target.value)}
               className="w-full pl-3.5 pr-8 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all font-medium text-slate-800 placeholder:text-slate-400"
             />
-            {search && (
+            {currentSearch && (
               <button 
                 onClick={() => onSearchChange('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
@@ -265,9 +292,9 @@ export default function ApexToolbar({
                     <Filter className="w-4 h-4 text-slate-400" />
                     <span>Filter</span>
                   </div>
-                  {filters.length > 0 && (
+                  {currentFilters.length > 0 && (
                     <span className="bg-teal-100 text-teal-800 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
-                      {filters.length} active
+                      {currentFilters.length} active
                     </span>
                   )}
                 </button>
@@ -362,7 +389,7 @@ export default function ApexToolbar({
                             key={view.id}
                             onClick={() => handleApplySavedView(view)}
                             className={`flex items-center justify-between p-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
-                              activeViewName === view.id ? 'bg-teal-600 text-white font-bold' : 'hover:bg-white text-slate-700'
+                              currentActiveView === view.id ? 'bg-teal-600 text-white font-bold' : 'hover:bg-white text-slate-700'
                             }`}
                           >
                             <span className="truncate pr-2">{view.name}</span>
@@ -370,7 +397,7 @@ export default function ApexToolbar({
                               type="button"
                               onClick={(e) => handleDeleteSavedView(view.id, e)}
                               className={`p-1 rounded hover:bg-rose-100 hover:text-rose-600 ${
-                                activeViewName === view.id ? 'text-teal-200' : 'text-slate-400'
+                                currentActiveView === view.id ? 'text-teal-200' : 'text-slate-400'
                               }`}
                               title="Delete view"
                             >
@@ -387,7 +414,7 @@ export default function ApexToolbar({
                 <button
                   type="button"
                   onClick={() => {
-                    onExport?.();
+                    triggerExport?.();
                     setShowActionsMenu(false);
                     setActiveSubMenu(null);
                   }}
@@ -444,13 +471,13 @@ export default function ApexToolbar({
       </div>
 
       {/* Filter Badges Bar (Shows active filters with one-click remove) */}
-      {filters.length > 0 && (
+      {currentFilters.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
             <Filter className="w-3 h-3 text-teal-600" />
             Applied Filters:
           </span>
-          {filters.map(f => {
+          {currentFilters.map(f => {
             const col = columns.find(c => c.id === f.columnId);
             const isUnary = f.operator === 'is_empty' || f.operator === 'is_not_empty';
             const operatorLabels = {
@@ -481,7 +508,7 @@ export default function ApexToolbar({
                 )}
                 <button
                   type="button"
-                  onClick={() => onFiltersChange(filters.filter(item => item.id !== f.id))}
+                  onClick={() => onFiltersChange(currentFilters.filter(item => item.id !== f.id))}
                   className="p-0.5 rounded hover:bg-teal-200/50 text-teal-700"
                 >
                   <X className="w-3 h-3" />

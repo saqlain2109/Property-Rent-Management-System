@@ -1096,6 +1096,25 @@ export default function PaymentsView() {
     });
   }, [outstandingData, search, selectedPropertyFilter, sheetFilters, selectedMonth]);
 
+  // Aggregate sums for Rent Collection Grid
+  const totalExpectedSum = React.useMemo(() => {
+    return filteredOut.reduce((sum, item) => {
+      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
+      return sum + (monthData ? monthData.expectedRate : (item.unit?.monthlyRentExpected || 0));
+    }, 0);
+  }, [filteredOut, selectedMonth]);
+
+  const totalPaidSum = React.useMemo(() => {
+    return filteredOut.reduce((sum, item) => {
+      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
+      return sum + (monthData ? monthData.allocatedAmount : 0);
+    }, 0);
+  }, [filteredOut, selectedMonth]);
+
+  const totalOutstandingSum = React.useMemo(() => {
+    return filteredOut.reduce((sum, item) => sum + (item.totalOutstanding || 0), 0);
+  }, [filteredOut]);
+
   // Sorted rows for Sheet
   const sortedSheetRows = React.useMemo(() => {
     if (!sheetSortConfig.key || !sheetSortConfig.direction) {
