@@ -71,6 +71,8 @@ router.get('/outstanding-summary', protect, async (req, res) => {
       summaries.push({
         assignmentId: assign._id,
         assignmentCode: assign.assignmentCode,
+        createdAt: assign.createdAt,
+        updatedAt: assign.updatedAt,
         tenant: assign.tenantId,
         unit: assign.unitId,
         property: assign.unitId.propertyId,

@@ -7,7 +7,7 @@ import {
 import gsap from 'gsap';
 import API from '../services/api';
 
-export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onOpenProfile }) {
+export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onOpenProfile, isOpen, onClose }) {
   const sidebarRef = useRef(null);
   const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'contracts', 'pg'].includes(currentTab);
   const [mastersExpanded, setMastersExpanded] = useState(true);
@@ -61,20 +61,40 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
   ];
 
   return (
-    <aside
-      ref={sidebarRef}
-      className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800 select-none shadow-xl"
-    >
-      {/* Brand */}
-      <div className="p-5 border-b border-slate-800/80 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
-          <Building2 className="w-5 h-5" />
+    <>
+      {/* Mobile Backdrop */}
+      {isOpen && (
+        <div 
+          onClick={onClose}
+          className="fixed inset-0 bg-slate-950/70 z-40 md:hidden backdrop-blur-xs transition-opacity"
+        />
+      )}
+
+      <aside
+        ref={sidebarRef}
+        className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800 select-none shadow-2xl md:shadow-xl transition-transform duration-200 ease-in-out ${
+          isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
+        {/* Brand */}
+        <div className="p-5 border-b border-slate-800/80 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="font-extrabold text-white tracking-wide text-base leading-tight">EstateLedger</h1>
+              <p className="text-[11px] text-emerald-400 font-semibold tracking-wide">Property Manager</p>
+            </div>
+          </div>
+          {/* Mobile close button */}
+          <button
+            onClick={onClose}
+            className="md:hidden p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800"
+          >
+            ✕
+          </button>
         </div>
-        <div>
-          <h1 className="font-extrabold text-white tracking-wide text-base leading-tight">EstateLedger</h1>
-          <p className="text-[11px] text-emerald-400 font-semibold tracking-wide">Property Manager</p>
-        </div>
-      </div>
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -247,5 +267,6 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
         </div>
       </div>
     </aside>
+    </>
   );
 }

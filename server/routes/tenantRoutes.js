@@ -115,39 +115,62 @@ router.post('/', protect, authorize('admin', 'manager'), [
       finalCode = `${finalCode}-${rand}`;
     }
 
-    const { unitId, monthlyRate, startDate, endDate, depositHeld, terms, initialPaidTillMonth } = req.body;
+    const {
+      unitId, monthlyRate, rentAmount, rentType = 'Monthly Fixed',
+      startDate, endDate, depositHeld, terms, initialPaidTillMonth
+    } = req.body;
+    const enteredRent = rentAmount ?? monthlyRate;
+    if (unitId && enteredRent !== undefined && enteredRent !== null && enteredRent !== '') {
+      if (!['Monthly Fixed', 'Annual Fixed'].includes(rentType)) {
+        return res.status(400).json({ success: false, message: 'Rent frequency must be monthly or annual' });
+      }
+      if (!Number.isFinite(Number(enteredRent)) || Number(enteredRent) < 0) {
+        return res.status(400).json({ success: false, message: 'Rent amount must be a non-negative number' });
+      }
+      if (endDate && new Date(endDate) < new Date(startDate || new Date())) {
+        return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
+      }
+    }
 
     const tenant = await Tenant.create({
       ...req.body,
       tenantCode: finalCode
     });
 
-    if (unitId && monthlyRate !== undefined && monthlyRate !== null && monthlyRate !== '') {
+    if (unitId && enteredRent !== undefined && enteredRent !== null && enteredRent !== '') {
+      const contractEndDate = endDate || null;
+      const contractHasEnded = Boolean(contractEndDate) &&
+        contractEndDate.slice(0, 10) < new Date().toISOString().slice(0, 10);
+      const amount = Number(enteredRent);
+      const monthlyEquivalent = rentType === 'Annual Fixed' ? amount / 12 : amount;
       const asnCount = await TenantAssignment.countDocuments();
       const assignment = await TenantAssignment.create({
         assignmentCode: `ASN-${String(asnCount + 1).padStart(4, '0')}`,
         tenantId: tenant._id,
         unitId,
         startDate: startDate || new Date().toISOString().split('T')[0],
-        endDate: endDate || null,
+        endDate: contractEndDate,
         depositHeld: Number(depositHeld) || 0,
         initialPaidTillMonth: initialPaidTillMonth || null,
-        status: 'Active'
+        status: contractHasEnded ? 'Past / Vacated' : 'Active'
       });
 
       await RentAgreement.create({
         assignmentId: assignment._id,
         unitId,
         tenantId: tenant._id,
-        rentType: 'Monthly Fixed',
-        monthlyRate: Number(monthlyRate) || 0,
+        rentType,
+        monthlyRate: monthlyEquivalent,
+        annualRate: rentType === 'Annual Fixed' ? amount : 0,
         effectiveFrom: startDate || new Date().toISOString().split('T')[0],
         terms: terms || '',
         isCurrentRate: true
       });
 
-      const Unit = require('../models/Unit');
-      await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+      if (!contractHasEnded) {
+        const Unit = require('../models/Unit');
+        await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+      }
     }
 
     await logAudit({
@@ -175,7 +198,22 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     }
 
     const prev = tenant.toObject();
-    const { unitId, monthlyRate, startDate, endDate, depositHeld, terms } = req.body;
+    const {
+      unitId, monthlyRate, rentAmount, rentType = 'Monthly Fixed',
+      startDate, endDate, depositHeld, terms
+    } = req.body;
+    const enteredRent = rentAmount ?? monthlyRate;
+    if (unitId && enteredRent !== undefined && enteredRent !== '' &&
+      !['Monthly Fixed', 'Annual Fixed'].includes(rentType)) {
+      return res.status(400).json({ success: false, message: 'Rent frequency must be monthly or annual' });
+    }
+    if (unitId && enteredRent !== undefined && enteredRent !== '' &&
+      (!Number.isFinite(Number(enteredRent)) || Number(enteredRent) < 0)) {
+      return res.status(400).json({ success: false, message: 'Rent amount must be a non-negative number' });
+    }
+    if (endDate && new Date(endDate) < new Date(startDate || new Date())) {
+      return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
+    }
 
     Object.assign(tenant, req.body);
     if (req.body.tenantCode) {
@@ -184,7 +222,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     await tenant.save();
 
     // Handle unit & rent updates if provided
-    if (unitId || monthlyRate !== undefined) {
+    if (unitId || enteredRent !== undefined) {
       const Unit = require('../models/Unit');
       const currentAssignment = await TenantAssignment.findOne({ tenantId: tenant._id, status: 'Active' });
 
@@ -198,15 +236,25 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
         if (startDate) currentAssignment.startDate = startDate;
         if (endDate !== undefined) currentAssignment.endDate = endDate || null;
         if (depositHeld !== undefined) currentAssignment.depositHeld = Number(depositHeld) || 0;
+        const currentAssignmentEnded = Boolean(currentAssignment.endDate) &&
+          new Date(currentAssignment.endDate).toISOString().slice(0, 10) < new Date().toISOString().slice(0, 10);
+        currentAssignment.status = currentAssignmentEnded ? 'Past / Vacated' : 'Active';
         await currentAssignment.save();
+        if (currentAssignmentEnded) {
+          await Unit.findByIdAndUpdate(currentAssignment.unitId, { occupancyStatus: 'Vacant' });
+        }
 
-        if (monthlyRate !== undefined && monthlyRate !== '') {
+        if (enteredRent !== undefined && enteredRent !== '') {
+          const amount = Number(enteredRent);
+          const monthlyEquivalent = rentType === 'Annual Fixed' ? amount / 12 : amount;
           const currentAgreement = await RentAgreement.findOne({
             assignmentId: currentAssignment._id,
             isCurrentRate: true
           });
           if (currentAgreement) {
-            currentAgreement.monthlyRate = Number(monthlyRate);
+            currentAgreement.rentType = rentType;
+            currentAgreement.monthlyRate = monthlyEquivalent;
+            currentAgreement.annualRate = rentType === 'Annual Fixed' ? amount : 0;
             if (terms !== undefined) currentAgreement.terms = terms;
             if (unitId) currentAgreement.unitId = unitId;
             await currentAgreement.save();
@@ -215,15 +263,18 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
               assignmentId: currentAssignment._id,
               unitId: currentAssignment.unitId,
               tenantId: tenant._id,
-              rentType: 'Monthly Fixed',
-              monthlyRate: Number(monthlyRate) || 0,
+              rentType,
+              monthlyRate: monthlyEquivalent,
+              annualRate: rentType === 'Annual Fixed' ? amount : 0,
               effectiveFrom: startDate || currentAssignment.startDate,
               terms: terms || '',
               isCurrentRate: true
             });
           }
         }
-      } else if (unitId && monthlyRate !== undefined && monthlyRate !== '') {
+      } else if (unitId && enteredRent !== undefined && enteredRent !== '') {
+        const amount = Number(enteredRent);
+        const monthlyEquivalent = rentType === 'Annual Fixed' ? amount / 12 : amount;
         // Create new assignment
         const asnCount = await TenantAssignment.countDocuments();
         const newAsn = await TenantAssignment.create({
@@ -233,21 +284,26 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
           startDate: startDate || new Date().toISOString().split('T')[0],
           endDate: endDate || null,
           depositHeld: Number(depositHeld) || 0,
-          status: 'Active'
+          status: endDate && endDate.slice(0, 10) < new Date().toISOString().slice(0, 10)
+            ? 'Past / Vacated'
+            : 'Active'
         });
 
         await RentAgreement.create({
           assignmentId: newAsn._id,
           unitId,
           tenantId: tenant._id,
-          rentType: 'Monthly Fixed',
-          monthlyRate: Number(monthlyRate) || 0,
+          rentType,
+          monthlyRate: monthlyEquivalent,
+          annualRate: rentType === 'Annual Fixed' ? amount : 0,
           effectiveFrom: startDate || new Date().toISOString().split('T')[0],
           terms: terms || '',
           isCurrentRate: true
         });
 
-        await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+        if (newAsn.status === 'Active') {
+          await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+        }
       }
     }
 

@@ -28,7 +28,9 @@ const RENT_SHEET_COLUMNS_DEF = [
   { id: 'floor', label: 'Floor / Location', defaultVisible: false },
   { id: 'deposit', label: 'Security Deposit', defaultVisible: false },
   { id: 'nextUnpaid', label: 'Next Unpaid Month', defaultVisible: false },
-  { id: 'totalCollected', label: 'Lifetime Paid', defaultVisible: false }
+  { id: 'totalCollected', label: 'Lifetime Paid', defaultVisible: false },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false }
 ];
 
 const RECEIPTS_COLUMNS_DEF = [
@@ -43,6 +45,8 @@ const RECEIPTS_COLUMNS_DEF = [
   { id: 'tenantPhone', label: 'Tenant Phone', defaultVisible: false },
   { id: 'propertyName', label: 'Property Name', defaultVisible: false },
   { id: 'subUnitName', label: 'Sub-Unit Partition', defaultVisible: false },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Actions', defaultVisible: true }
 ];
 
@@ -64,7 +68,9 @@ const DEFAULT_SHEET_COLUMN_WIDTHS = {
   floor: 85,
   deposit: 105,
   nextUnpaid: 110,
-  totalCollected: 120
+  totalCollected: 120,
+  createdAt: 110,
+  updatedAt: 110
 };
 
 const DEFAULT_RECEIPTS_COLUMN_WIDTHS = {
@@ -79,7 +85,9 @@ const DEFAULT_RECEIPTS_COLUMN_WIDTHS = {
   comments: 150,
   tenantPhone: 110,
   propertyName: 130,
-  subUnitName: 110
+  subUnitName: 110,
+  createdAt: 110,
+  updatedAt: 110
 };
 
 export default function PaymentsView() {
@@ -1514,6 +1522,13 @@ export default function PaymentsView() {
                                 </td>
                               );
                             }
+                            if (colId === 'createdAt' || colId === 'updatedAt') {
+                              return (
+                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
+                                  {item[colId] ? formatDate(item[colId]) : '—'}
+                                </td>
+                              );
+                            }
                              if (colId === 'actions') {
                               const hasEnteredAmount = Boolean(draft.amount && Number(draft.amount) > 0);
                               return (
@@ -1880,6 +1895,13 @@ export default function PaymentsView() {
                           return (
                             <td key={colId} className="px-5 py-4 text-slate-600 text-xs">
                               {formatDate(r.receiptDate)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'createdAt' || colId === 'updatedAt') {
+                          return (
+                            <td key={colId} className="px-5 py-4 text-slate-600 text-xs whitespace-nowrap">
+                              {r[colId] ? formatDate(r[colId]) : '—'}
                             </td>
                           );
                         }

@@ -4,21 +4,24 @@ import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
-import { Users, Plus, Search, Download, TrendingUp, Edit, Trash2, LogOut, RotateCcw, FileText } from 'lucide-react';
+import { Users, Plus, Search, Download, TrendingUp, Edit, Trash2, LogOut, RotateCcw, FileText, ArrowUpDown } from 'lucide-react';
 
 const TENANTS_COLUMNS_DEF = [
   { id: 'tenant', label: 'Tenant Details' },
   { id: 'property', label: 'Property & Sub Unit (Partition)' },
   { id: 'startDate', label: 'Start Date' },
   { id: 'endDate', label: 'End Date' },
-  { id: 'monthlyRate', label: 'Monthly Rent' },
+  { id: 'rentType', label: 'Rent Frequency' },
+  { id: 'monthlyRate', label: 'Contract Rent' },
   { id: 'deposit', label: 'Deposit' },
   { id: 'termsNotes', label: 'Terms / Notes' },
   { id: 'status', label: 'Status' },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Actions' },
 ];
 
-const DEFAULT_TENANTS_COLS = ['tenant', 'property', 'startDate', 'monthlyRate', 'deposit', 'status', 'actions'];
+const DEFAULT_TENANTS_COLS = ['tenant', 'property', 'startDate', 'endDate', 'rentType', 'monthlyRate', 'deposit', 'status', 'actions'];
 
 // Screen-fitting default column widths with sufficient space for actions buttons
 const DEFAULT_TENANTS_COLUMN_WIDTHS = {
@@ -27,10 +30,22 @@ const DEFAULT_TENANTS_COLUMN_WIDTHS = {
   startDate: 105,
   endDate: 100,
   monthlyRate: 110,
+  rentType: 100,
   deposit: 95,
   termsNotes: 140,
   status: 90,
   actions: 235
+};
+
+const changeRentType = (form, setForm, rentType) => {
+  let rentAmount = form.rentAmount;
+  if (rentAmount !== '' && form.rentType !== rentType) {
+    const amount = Number(rentAmount);
+    rentAmount = form.rentType === 'Monthly Fixed'
+      ? String(Math.round(amount * 1200) / 100)
+      : String(Math.round(amount / 12 * 100) / 100);
+  }
+  setForm({ ...form, rentType, rentAmount });
 };
 
 export default function TenantsView({ onDataChanged }) {
@@ -41,13 +56,15 @@ export default function TenantsView({ onDataChanged }) {
   const [search, setSearch] = useState('');
   const [propertyFilter, setPropertyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_tenants_v2');
     if (!saved) return DEFAULT_TENANTS_COLS;
     try {
       const allowed = TENANTS_COLUMNS_DEF.map((column) => column.id);
-      return JSON.parse(saved).filter((column) => allowed.includes(column));
+      const savedColumns = JSON.parse(saved).filter((column) => allowed.includes(column));
+      return [...new Set([...savedColumns, 'startDate', 'endDate', 'rentType'])];
     } catch {
       return DEFAULT_TENANTS_COLS;
     }
@@ -77,7 +94,8 @@ export default function TenantsView({ onDataChanged }) {
     unitId: '',
     startDate: new Date().toISOString().split('T')[0],
     endDate: '', // initially blank
-    monthlyRate: '',
+    rentType: 'Monthly Fixed',
+    rentAmount: '',
     depositHeld: '0',
     terms: '',
     notes: ''
@@ -139,7 +157,8 @@ export default function TenantsView({ onDataChanged }) {
         notes: form.notes,
         ...(willAttachContract && form.unitId ? {
           unitId: form.unitId,
-          monthlyRate: form.monthlyRate !== '' ? Number(form.monthlyRate) : undefined,
+          rentType: form.rentType,
+          rentAmount: form.rentAmount !== '' ? Number(form.rentAmount) : undefined,
           depositHeld: Number(form.depositHeld) || 0,
           startDate: form.startDate || new Date().toISOString().split('T')[0],
           endDate: form.endDate || null,
@@ -178,7 +197,8 @@ export default function TenantsView({ onDataChanged }) {
       unitId: '',
       startDate: new Date().toISOString().split('T')[0],
       endDate: '',
-      monthlyRate: '',
+      rentType: 'Monthly Fixed',
+      rentAmount: '',
       depositHeld: '0',
       terms: '',
       notes: ''
@@ -200,7 +220,12 @@ export default function TenantsView({ onDataChanged }) {
       unitId: activeUnit?._id || '',
       startDate: assignment?.startDate ? new Date(assignment.startDate).toISOString().split('T')[0] : '',
       endDate: assignment?.endDate ? new Date(assignment.endDate).toISOString().split('T')[0] : '',
-      monthlyRate: agreement?.monthlyRate ? String(agreement.monthlyRate) : '',
+      rentType: agreement?.rentType || 'Monthly Fixed',
+      rentAmount: agreement
+        ? String(agreement.rentType === 'Annual Fixed'
+          ? (agreement.annualRate || agreement.monthlyRate * 12)
+          : agreement.monthlyRate)
+        : '',
       depositHeld: assignment?.depositHeld ? String(assignment.depositHeld) : '0',
       terms: agreement?.terms || '',
       notes: t.notes || ''
@@ -264,7 +289,12 @@ export default function TenantsView({ onDataChanged }) {
       'Sub Unit (Partition)': t.activeUnit ? (t.activeUnit.subUnitPartition || t.activeUnit.unitName) : 'None',
       'Start Date': t.activeAssignment ? formatDate(t.activeAssignment.startDate) : '',
       'End Date': t.activeAssignment?.endDate ? formatDate(t.activeAssignment.endDate) : 'Ongoing (Blank)',
-      'Monthly Rent': t.currentRentAgreement ? t.currentRentAgreement.monthlyRate : 0,
+      'Rent Frequency': t.currentRentAgreement?.rentType === 'Annual Fixed' ? 'Annual' : t.currentRentAgreement ? 'Monthly' : '',
+      'Contract Rent': t.currentRentAgreement
+        ? (t.currentRentAgreement.rentType === 'Annual Fixed'
+          ? t.currentRentAgreement.annualRate || t.currentRentAgreement.monthlyRate * 12
+          : t.currentRentAgreement.monthlyRate)
+        : 0,
       'Security Deposit': t.activeAssignment ? (t.activeAssignment.depositHeld || 0) : 0,
       'Status': t.activeAssignment ? 'Active Lease' : 'Vacated / Inactive',
       'Terms & Conditions': t.currentRentAgreement?.terms || '',
@@ -287,6 +317,30 @@ export default function TenantsView({ onDataChanged }) {
     const matchesProperty = !propertyFilter || String(tenantPropertyId) === propertyFilter;
     const matchesStatus = !statusFilter || (statusFilter === 'active' ? !!t.activeAssignment : !t.activeAssignment);
     return matchesSearch && matchesProperty && matchesStatus;
+  });
+  const sortedTenants = [...filteredTenants].sort((a, b) => {
+    const getValue = (tenant) => ({
+      tenant: tenant.name,
+      property: tenant.activeUnit?.propertyId?.name,
+      startDate: tenant.activeAssignment?.startDate,
+      endDate: tenant.activeAssignment?.endDate,
+      rentType: tenant.currentRentAgreement?.rentType,
+      monthlyRate: tenant.currentRentAgreement?.rentType === 'Annual Fixed'
+        ? tenant.currentRentAgreement.annualRate || tenant.currentRentAgreement.monthlyRate * 12
+        : tenant.currentRentAgreement?.monthlyRate,
+      deposit: tenant.activeAssignment?.depositHeld,
+      termsNotes: tenant.currentRentAgreement?.terms || tenant.notes,
+      status: tenant.activeAssignment ? 'Active' : 'Inactive',
+      createdAt: tenant.createdAt,
+      updatedAt: tenant.updatedAt,
+      phone: tenant.phone,
+    })[sortConfig.key];
+    const left = getValue(a);
+    const right = getValue(b);
+    const comparison = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left || '').localeCompare(String(right || ''), undefined, { numeric: true, sensitivity: 'base' });
+    return comparison * (sortConfig.direction === 'asc' ? 1 : -1);
   });
 
   return (
@@ -402,7 +456,21 @@ export default function TenantsView({ onDataChanged }) {
                       style={{ width: `${width}px` }}
                       className={`py-3 px-4 border-r border-slate-200 relative group ${alignClass}`}
                     >
-                      <span className="truncate block pr-2">{def.label}</span>
+                      <button
+                        type="button"
+                        disabled={colId === 'actions'}
+                        onClick={() => colId !== 'actions' && setSortConfig((current) => ({
+                          key: colId,
+                          direction: current.key === colId
+                            ? (current.direction === 'asc' ? 'desc' : 'asc')
+                            : (colId === 'createdAt' ? 'desc' : 'asc')
+                        }))}
+                        className={`truncate flex items-center gap-1 pr-2 ${colId === 'actions' ? 'cursor-default' : 'cursor-pointer hover:text-emerald-700'}`}
+                        title={colId === 'actions' ? undefined : `Sort by ${def.label}`}
+                      >
+                        <span>{def.label}</span>
+                        {colId !== 'actions' && <ArrowUpDown className={`w-3 h-3 shrink-0 ${sortConfig.key === colId ? 'text-emerald-600' : 'text-slate-400'}`} />}
+                      </button>
                       <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                     </th>
                   );
@@ -419,7 +487,7 @@ export default function TenantsView({ onDataChanged }) {
                   </td>
                 </tr>
               ) : (
-                filteredTenants.map((t) => (
+                sortedTenants.map((t) => (
                   <tr key={t._id} className="hover:bg-emerald-50/30 transition-colors">
                     {visibleColumns.map(colId => {
                       if (colId === 'tenant') {
@@ -463,7 +531,25 @@ export default function TenantsView({ onDataChanged }) {
                       if (colId === 'monthlyRate') {
                         return (
                           <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-900">
-                            {t.currentRentAgreement ? formatCurrency(t.currentRentAgreement.monthlyRate) : '—'}
+                            {t.currentRentAgreement
+                              ? formatCurrency(t.currentRentAgreement.rentType === 'Annual Fixed'
+                                ? t.currentRentAgreement.annualRate || t.currentRentAgreement.monthlyRate * 12
+                                : t.currentRentAgreement.monthlyRate)
+                              : '—'}
+                          </td>
+                        );
+                      }
+                      if (colId === 'rentType') {
+                        return (
+                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-center text-slate-700">
+                            {t.currentRentAgreement?.rentType === 'Annual Fixed' ? 'Annual' : t.currentRentAgreement ? 'Monthly' : '—'}
+                          </td>
+                        );
+                      }
+                      if (colId === 'createdAt' || colId === 'updatedAt') {
+                        return (
+                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
+                            {t[colId] ? formatDate(t[colId]) : '—'}
                           </td>
                         );
                       }
@@ -624,7 +710,7 @@ export default function TenantsView({ onDataChanged }) {
                       onChange={(e) => {
                         setAttachContract(e.target.checked);
                         if (!e.target.checked) {
-                          setForm(f => ({ ...f, unitId: '', monthlyRate: '' }));
+                          setForm(f => ({ ...f, unitId: '', rentAmount: '' }));
                         }
                       }}
                       className="sr-only peer"
@@ -666,20 +752,40 @@ export default function TenantsView({ onDataChanged }) {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Monthly Rent Rate (₹) *</label>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Rent Frequency *</label>
+                      <select
+                        value={form.rentType}
+                        onChange={(e) => changeRentType(form, setForm, e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="Monthly Fixed">Monthly</option>
+                        <option value="Annual Fixed">Annual</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        {form.rentType === 'Annual Fixed' ? 'Annual Rent (₹) *' : 'Monthly Rent (₹) *'}
+                      </label>
                       <input
                         type="number"
                         required={!!form.unitId}
-                        placeholder="e.g. 22000"
-                        value={form.monthlyRate}
-                        onChange={(e) => setForm({ ...form, monthlyRate: e.target.value })}
+                        min="0"
+                        step="0.01"
+                        placeholder={form.rentType === 'Annual Fixed' ? 'e.g. 264000' : 'e.g. 22000'}
+                        value={form.rentAmount}
+                        onChange={(e) => setForm({ ...form, rentAmount: e.target.value })}
                         className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
                       />
+                      {form.rentType === 'Annual Fixed' && (
+                        <p className="mt-1 text-[10px] text-slate-500">
+                          Rent ledger accrues {formatCurrency((Number(form.rentAmount) || 0) / 12)} per month.
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Security Deposit Held (₹)</label>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Security Deposit (₹)</label>
                       <input
                         type="number"
                         placeholder="0"

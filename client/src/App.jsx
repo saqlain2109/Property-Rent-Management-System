@@ -13,6 +13,7 @@ import PaymentsView from './views/PaymentsView';
 import ExpensesView from './views/ExpensesView';
 import LedgerReportsView from './views/LedgerReportsView';
 import API from './services/api';
+import { Menu, Building2 } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -22,6 +23,7 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [partitionPropertyFilter, setPartitionPropertyFilter] = useState('');
   const [partitionSearch, setPartitionSearch] = useState('');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const checkAuthStatus = async () => {
@@ -76,13 +78,18 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden relative">
-      {/* Consolidated Sidebar with Masters Toggle Accordion */}
+      {/* Consolidated Sidebar with Mobile Drawer support */}
       <Sidebar
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={(tab) => {
+          setCurrentTab(tab);
+          setMobileMenuOpen(false);
+        }}
         user={user}
         onLogout={handleLogout}
         onOpenProfile={() => setShowProfileModal(true)}
+        isOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
       />
 
       {/* Profile & Security Modal */}
@@ -96,7 +103,29 @@ export default function App() {
 
       {/* Main Content View Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <div className="p-4 sm:p-8 max-w-7xl w-full mx-auto pb-24">
+        {/* Mobile Top App Bar */}
+        <div className="md:hidden flex items-center justify-between p-3.5 bg-slate-900 text-white border-b border-slate-800 shrink-0 sticky top-0 z-30 shadow-md">
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 rounded-xl bg-slate-800 text-slate-200 hover:text-white"
+              title="Open Navigation Menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center text-white">
+                <Building2 className="w-4 h-4" />
+              </div>
+              <span className="font-extrabold text-sm tracking-wide">EstateLedger</span>
+            </div>
+          </div>
+          <span className="text-[11px] font-bold text-teal-400 capitalize px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700">
+            {currentTab.replace('_', ' ')}
+          </span>
+        </div>
+
+        <div className="p-3 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto pb-24">
           {currentTab === 'dashboard' && <Dashboard />}
 
           {/* Master Views (rendered full-width, navigated via left sidebar toggle) */}

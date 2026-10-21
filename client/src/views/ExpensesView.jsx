@@ -41,6 +41,8 @@ const EXPENSES_SHEET_COLUMNS_DEF = [
   { id: 'payee', label: 'Paid To / Vendor', defaultVisible: true },
   { id: 'paymentMode', label: 'Payment Mode', defaultVisible: true },
   { id: 'amount', label: 'Amount (₹)', defaultVisible: true },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Actions', defaultVisible: true }
 ];
 
@@ -52,6 +54,8 @@ const DEFAULT_SHEET_COLUMN_WIDTHS = {
   payee: 150,
   paymentMode: 110,
   amount: 140,
+  createdAt: 110,
+  updatedAt: 110,
   actions: 110
 };
 
@@ -62,6 +66,8 @@ const EXPENSES_REGISTER_COLUMNS_DEF = [
   { id: 'description', label: 'What it was for', defaultVisible: true },
   { id: 'payee', label: 'Paid To / Mode', defaultVisible: true },
   { id: 'amount', label: 'Amount', defaultVisible: true },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Action', defaultVisible: true }
 ];
 
@@ -72,6 +78,8 @@ const DEFAULT_REGISTER_COLUMN_WIDTHS = {
   description: 230,
   payee: 140,
   amount: 120,
+  createdAt: 110,
+  updatedAt: 110,
   actions: 100
 };
 
@@ -138,7 +146,7 @@ export default function ExpensesView() {
         return JSON.parse(saved).filter(c => allowed.includes(c));
       } catch (e) {}
     }
-    return EXPENSES_SHEET_COLUMNS_DEF.map(c => c.id);
+    return EXPENSES_SHEET_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
   });
 
   const {
@@ -156,7 +164,7 @@ export default function ExpensesView() {
         return JSON.parse(saved).filter(c => allowed.includes(c));
       } catch (e) {}
     }
-    return EXPENSES_REGISTER_COLUMNS_DEF.map(c => c.id);
+    return EXPENSES_REGISTER_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
   });
 
   const {
@@ -896,6 +904,8 @@ export default function ExpensesView() {
                         else if (colId === 'payee') { label = 'Paid To / Vendor'; }
                         else if (colId === 'paymentMode') { label = 'Payment Mode'; }
                         else if (colId === 'amount') { label = 'Amount (₹)'; align = 'text-right'; }
+                        else if (colId === 'createdAt') { label = 'Created Date'; }
+                        else if (colId === 'updatedAt') { label = 'Modified Date'; }
                         else if (colId === 'actions') { label = 'Actions'; align = 'text-center'; }
 
                         return (
@@ -1035,6 +1045,13 @@ export default function ExpensesView() {
                                 </td>
                               );
                             }
+                            if (colId === 'createdAt' || colId === 'updatedAt') {
+                              return (
+                                <td key={colId} className="px-3 py-3 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
+                                  {e[colId] ? formatDate(e[colId]) : '—'}
+                                </td>
+                              );
+                            }
                             if (colId === 'actions') {
                               return (
                                 <td key={colId} className="px-3 py-3 text-center border-r border-slate-100">
@@ -1091,15 +1108,20 @@ export default function ExpensesView() {
                   {/* Excel Sheet Total Row */}
                   <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-extrabold text-xs">
                     <tr>
-                      <td colSpan={visibleSheetColumns.length - 2} className="px-4 py-3.5 text-left text-slate-700 uppercase tracking-wider">
-                        Total Expenses for {formatMonthYear(selectedMonth)} ({filteredMonthExpenses.length} entries)
-                      </td>
-                      <td className="px-4 py-3.5 text-right font-mono text-sm text-rose-700 font-extrabold">
-                        {formatCurrency(monthTotalSum)}
-                      </td>
-                      <td className="px-4 py-3.5 text-center text-slate-400 font-normal text-[11px]">
-                        Excel Format
-                      </td>
+                      {visibleSheetColumns.map((colId) => (
+                        <td
+                          key={colId}
+                          className={`px-4 py-3.5 ${colId === 'amount' ? 'text-right font-mono text-sm text-rose-700' : colId === 'actions' ? 'text-center text-slate-400 font-normal text-[11px]' : 'text-slate-700'} font-extrabold`}
+                        >
+                          {colId === 'amount'
+                            ? formatCurrency(monthTotalSum)
+                            : colId === 'actions'
+                              ? 'Excel Format'
+                              : colId === visibleSheetColumns.find((column) => !['amount', 'actions'].includes(column))
+                                ? `Total Expenses for ${formatMonthYear(selectedMonth)} (${filteredMonthExpenses.length} entries)`
+                                : ''}
+                        </td>
+                      ))}
                     </tr>
                   </tfoot>
                 </table>
@@ -1220,6 +1242,8 @@ export default function ExpensesView() {
                         else if (colId === 'description') label = 'What it was for';
                         else if (colId === 'payee') label = 'Paid To / Method';
                         else if (colId === 'amount') { label = 'Amount'; align = 'text-right'; }
+                        else if (colId === 'createdAt') label = 'Created Date';
+                        else if (colId === 'updatedAt') label = 'Modified Date';
                         else if (colId === 'actions') { label = 'Action'; align = 'text-center'; }
 
                         return (
@@ -1291,6 +1315,13 @@ export default function ExpensesView() {
                             return (
                               <td key={colId} className="px-5 py-3.5 text-right font-bold text-rose-600 text-sm">
                                 {formatCurrency(e.amount)}
+                              </td>
+                            );
+                          }
+                          if (colId === 'createdAt' || colId === 'updatedAt') {
+                            return (
+                              <td key={colId} className="px-5 py-3.5 text-xs text-slate-600 whitespace-nowrap">
+                                {e[colId] ? formatDate(e[colId]) : '—'}
                               </td>
                             );
                           }

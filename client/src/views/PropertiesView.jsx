@@ -3,9 +3,9 @@ import API from '../services/api';
 import * as XLSX from 'xlsx';
 import { 
   Building2, Plus, Search, Download, Edit, Trash2,
-  ChevronDown, ChevronUp, Layers, ExternalLink, ArrowRight, RotateCcw
+  ChevronDown, ChevronUp, Layers, ExternalLink, ArrowRight, RotateCcw, ArrowUpDown
 } from 'lucide-react';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, formatDate } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
 
 const PROPERTIES_COLUMNS_DEF = [
@@ -15,6 +15,8 @@ const PROPERTIES_COLUMNS_DEF = [
   { id: 'ownership', label: 'Ownership %' },
   { id: 'partitions', label: 'Partitions' },
   { id: 'address', label: 'Full Address' },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Actions' },
 ];
 
@@ -38,6 +40,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [propertyTypeFilter, setPropertyTypeFilter] = useState('');
+  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_properties');
@@ -250,6 +253,33 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
     ((p.name || '').toLowerCase().includes(search.toLowerCase()) ||
     (p.address || '').toLowerCase().includes(search.toLowerCase()))
   );
+  const sortedProperties = [...filteredProperties].sort((a, b) => {
+    const values = {
+      details: a.name,
+      type: a.propertyType,
+      area: a.totalAreaSqFt,
+      ownership: a.ownershipPercentage,
+      partitions: a.unitCount,
+      address: a.address,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+    };
+    const left = values[sortConfig.key];
+    const right = {
+      details: b.name,
+      type: b.propertyType,
+      area: b.totalAreaSqFt,
+      ownership: b.ownershipPercentage,
+      partitions: b.unitCount,
+      address: b.address,
+      createdAt: b.createdAt,
+      updatedAt: b.updatedAt,
+    }[sortConfig.key];
+    const comparison = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left || '').localeCompare(String(right || ''), undefined, { numeric: true, sensitivity: 'base' });
+    return comparison * (sortConfig.direction === 'asc' ? 1 : -1);
+  });
 
   return (
     <div className="space-y-6">
@@ -352,6 +382,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                   if (['ownership', 'partitions'].includes(colId)) alignClass = 'text-center';
                   if (['area', 'actions'].includes(colId)) alignClass = 'text-right';
 
+                  const isSortable = colId !== 'actions';
                   return (
                     <th 
                       key={colId} 
@@ -359,7 +390,21 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                       style={{ width: `${width}px` }}
                       className={`py-3 px-4 border-r border-slate-200 relative group ${alignClass}`}
                     >
-                      <span className="truncate block pr-2">{def.label}</span>
+                      <button
+                        type="button"
+                        disabled={!isSortable}
+                        onClick={() => isSortable && setSortConfig((current) => ({
+                          key: colId,
+                          direction: current.key === colId
+                            ? (current.direction === 'asc' ? 'desc' : 'asc')
+                            : (colId === 'createdAt' ? 'desc' : 'asc')
+                        }))}
+                        className={`truncate flex items-center gap-1 pr-2 ${isSortable ? 'cursor-pointer hover:text-emerald-700' : 'cursor-default'}`}
+                        title={isSortable ? `Sort by ${def.label}` : undefined}
+                      >
+                        <span>{def.label}</span>
+                        {isSortable && <ArrowUpDown className={`w-3 h-3 shrink-0 ${sortConfig.key === colId ? 'text-emerald-600' : 'text-slate-400'}`} />}
+                      </button>
                       <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                     </th>
                   );
@@ -376,7 +421,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                   </td>
                 </tr>
               ) : (
-                filteredProperties.map((p) => (
+                sortedProperties.map((p) => (
                   <React.Fragment key={p._id}>
                     <tr className="hover:bg-emerald-50/30 transition-colors">
                       {visibleColumns.map(colId => {
@@ -460,6 +505,13 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                           return (
                             <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-600 text-xs">
                               {p.address || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'createdAt' || colId === 'updatedAt') {
+                          return (
+                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
+                              {p[colId] ? formatDate(p[colId]) : '—'}
                             </td>
                           );
                         }

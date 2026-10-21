@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
-import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
-import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit, RotateCcw } from 'lucide-react';
+import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit, RotateCcw, ArrowUpDown } from 'lucide-react';
 
 const PG_COLUMNS_DEF = [
   { id: 'month', label: 'Month', defaultVisible: true },
@@ -16,6 +16,8 @@ const PG_COLUMNS_DEF = [
   { id: 'actualBank', label: 'Actual Bank Received', defaultVisible: false },
   { id: 'difference', label: 'Bank vs Net Variance', defaultVisible: false },
   { id: 'notes', label: 'Notes / Remarks', defaultVisible: false },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Actions', defaultVisible: true }
 ];
 
@@ -32,7 +34,9 @@ const DEFAULT_PG_COLUMN_WIDTHS = {
   rehan: 95,
   actualBank: 110,
   difference: 110,
-  notes: 140
+  notes: 140,
+  createdAt: 110,
+  updatedAt: 110
 };
 
 export default function PGView() {
@@ -40,11 +44,15 @@ export default function PGView() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingSettlement, setEditingSettlement] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
 
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_pg_settlements');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try {
+        const allowed = PG_COLUMNS_DEF.map((column) => column.id);
+        return JSON.parse(saved).filter((column) => allowed.includes(column));
+      } catch (e) {}
     }
     return PG_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
   });
@@ -117,6 +125,31 @@ export default function PGView() {
 
   const calculatedDeductions = Number(form.altafShare || 0) + Number(form.anandShare || 0) + Number(form.bisleriWaterShare || 0) + Number(form.rehanShare || 0);
   const calculatedNet = Number(form.pgGrossCollection || 0) - calculatedDeductions;
+  const sortedSettlements = [...settlements].sort((a, b) => {
+    const getValue = (settlement) => ({
+      month: settlement.monthYear,
+      gross: settlement.pgGrossCollection,
+      altaf: settlement.altafShare,
+      anand: settlement.anandShare,
+      bisleri: settlement.bisleriWaterShare,
+      deductions: settlement.totalOperatorDeductions,
+      net: settlement.netReceivedByOwner,
+      rehan: settlement.rehanShare,
+      actualBank: settlement.actualBankReceived,
+      difference: settlement.actualBankReceived == null
+        ? null
+        : settlement.actualBankReceived - settlement.netReceivedByOwner,
+      notes: settlement.notes,
+      createdAt: settlement.createdAt,
+      updatedAt: settlement.updatedAt,
+    })[sortConfig.key];
+    const left = getValue(a);
+    const right = getValue(b);
+    const comparison = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left || '').localeCompare(String(right || ''), undefined, { numeric: true, sensitivity: 'base' });
+    return comparison * (sortConfig.direction === 'asc' ? 1 : -1);
+  });
 
   return (
     <div className="space-y-6">
@@ -218,7 +251,21 @@ export default function PGView() {
                       style={{ width: `${width}px` }}
                       className={`pb-3 pr-2 border-r border-slate-100 relative group ${align}`}
                     >
-                      <span className="truncate block pr-2">{label}</span>
+                      <button
+                        type="button"
+                        disabled={colId === 'actions'}
+                        onClick={() => colId !== 'actions' && setSortConfig((current) => ({
+                          key: colId,
+                          direction: current.key === colId
+                            ? (current.direction === 'asc' ? 'desc' : 'asc')
+                            : (colId === 'createdAt' ? 'desc' : 'asc')
+                        }))}
+                        className={`truncate flex items-center gap-1 pr-2 ${colId === 'actions' ? 'cursor-default' : 'cursor-pointer hover:text-emerald-700'}`}
+                        title={colId === 'actions' ? undefined : `Sort by ${label}`}
+                      >
+                        <span>{label}</span>
+                        {colId !== 'actions' && <ArrowUpDown className={`w-3 h-3 shrink-0 ${sortConfig.key === colId ? 'text-emerald-600' : 'text-slate-400'}`} />}
+                      </button>
                       <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                     </th>
                   );
@@ -233,7 +280,7 @@ export default function PGView() {
                   </td>
                 </tr>
               ) : (
-                settlements.map((s) => {
+                sortedSettlements.map((s) => {
                   const actualBank = s.actualBankReceived != null ? Number(s.actualBankReceived) : null;
                   const variance = actualBank != null ? actualBank - Number(s.netReceivedByOwner || 0) : null;
 
@@ -320,6 +367,13 @@ export default function PGView() {
                           return (
                             <td key={colId} className="py-3.5 text-xs text-slate-500 max-w-xs truncate" title={s.notes}>
                               {s.notes || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'createdAt' || colId === 'updatedAt') {
+                          return (
+                            <td key={colId} className="py-3.5 text-xs text-slate-600 whitespace-nowrap">
+                              {s[colId] ? formatDate(s[colId]) : '—'}
                             </td>
                           );
                         }

@@ -1,22 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import * as XLSX from 'xlsx';
-import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
+import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
-import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import ApexToolbar from '../components/ApexToolbar';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
 import {
-  FileText, Plus, Search, Building2, Layers, Users, Calendar,
-  TrendingUp, CheckCircle2, AlertCircle, Edit2, LogOut, History,
-  IndianRupee, X, Check, ArrowRight, Clock, ShieldCheck, Download, RotateCcw
+  FileText, Plus, Search, Calendar, TrendingUp, Edit2, LogOut, History,
+  X, Download, RotateCcw, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 const CONTRACTS_COLUMNS_DEF = [
   { id: 'assignmentCode', label: 'Contract Code' },
   { id: 'tenant', label: 'Tenant Details' },
   { id: 'property', label: 'Property & Partition' },
-  { id: 'dates', label: 'Tenancy Dates' },
-  { id: 'currentRate', label: 'Current Rate' },
-  { id: 'totalExpected', label: 'Expected To Date' },
+  { id: 'startDate', label: 'Start Date' },
+  { id: 'endDate', label: 'End Date' },
+  { id: 'rentType', label: 'Rent Frequency' },
+  { id: 'currentRate', label: 'Contract Rent' },
   { id: 'totalReceived', label: 'Received' },
   { id: 'outstanding', label: 'Outstanding' },
   { id: 'history', label: 'Rate History' },
@@ -24,22 +25,58 @@ const CONTRACTS_COLUMNS_DEF = [
 ];
 
 const DEFAULT_CONTRACTS_COLS = [
-  'assignmentCode', 'tenant', 'property', 'dates',
-  'currentRate', 'totalExpected', 'totalReceived', 'outstanding', 'history', 'actions'
+  'assignmentCode', 'tenant', 'property', 'startDate', 'endDate',
+  'rentType', 'currentRate', 'totalReceived', 'outstanding', 'history', 'actions'
 ];
 
 const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
   assignmentCode: 130,
   tenant: 170,
   property: 170,
-  dates: 140,
+  startDate: 120,
+  endDate: 120,
+  rentType: 110,
   currentRate: 120,
-  totalExpected: 125,
   totalReceived: 120,
   outstanding: 125,
   history: 105,
-  actions: 145
+  actions: 220
 };
+
+const getContractRentType = (contract) => (
+  contract.currentAgreement?.rentType || 'Monthly Fixed'
+);
+
+const getContractRentAmount = (contract) => {
+  const agreement = contract.currentAgreement;
+  if (!agreement) return contract.currentMonthlyRate || 0;
+  if (agreement.rentType === 'Annual Fixed') {
+    return agreement.annualRate || agreement.monthlyRate * 12;
+  }
+  return agreement.monthlyRate || 0;
+};
+
+const isContractEndDatePast = (endDate) => (
+  Boolean(endDate) && endDate.slice(0, 10) < new Date().toISOString().slice(0, 10)
+);
+
+const changeRentType = (form, setForm, nextRentType) => {
+  let rentAmount = form.rentAmount;
+  if (rentAmount !== '' && form.rentType !== nextRentType) {
+    const amount = Number(rentAmount);
+    if (form.rentType === 'Monthly Fixed' && nextRentType === 'Annual Fixed') {
+      rentAmount = String(Math.round(amount * 1200) / 100);
+    } else if (form.rentType === 'Annual Fixed' && nextRentType === 'Monthly Fixed') {
+      rentAmount = String(Math.round(amount / 12 * 100) / 100);
+    }
+  }
+  setForm({ ...form, rentType: nextRentType, rentAmount });
+};
+
+const getContractColumnWidth = (columnId, columnWidths) => Math.max(
+  columnWidths[columnId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[columnId] || 100,
+  columnId === 'actions' ? 220 : 0
+);
 
 export default function ContractsView() {
   const [contracts, setContracts] = useState([]);
@@ -55,7 +92,8 @@ export default function ContractsView() {
     if (!saved) return DEFAULT_CONTRACTS_COLS;
     try {
       const allowed = CONTRACTS_COLUMNS_DEF.map((c) => c.id);
-      return JSON.parse(saved).filter((c) => allowed.includes(c));
+      const savedColumns = JSON.parse(saved).filter((c) => allowed.includes(c));
+      return [...new Set([...savedColumns, 'startDate', 'endDate', 'rentType'])];
     } catch {
       return DEFAULT_CONTRACTS_COLS;
     }
@@ -64,17 +102,24 @@ export default function ContractsView() {
   const {
     columnWidths,
     handleResizeStart,
-    resetColumnWidths,
-    hasCustomWidths
+    resetColumnWidths
   } = useResizableColumns('contracts_v1', DEFAULT_CONTRACTS_COLUMN_WIDTHS);
 
-  // Filters
+  // Controls & Toolbar States (APEX Integration)
   const [search, setSearch] = useState('');
   const [propertyFilter, setPropertyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('Active');
+  const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [activeViewId, setActiveViewId] = useState(null);
+
+  // Pagination State
+  const [rowsPerPage, setRowsPerPage] = useState(10); // default 10 or 'All'
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showReviseModal, setShowReviseModal] = useState(false);
   const [showVacateModal, setShowVacateModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -86,14 +131,30 @@ export default function ContractsView() {
     propertyId: '',
     unitId: '',
     startDate: new Date().toISOString().split('T')[0],
-    monthlyRate: '',
+    endDate: '',
+    rentType: 'Monthly Fixed',
+    rentAmount: '',
+    depositHeld: 0,
+    terms: '',
+    notes: '',
+  });
+
+  const [editForm, setEditForm] = useState({
+    tenantId: '',
+    propertyId: '',
+    unitId: '',
+    startDate: '',
+    endDate: '',
+    rentType: 'Monthly Fixed',
+    rentAmount: '',
     depositHeld: 0,
     terms: '',
     notes: '',
   });
 
   const [reviseForm, setReviseForm] = useState({
-    newRate: '',
+    rentType: 'Monthly Fixed',
+    rentAmount: '',
     effectiveFrom: new Date().toISOString().split('T')[0],
     reason: '',
   });
@@ -133,6 +194,10 @@ export default function ContractsView() {
     u => !createForm.propertyId || String(u.propertyId?._id || u.propertyId) === createForm.propertyId
   );
 
+  const availableUnitsForEdit = units.filter(
+    u => !editForm.propertyId || String(u.propertyId?._id || u.propertyId) === editForm.propertyId
+  );
+
   const handleCreateContract = async (e) => {
     e.preventDefault();
     try {
@@ -141,19 +206,24 @@ export default function ContractsView() {
         tenantId: createForm.tenantId,
         unitId: createForm.unitId,
         startDate: createForm.startDate,
-        monthlyRate: Number(createForm.monthlyRate),
+        endDate: createForm.endDate || null,
+        rentType: createForm.rentType,
+        rentAmount: Number(createForm.rentAmount),
         depositHeld: Number(createForm.depositHeld) || 0,
         terms: createForm.terms,
         notes: createForm.notes,
       });
       if (res.data.success) {
+        if (statusFilter === 'Active' && isContractEndDatePast(createForm.endDate)) setStatusFilter('Past');
         setShowCreateModal(false);
         setCreateForm({
           tenantId: '',
           propertyId: '',
           unitId: '',
           startDate: new Date().toISOString().split('T')[0],
-          monthlyRate: '',
+          endDate: '',
+          rentType: 'Monthly Fixed',
+          rentAmount: '',
           depositHeld: 0,
           terms: '',
           notes: '',
@@ -161,7 +231,39 @@ export default function ContractsView() {
         fetchData();
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create contract.');
+      alert(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to create contract.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleEditContract = async (e) => {
+    e.preventDefault();
+    if (!selectedContract) return;
+    try {
+      setSubmitting(true);
+      const res = await API.put(`/assignments/${selectedContract._id}`, {
+        tenantId: editForm.tenantId,
+        unitId: editForm.unitId,
+        propertyId: editForm.propertyId,
+        startDate: editForm.startDate,
+        endDate: editForm.endDate || null,
+        rentType: editForm.rentType,
+        rentAmount: Number(editForm.rentAmount),
+        depositHeld: Number(editForm.depositHeld) || 0,
+        terms: editForm.terms,
+        notes: editForm.notes,
+      });
+      if (res.data.success) {
+        const contractEnded = isContractEndDatePast(editForm.endDate);
+        if (statusFilter === 'Active' && contractEnded) setStatusFilter('Past');
+        if (statusFilter === 'Past' && !contractEnded) setStatusFilter('Active');
+        setShowEditModal(false);
+        setSelectedContract(null);
+        fetchData();
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Failed to update contract.');
     } finally {
       setSubmitting(false);
     }
@@ -173,7 +275,8 @@ export default function ContractsView() {
     try {
       setSubmitting(true);
       const res = await API.post(`/assignments/${selectedContract._id}/increase-rent`, {
-        newRate: Number(reviseForm.newRate),
+        rentType: reviseForm.rentType,
+        rentAmount: Number(reviseForm.rentAmount),
         effectiveFrom: reviseForm.effectiveFrom,
         reason: reviseForm.reason,
       });
@@ -181,7 +284,8 @@ export default function ContractsView() {
         setShowReviseModal(false);
         setSelectedContract(null);
         setReviseForm({
-          newRate: '',
+          rentType: 'Monthly Fixed',
+          rentAmount: '',
           effectiveFrom: new Date().toISOString().split('T')[0],
           reason: '',
         });
@@ -216,37 +320,85 @@ export default function ContractsView() {
     }
   };
 
-  const filteredContracts = contracts.filter((c) => {
-    const tName = c.tenantId?.name || '';
-    const pName = c.unitId?.propertyId?.name || '';
-    const uName = c.unitId?.unitName || '';
-    const code = c.assignmentCode || '';
+  // Comprehensive Filter & Search Logic (including APEX Expression filters)
+  const filteredContracts = useMemo(() => {
+    return contracts.filter((c) => {
+      const tName = c.tenantId?.name || '';
+      const pName = c.unitId?.propertyId?.name || '';
+      const uName = c.unitId?.unitName || '';
+      const code = c.assignmentCode || '';
+      const rentType = getContractRentType(c);
+      const rentAmount = String(getContractRentAmount(c));
+      const sDate = c.startDate ? formatDate(c.startDate) : '';
+      const eDate = c.endDate ? formatDate(c.endDate) : 'Ongoing';
 
-    const matchesSearch =
-      !search ||
-      tName.toLowerCase().includes(search.toLowerCase()) ||
-      pName.toLowerCase().includes(search.toLowerCase()) ||
-      uName.toLowerCase().includes(search.toLowerCase()) ||
-      code.toLowerCase().includes(search.toLowerCase());
+      // 1. Text Search Box
+      const matchesSearch =
+        !search ||
+        tName.toLowerCase().includes(search.toLowerCase()) ||
+        pName.toLowerCase().includes(search.toLowerCase()) ||
+        uName.toLowerCase().includes(search.toLowerCase()) ||
+        code.toLowerCase().includes(search.toLowerCase()) ||
+        rentAmount.includes(search);
 
-    const matchesProp =
-      !propertyFilter ||
-      String(c.unitId?.propertyId?._id || c.unitId?.propertyId) === propertyFilter;
+      // 2. Property Dropdown Filter
+      const matchesProp =
+        !propertyFilter ||
+        String(c.unitId?.propertyId?._id || c.unitId?.propertyId) === propertyFilter;
 
-    const matchesStatus =
-      !statusFilter ||
-      (statusFilter === 'Active' && c.status === 'Active') ||
-      (statusFilter === 'Past' && c.status !== 'Active');
+      // 3. Status Tab Filter (Active / Past / All)
+      const matchesStatus =
+        !statusFilter ||
+        (statusFilter === 'Active' && c.status === 'Active') ||
+        (statusFilter === 'Past' && c.status !== 'Active');
 
-    return matchesSearch && matchesProp && matchesStatus;
-  });
+      if (!matchesSearch || !matchesProp || !matchesStatus) return false;
 
-  // Overview metrics
-  const totalActive = contracts.filter(c => c.status === 'Active').length;
-  const totalExpectedAll = contracts.reduce((s, c) => s + (c.totalExpected || 0), 0);
-  const totalReceivedAll = contracts.reduce((s, c) => s + (c.totalReceived || 0), 0);
-  const totalOutstandingAll = contracts.reduce((s, c) => s + (c.outstandingBalance || 0), 0);
+      // 4. Custom APEX Filters
+      for (const f of activeFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'assignmentCode') fieldVal = code;
+        else if (f.columnId === 'tenant') fieldVal = tName;
+        else if (f.columnId === 'property') fieldVal = `${pName} ${uName}`;
+        else if (f.columnId === 'startDate') fieldVal = sDate;
+        else if (f.columnId === 'endDate') fieldVal = eDate;
+        else if (f.columnId === 'rentType') fieldVal = rentType;
+        else if (f.columnId === 'currentRate') fieldVal = rentAmount;
+        else if (f.columnId === 'totalReceived') fieldVal = String(c.totalReceived || 0);
+        else if (f.columnId === 'outstanding') fieldVal = String(c.outstandingBalance || 0);
 
+        const target = (f.value || '').toLowerCase().trim();
+        const src = fieldVal.toLowerCase().trim();
+
+        if (f.operator === 'contains' && !src.includes(target)) return false;
+        if (f.operator === 'equals' && src !== target) return false;
+        if (f.operator === 'starts_with' && !src.startsWith(target)) return false;
+        if (f.operator === 'greater_than' && Number(src.replace(/[^\d.-]/g, '')) <= Number(target)) return false;
+        if (f.operator === 'less_than' && Number(src.replace(/[^\d.-]/g, '')) >= Number(target)) return false;
+      }
+
+      return true;
+    });
+  }, [contracts, search, propertyFilter, statusFilter, activeFilters]);
+
+  // Pagination Slice
+  const totalItems = filteredContracts.length;
+  const isAllRows = rowsPerPage === 'All';
+  const effectivePageSize = isAllRows ? totalItems || 1 : Number(rowsPerPage);
+  const totalPages = Math.ceil(totalItems / effectivePageSize) || 1;
+
+  // Keep currentPage within bounds when items change
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(1);
+  }, [totalPages, currentPage]);
+
+  const paginatedContracts = useMemo(() => {
+    if (isAllRows) return filteredContracts;
+    const startIndex = (currentPage - 1) * effectivePageSize;
+    return filteredContracts.slice(startIndex, startIndex + effectivePageSize);
+  }, [filteredContracts, isAllRows, currentPage, effectivePageSize]);
+
+  // Export ONLY the currently filtered data
   const exportToExcel = () => {
     try {
       const dataToExport = filteredContracts.map((c) => ({
@@ -259,8 +411,8 @@ export default function ContractsView() {
         'Partition / Unit': c.unitId?.unitName || '',
         'Start Date': c.startDate ? formatDate(c.startDate) : '',
         'End Date': c.endDate ? formatDate(c.endDate) : 'Ongoing',
-        'Current Monthly Rate (₹)': c.currentMonthlyRate || 0,
-        'Expected Rent To Date (₹)': c.totalExpected || 0,
+        'Rent Frequency': getContractRentType(c),
+        'Contract Rent (₹)': getContractRentAmount(c),
         'Total Received (₹)': c.totalReceived || 0,
         'Outstanding Balance (₹)': c.outstandingBalance || 0,
         'Deposit Held (₹)': c.depositHeld || 0,
@@ -270,171 +422,102 @@ export default function ContractsView() {
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Contracts');
-      XLSX.writeFile(workbook, `Contracts_Register_${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.writeFile(workbook, `Contracts_Filtered_${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (err) {
       console.error('Failed to export contracts to Excel:', err);
     }
   };
 
+  const totalActive = contracts.filter(c => c.status === 'Active').length;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold">
-              <FileText className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900">Rent Contracts & Leases</h2>
-              <p className="text-xs text-slate-500">
-                Independent contract records linking Tenants to Properties & Units with full rate revision history
-              </p>
-            </div>
+    <div className="space-y-4">
+      {/* Header View: Clean Title without Dashboard KPIs as requested */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold shrink-0">
+            <FileText className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Contracts & Leases</h2>
+            <p className="text-xs text-slate-500">
+              Clean lease agreement manager with monthly rent, start & end dates, rate revisions, and vacancy logs
+            </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <ColumnManager
-            columns={CONTRACTS_COLUMNS_DEF}
-            visibleColumns={visibleColumns}
-            onChangeVisible={setVisibleColumns}
-            storageKey="contracts_v1"
-            onResetWidths={resetColumnWidths}
+        {/* Quick Property & Status Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchableSelect
+            className="w-44 sm:w-52"
+            value={propertyFilter}
+            onChange={setPropertyFilter}
+            placeholder="All Properties"
+            searchPlaceholder="Filter property..."
+            options={properties.map((p) => ({ value: p._id, label: p.name }))}
           />
 
-          <button
-            type="button"
-            onClick={resetColumnWidths}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-xs font-bold transition-all shadow-xs"
-            title="Reset column widths"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Reset Widths</span>
-          </button>
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+            <button
+              onClick={() => { setStatusFilter('Active'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                statusFilter === 'Active' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Active ({totalActive})
+            </button>
+            <button
+              onClick={() => { setStatusFilter('Past'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                statusFilter === 'Past' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Past / Vacated
+            </button>
+            <button
+              onClick={() => { setStatusFilter(''); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                !statusFilter ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              All
+            </button>
+          </div>
+        </div>
+      </div>
 
-          <button
-            onClick={exportToExcel}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
-          >
-            <Download className="w-4 h-4 text-teal-600" />
-            <span>Export to Excel</span>
-          </button>
-
+      {/* Oracle APEX-Style Interactive Toolbar (Columns, Filter, Freeze Header, Save View, Download, Rows Per Page) */}
+      <ApexToolbar
+        search={search}
+        onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+        availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+        columns={CONTRACTS_COLUMNS_DEF}
+        visibleColumns={visibleColumns}
+        onChangeVisibleColumns={setVisibleColumns}
+        onResetWidths={resetColumnWidths}
+        isHeaderSticky={isHeaderSticky}
+        onToggleHeaderSticky={setIsHeaderSticky}
+        filters={activeFilters}
+        onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
+        onExport={exportToExcel}
+        storageKey="contracts_v1"
+        activeViewName={activeViewId}
+        onViewChange={setActiveViewId}
+        primaryAction={
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-teal-600/20 active:scale-95 shrink-0"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0"
           >
-            <Plus className="w-4 h-4" />
-            Create Contract
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create Contract</span>
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-teal-50 text-teal-600">
-            <Building2 className="w-6 h-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Active Leases</p>
-            <p className="text-2xl font-extrabold mt-0.5 text-slate-900">{totalActive}</p>
-            <p className="text-xs text-teal-600 font-medium mt-0.5 leading-tight">Currently Occupying Units</p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-blue-50 text-blue-600">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Total Expected</p>
-            <p className="text-2xl font-extrabold mt-0.5 text-blue-700">{formatCurrency(totalExpectedAll)}</p>
-            <p className="text-xs text-slate-400 mt-0.5 leading-tight">Prorated through current month</p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-600">
-            <CheckCircle2 className="w-6 h-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Total Received</p>
-            <p className="text-2xl font-extrabold mt-0.5 text-emerald-600">{formatCurrency(totalReceivedAll)}</p>
-            <p className="text-xs text-emerald-600 font-medium mt-0.5 leading-tight">Allocated payment receipts</p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-rose-50 text-rose-600">
-            <AlertCircle className="w-6 h-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">Outstanding Balance</p>
-            <p className="text-2xl font-extrabold mt-0.5 text-rose-600">{formatCurrency(totalOutstandingAll)}</p>
-            <p className="text-xs text-rose-500 font-medium mt-0.5 leading-tight">Net overdue across contracts</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-2.5 flex-1 bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200/80">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" />
-          <input
-            type="text"
-            placeholder="Search tenant, property, unit, or contract code..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 text-xs sm:text-sm bg-transparent border-none focus:outline-none text-slate-800 placeholder:text-slate-400"
-          />
-          {search && (
-            <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        <SearchableSelect
-          className="w-full sm:w-56"
-          value={propertyFilter}
-          onChange={setPropertyFilter}
-          placeholder="All Properties"
-          searchPlaceholder="Search properties..."
-          options={properties.map((p) => ({ value: p._id, label: p.name }))}
-        />
-
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
-          <button
-            onClick={() => setStatusFilter('Active')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              statusFilter === 'Active' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            Active ({totalActive})
-          </button>
-          <button
-            onClick={() => setStatusFilter('Past')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              statusFilter === 'Past' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            Past / Vacated
-          </button>
-          <button
-            onClick={() => setStatusFilter('')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              !statusFilter ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            All
-          </button>
-        </div>
-      </div>
-
-      {/* Contracts Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Contracts Table with Sticky Header & APEX Drag-Resize Columns */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="w-7 h-7 border-4 border-teal-500 border-t-transparent rounded-full animate-spin" />
@@ -444,28 +527,28 @@ export default function ContractsView() {
             No contracts found matching your filters.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
             <table
               className="w-full text-left text-xs border-collapse table-fixed"
-              style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
+              style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + getContractColumnWidth(colId, columnWidths), 0)}px` }}
             >
               <colgroup>
                 {visibleColumns.map((colId) => (
                   <col
                     key={colId}
-                    style={{ width: `${columnWidths[colId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[colId] || 100}px` }}
+                    style={{ width: `${getContractColumnWidth(colId, columnWidths)}px` }}
                   />
                 ))}
               </colgroup>
-              <thead>
-                <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200 select-none">
+              <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
+                <tr className="bg-slate-100/95 backdrop-blur-xs text-slate-700 font-bold border-b border-slate-200 select-none">
                   {visibleColumns.map((colId) => {
                     const def = CONTRACTS_COLUMNS_DEF.find((c) => c.id === colId);
                     if (!def) return null;
-                    const width = columnWidths[colId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[colId] || 100;
+                    const width = getContractColumnWidth(colId, columnWidths);
                     let alignClass = 'text-left';
                     if (['history'].includes(colId)) alignClass = 'text-center';
-                    if (['currentRate', 'totalExpected', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
+                    if (['currentRate', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
                     if (colId === 'actions') alignClass = 'text-center';
 
                     return (
@@ -473,7 +556,7 @@ export default function ContractsView() {
                         key={colId}
                         {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'contracts_v1')}
                         style={{ width: `${width}px` }}
-                        className={`py-3 px-4 border-r border-slate-200 relative group ${alignClass}`}
+                        className={`py-3 px-3.5 border-r border-slate-200 relative group bg-slate-100/95 ${alignClass}`}
                       >
                         <span className="truncate block pr-2">{def.label}</span>
                         <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
@@ -483,7 +566,7 @@ export default function ContractsView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredContracts.map((c) => {
+                {paginatedContracts.map((c) => {
                   const isVacated = c.status !== 'Active';
                   const rateCount = c.rateHistory?.length || 1;
                   return (
@@ -494,7 +577,7 @@ export default function ContractsView() {
                       {visibleColumns.map((colId) => {
                         if (colId === 'assignmentCode') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 whitespace-nowrap">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
                               <span className="font-mono font-bold text-slate-800 text-xs block">
                                 {c.assignmentCode}
                               </span>
@@ -509,15 +592,12 @@ export default function ContractsView() {
 
                         if (colId === 'tenant') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200">
-                              <span className="font-bold text-slate-900 text-sm block">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                              <span className="font-bold text-slate-900 text-xs block truncate">
                                 {c.tenantId?.name || '—'}
                               </span>
                               {c.tenantId?.phone && (
                                 <span className="text-slate-500 text-[11px] block">{c.tenantId.phone}</span>
-                              )}
-                              {c.tenantId?.email && (
-                                <span className="text-slate-400 text-[10px] block">{c.tenantId.email}</span>
                               )}
                             </td>
                           );
@@ -525,51 +605,66 @@ export default function ContractsView() {
 
                         if (colId === 'property') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200">
-                              <span className="font-semibold text-slate-800 block">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                              <span className="font-semibold text-slate-800 text-xs block truncate">
                                 {c.unitId?.propertyId?.name || '—'}
                               </span>
-                              <span className="text-teal-700 font-medium text-[11px] block">
+                              <span className="text-teal-700 font-medium text-[11px] block truncate">
                                 {c.unitId?.unitName || '—'}
                               </span>
                             </td>
                           );
                         }
 
-                        if (colId === 'dates') {
+                        if (colId === 'startDate') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 whitespace-nowrap">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
                               <div className="flex items-center gap-1.5 text-slate-700 font-medium">
                                 <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                 <span>{formatDate(c.startDate)}</span>
                               </div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">
-                                {c.endDate ? `Ended: ${formatDate(c.endDate)}` : 'Ongoing Tenancy'}
-                              </div>
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'endDate') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                              {c.endDate ? (
+                                <span className="text-slate-700 font-medium">{formatDate(c.endDate)}</span>
+                              ) : (
+                                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                  Ongoing
+                                </span>
+                              )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'rentType') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                              <span className="inline-block px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold text-[11px]">
+                                {getContractRentType(c)}
+                              </span>
                             </td>
                           );
                         }
 
                         if (colId === 'currentRate') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900">
-                              {formatCurrency(c.currentMonthlyRate || 0)}
-                              <span className="text-[10px] text-slate-400 font-normal block">/ month</span>
-                            </td>
-                          );
-                        }
-
-                        if (colId === 'totalExpected') {
-                          return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-blue-800">
-                              {formatCurrency(c.totalExpected || 0)}
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900">
+                              {formatCurrency(getContractRentAmount(c))}
+                              <span className="text-[10px] text-slate-400 font-normal block">
+                                / {getContractRentType(c) === 'Annual Fixed' ? 'year' : 'month'}
+                              </span>
                             </td>
                           );
                         }
 
                         if (colId === 'totalReceived') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-emerald-700">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-emerald-700">
                               {formatCurrency(c.totalReceived || 0)}
                             </td>
                           );
@@ -577,7 +672,7 @@ export default function ContractsView() {
 
                         if (colId === 'outstanding') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right whitespace-nowrap font-mono font-bold">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-bold">
                               <span className={c.outstandingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
                                 {formatCurrency(c.outstandingBalance || 0)}
                               </span>
@@ -587,7 +682,7 @@ export default function ContractsView() {
 
                         if (colId === 'history') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-center whitespace-nowrap">
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
                               <button
                                 onClick={() => {
                                   setSelectedContract(c);
@@ -605,15 +700,47 @@ export default function ContractsView() {
 
                         if (colId === 'actions') {
                           return (
-                            <td key={colId} className="py-3.5 px-4 text-center whitespace-nowrap">
+                            <td key={colId} className="py-3 px-3.5 text-center whitespace-nowrap">
                               <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setSelectedContract(c);
+                                    const agreement = c.currentAgreement || {};
+                                    const rentType = agreement.rentType || 'Monthly Fixed';
+                                    setEditForm({
+                                      tenantId: c.tenantId?._id || '',
+                                      propertyId: c.unitId?.propertyId?._id || c.unitId?.propertyId || '',
+                                      unitId: c.unitId?._id || '',
+                                      startDate: c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : '',
+                                      endDate: c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : '',
+                                      rentType,
+                                      rentAmount: String(
+                                        rentType === 'Annual Fixed'
+                                          ? (agreement.annualRate || (agreement.monthlyRate || 0) * 12)
+                                          : agreement.monthlyRate ?? c.currentMonthlyRate ?? ''
+                                      ),
+                                      depositHeld: c.depositHeld || 0,
+                                      terms: agreement.terms || '',
+                                      notes: c.notes || '',
+                                    });
+                                    setShowEditModal(true);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1"
+                                  title="Edit Contract details"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                  Edit
+                                </button>
                                 {!isVacated && (
                                   <>
                                     <button
                                       onClick={() => {
                                         setSelectedContract(c);
+                                        const agreement = c.currentAgreement || {};
+                                        const rentType = agreement.rentType || 'Monthly Fixed';
                                         setReviseForm({
-                                          newRate: String(c.currentMonthlyRate || ''),
+                                          rentType,
+                                          rentAmount: String(getContractRentAmount(c)),
                                           effectiveFrom: new Date().toISOString().split('T')[0],
                                           reason: '',
                                         });
@@ -656,12 +783,55 @@ export default function ContractsView() {
             </table>
           </div>
         )}
+
+        {/* Bottom Pagination Bar (APEX Style: 1 - 10 of 25) */}
+        {!loading && filteredContracts.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 border-t border-slate-200 bg-slate-50/80 text-xs font-medium text-slate-600 select-none">
+            <div>
+              {isAllRows ? (
+                <span>Showing all <strong className="text-slate-900">{totalItems}</strong> records</span>
+              ) : (
+                <span>
+                  Showing <strong className="text-slate-900">{Math.min((currentPage - 1) * effectivePageSize + 1, totalItems)}</strong> to{' '}
+                  <strong className="text-slate-900">{Math.min(currentPage * effectivePageSize, totalItems)}</strong> of{' '}
+                  <strong className="text-slate-900">{totalItems}</strong> records
+                </span>
+              )}
+            </div>
+
+            {!isAllRows && totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 transition-colors"
+                  title="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="px-2 py-1 font-bold text-slate-800">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 transition-colors"
+                  title="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* MODAL 1: Create New Contract */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-teal-100 text-teal-700">
@@ -680,7 +850,7 @@ export default function ContractsView() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateContract} className="p-5 space-y-4">
+            <form onSubmit={handleCreateContract} className="p-5 sm:p-6 space-y-5 overflow-y-auto">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Select Tenant *</label>
                 <select
@@ -696,7 +866,7 @@ export default function ContractsView() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Property *</label>
                   <select
@@ -728,20 +898,7 @@ export default function ContractsView() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Monthly Rent Rate (₹) *</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    placeholder="e.g. 9000"
-                    value={createForm.monthlyRate}
-                    onChange={(e) => setCreateForm({ ...createForm, monthlyRate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
-                </div>
-
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Start Date *</label>
                   <input
@@ -751,11 +908,51 @@ export default function ContractsView() {
                     onChange={(e) => setCreateForm({ ...createForm, startDate: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Prorated if starting mid-month</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Agreement commencement date</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract End Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={createForm.endDate}
+                    onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank for ongoing tenancies</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Rent Frequency *</label>
+                  <select
+                    value={createForm.rentType}
+                    onChange={(e) => changeRentType(createForm, setCreateForm, e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Monthly Fixed">Monthly Fixed</option>
+                    <option value="Annual Fixed">Annual Fixed</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    {createForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *'}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    placeholder={createForm.rentType === 'Annual Fixed' ? 'e.g. 108000' : 'e.g. 9000'}
+                    value={createForm.rentAmount}
+                    onChange={(e) => setCreateForm({ ...createForm, rentAmount: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Deposit Held (₹)</label>
                   <input
@@ -800,49 +997,194 @@ export default function ContractsView() {
         </div>
       )}
 
-      {/* MODAL 2: Revise / Increase Rent */}
-      {showReviseModal && selectedContract && (
+      {/* MODAL 2: Edit Contract Modal (Clean Layout) */}
+      {showEditModal && selectedContract && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-blue-100 text-blue-700">
-                  <TrendingUp className="w-5 h-5" />
+                <div className="p-2 rounded-xl bg-slate-900 text-white">
+                  <Edit2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-base">Revise Rent Rate</h3>
-                  <p className="text-xs text-slate-500">
-                    {selectedContract.tenantId?.name} · {selectedContract.unitId?.unitName}
-                  </p>
+                  <h3 className="font-extrabold text-slate-900 text-base">Edit Contract</h3>
+                  <p className="text-xs text-slate-500 font-mono">{selectedContract.assignmentCode}</p>
                 </div>
               </div>
               <button
-                onClick={() => { setShowReviseModal(false); setSelectedContract(null); }}
+                onClick={() => { setShowEditModal(false); setSelectedContract(null); }}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleReviseRate} className="p-5 space-y-4">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Current Monthly Rate:</span>
-                <span className="font-bold text-slate-800 text-sm">
-                  {formatCurrency(selectedContract.currentMonthlyRate || 0)}
-                </span>
+            <form onSubmit={handleEditContract} className="p-5 sm:p-6 space-y-5 overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Start Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={editForm.startDate}
+                    onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Agreement commencement date</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract End Date</label>
+                  <input
+                    type="date"
+                    value={editForm.endDate}
+                    onChange={(e) => setEditForm({ ...editForm, endDate: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank for ongoing contracts</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Rent Frequency *</label>
+                  <select
+                    value={editForm.rentType}
+                    onChange={(e) => changeRentType(editForm, setEditForm, e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Monthly Fixed">Monthly Fixed</option>
+                    <option value="Annual Fixed">Annual Fixed</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    {editForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *'}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    value={editForm.rentAmount}
+                    onChange={(e) => setEditForm({ ...editForm, rentAmount: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Security Deposit Held (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.depositHeld}
+                    onChange={(e) => setEditForm({ ...editForm, depositHeld: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Agreement Terms</label>
+                  <input
+                    type="text"
+                    value={editForm.terms}
+                    onChange={(e) => setEditForm({ ...editForm, terms: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">New Monthly Rate (₹) *</label>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  placeholder="e.g. 10000"
-                  value={reviseForm.newRate}
-                  onChange={(e) => setReviseForm({ ...reviseForm, newRate: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Notes / Special Conditions</label>
+                <textarea
+                  rows="2"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                 />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowEditModal(false); setSelectedContract(null); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {submitting ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: Revise Rate */}
+      {showReviseModal && selectedContract && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-teal-100 text-teal-700">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">Revise Rent Rate</h3>
+                  <p className="text-xs text-slate-500 font-mono">{selectedContract.assignmentCode}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowReviseModal(false); setSelectedContract(null); }}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReviseRate} className="p-5 space-y-4">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <p className="text-xs text-slate-500 font-medium">Tenant & Property</p>
+                <p className="text-sm font-bold text-slate-800 mt-0.5">
+                  {selectedContract.tenantId?.name} · {selectedContract.unitId?.propertyId?.name}
+                </p>
+                <p className="text-xs text-slate-600 mt-1">
+                  Current: <strong className="text-slate-900">{formatCurrency(getContractRentAmount(selectedContract))}</strong> / {getContractRentType(selectedContract) === 'Annual Fixed' ? 'year' : 'month'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">New Rent Type</label>
+                  <select
+                    value={reviseForm.rentType}
+                    onChange={(e) => changeRentType(reviseForm, setReviseForm, e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Monthly Fixed">Monthly Fixed</option>
+                    <option value="Annual Fixed">Annual Fixed</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">New Rent Rate (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    placeholder="e.g. 10000"
+                    value={reviseForm.rentAmount}
+                    onChange={(e) => setReviseForm({ ...reviseForm, rentAmount: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  />
+                </div>
               </div>
 
               <div>
@@ -854,9 +1196,6 @@ export default function ContractsView() {
                   onChange={(e) => setReviseForm({ ...reviseForm, effectiveFrom: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                 />
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  If effective mid-month, that month's rent will be split proportionally between old and new rates.
-                </p>
               </div>
 
               <div>
@@ -864,7 +1203,7 @@ export default function ContractsView() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Annual 10% rent escalation, renewal"
+                  placeholder="e.g. Annual escalation, renewed lease"
                   value={reviseForm.reason}
                   onChange={(e) => setReviseForm({ ...reviseForm, reason: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
@@ -884,7 +1223,7 @@ export default function ContractsView() {
                   disabled={submitting}
                   className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 disabled:opacity-50"
                 >
-                  {submitting ? 'Saving...' : 'Apply Revision'}
+                  {submitting ? 'Updating...' : 'Apply Revision'}
                 </button>
               </div>
             </form>
@@ -892,31 +1231,41 @@ export default function ContractsView() {
         </div>
       )}
 
-      {/* MODAL 3: Vacate Contract */}
+      {/* MODAL 4: Vacate / End Tenancy */}
       {showVacateModal && selectedContract && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-rose-50">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-rose-100 text-rose-700">
                   <LogOut className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-base">Vacate / End Contract</h3>
-                  <p className="text-xs text-slate-500">{selectedContract.tenantId?.name}</p>
+                  <h3 className="font-extrabold text-slate-900 text-base">Vacate / End Tenancy</h3>
+                  <p className="text-xs text-rose-600 font-mono">{selectedContract.assignmentCode}</p>
                 </div>
               </div>
               <button
                 onClick={() => { setShowVacateModal(false); setSelectedContract(null); }}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleVacateContract} className="p-5 space-y-4">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <p className="text-xs text-slate-500 font-medium">Tenant & Property</p>
+                <p className="text-sm font-bold text-slate-800 mt-0.5">
+                  {selectedContract.tenantId?.name} · {selectedContract.unitId?.propertyId?.name}
+                </p>
+                <p className="text-xs text-slate-600 mt-1">
+                  Security deposit held: <strong className="text-slate-900">{formatCurrency(selectedContract.depositHeld || 0)}</strong>
+                </p>
+              </div>
+
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Vacate / End Date *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Vacate / Exit Date *</label>
                 <input
                   type="date"
                   required
@@ -924,11 +1273,10 @@ export default function ContractsView() {
                   onChange={(e) => setVacateForm({ ...vacateForm, endDate: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
                 />
-                <p className="text-[10px] text-slate-400 mt-0.5">Rent for final month will be prorated up to this day.</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Deposit Refunded (₹)</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Security Deposit Refunded (₹)</label>
                 <input
                   type="number"
                   min="0"
@@ -939,10 +1287,10 @@ export default function ContractsView() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Vacate Notes / Reason</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Contract ended, tenant relocated"
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Exit Remarks / Notes</label>
+                <textarea
+                  rows="2"
+                  placeholder="e.g. Handed over keys, final electricity settled"
                   value={vacateForm.notes}
                   onChange={(e) => setVacateForm({ ...vacateForm, notes: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
@@ -970,73 +1318,72 @@ export default function ContractsView() {
         </div>
       )}
 
-      {/* MODAL 4: Rate Revisions Timeline History */}
+      {/* MODAL 5: Rate Revision History Timeline */}
       {showHistoryModal && selectedContract && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white w-full max-w-xl max-h-[85vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-teal-100 text-teal-700">
-                  <History className="w-5 h-5" />
+                <div className="p-2 rounded-xl bg-slate-100 text-slate-700">
+                  <History className="w-5 h-5 text-teal-600" />
                 </div>
                 <div>
                   <h3 className="font-extrabold text-slate-900 text-base">Rate Revision History</h3>
-                  <p className="text-xs text-slate-500">
-                    {selectedContract.tenantId?.name} · {selectedContract.unitId?.propertyId?.name} ({selectedContract.unitId?.unitName})
-                  </p>
+                  <p className="text-xs text-slate-500 font-mono">{selectedContract.assignmentCode}</p>
                 </div>
               </div>
               <button
                 onClick={() => { setShowHistoryModal(false); setSelectedContract(null); }}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 max-h-[70vh] overflow-y-auto space-y-4">
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 grid grid-cols-3 gap-3 text-center">
-                <div>
-                  <p className="text-[11px] text-slate-500 font-medium">Total Expected To Date</p>
-                  <p className="text-base font-extrabold text-blue-800">{formatCurrency(selectedContract.totalExpected || 0)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-slate-500 font-medium">Total Received To Date</p>
-                  <p className="text-base font-extrabold text-emerald-600">{formatCurrency(selectedContract.totalReceived || 0)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-slate-500 font-medium">Outstanding Balance</p>
-                  <p className={`text-base font-extrabold ${selectedContract.outstandingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                    {formatCurrency(selectedContract.outstandingBalance || 0)}
-                  </p>
-                </div>
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                <p className="font-bold text-slate-800 text-sm">{selectedContract.tenantId?.name}</p>
+                <p className="text-slate-600 mt-0.5">
+                  {selectedContract.unitId?.propertyId?.name} · {selectedContract.unitId?.unitName}
+                </p>
+                <p className="text-slate-500 mt-1">
+                  Start Date: <strong>{formatDate(selectedContract.startDate)}</strong>
+                  {selectedContract.endDate && ` · Exit Date: ${formatDate(selectedContract.endDate)}`}
+                </p>
               </div>
 
               <div>
-                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                  Chronological Rate History
+                <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2.5">
+                  Historical Rates Timeline
                 </h4>
-                {(!selectedContract.rateHistory || selectedContract.rateHistory.length === 0) ? (
-                  <p className="text-xs text-slate-400 italic py-4 text-center">No rate change history recorded</p>
+                {selectedContract.rateHistory?.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-4 text-center">No revision history found.</p>
                 ) : (
                   <div className="space-y-2.5">
                     {selectedContract.rateHistory.map((ag, idx) => (
                       <div
                         key={ag._id || idx}
-                        className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
+                        className={`p-3.5 rounded-xl border text-xs flex items-center justify-between ${
                           ag.isCurrentRate
-                            ? 'bg-teal-50/50 border-teal-200'
-                            : 'bg-white border-slate-200'
+                            ? 'bg-teal-50/70 border-teal-200 ring-1 ring-teal-300'
+                            : 'bg-white border-slate-200 text-slate-600'
                         }`}
                       >
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-slate-900 text-sm">
-                              {formatCurrency(ag.monthlyRate)} / month
+                            <span className="font-bold text-slate-900 text-sm">
+                              {formatCurrency(
+                                ag.rentType === 'Annual Fixed'
+                                  ? ag.annualRate || ag.monthlyRate * 12
+                                  : ag.monthlyRate
+                              )}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              / {ag.rentType === 'Annual Fixed' ? 'year' : 'month'}
                             </span>
                             {ag.isCurrentRate && (
-                              <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-bold text-[10px]">
-                                Current Rate
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-600 text-white">
+                                Current
                               </span>
                             )}
                           </div>
@@ -1059,7 +1406,14 @@ export default function ContractsView() {
                           <div className="text-right shrink-0">
                             <span className="text-[11px] text-slate-400 block">Previous:</span>
                             <span className="text-xs text-slate-500 line-through">
-                              {formatCurrency(ag.previousRate)}
+                              {formatCurrency(
+                                ag.rentType === 'Annual Fixed'
+                                  ? ag.previousRate * 12
+                                  : ag.previousRate
+                              )}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              / {ag.rentType === 'Annual Fixed' ? 'year' : 'month'}
                             </span>
                           </div>
                         )}

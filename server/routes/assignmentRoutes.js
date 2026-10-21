@@ -12,6 +12,11 @@ const { calculateTenantUnitLedger } = require('../services/rentCalculator');
 const PaymentAllocation = require('../models/PaymentAllocation');
 const PaymentReceipt = require('../models/PaymentReceipt');
 
+const isDateBeforeToday = (date) => {
+  if (!date) return false;
+  return new Date(date).toISOString().slice(0, 10) < new Date().toISOString().slice(0, 10);
+};
+
 // @route GET /api/assignments
 router.get('/', protect, async (req, res) => {
   try {
@@ -95,7 +100,10 @@ router.post('/', protect, authorize('admin', 'manager'), [
   body('tenantId').isMongoId().withMessage('Valid tenant ID is required'),
   body('unitId').isMongoId().withMessage('Valid unit ID is required'),
   body('startDate').isISO8601().withMessage('Valid start date is required'),
-  body('monthlyRate').isNumeric().withMessage('Monthly rent rate must be a number')
+  body('endDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
+  body('rentType').optional().isIn(['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom']),
+  body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
+  body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -103,10 +111,24 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    const { tenantId, unitId, startDate, depositHeld, monthlyRate, rentType, terms, notes } = req.body;
+    const {
+      tenantId, unitId, startDate, endDate, depositHeld,
+      rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes
+    } = req.body;
+    const enteredRent = rentAmount ?? monthlyRate;
+    if (enteredRent === undefined || enteredRent === null || enteredRent === '') {
+      return res.status(400).json({ success: false, message: 'Rent amount is required' });
+    }
+    const contractEndDate = endDate || null;
+    if (contractEndDate && new Date(contractEndDate) < new Date(startDate)) {
+      return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
+    }
+    const contractHasEnded = isDateBeforeToday(contractEndDate);
 
     // Check if unit is already occupied by an active assignment
-    const existingActive = await TenantAssignment.findOne({ unitId, status: 'Active' });
+    const existingActive = contractHasEnded
+      ? null
+      : await TenantAssignment.findOne({ unitId, status: 'Active' });
     if (existingActive) {
       return res.status(400).json({
         success: false,
@@ -122,9 +144,10 @@ router.post('/', protect, authorize('admin', 'manager'), [
       tenantId,
       unitId,
       startDate,
+      endDate: contractEndDate,
       depositHeld: Number(depositHeld) || 0,
       notes: notes || '',
-      status: 'Active'
+      status: contractHasEnded ? 'Past / Vacated' : 'Active'
     });
 
     // Create initial rent agreement rate
@@ -133,21 +156,24 @@ router.post('/', protect, authorize('admin', 'manager'), [
       unitId,
       tenantId,
       rentType: rentType || 'Monthly Fixed',
-      monthlyRate: Number(monthlyRate),
+      monthlyRate: rentType === 'Annual Fixed' ? Number(enteredRent) / 12 : Number(enteredRent),
+      annualRate: rentType === 'Annual Fixed' ? Number(enteredRent) : 0,
       effectiveFrom: startDate,
+      effectiveTo: contractEndDate,
       terms: terms || '',
-      isCurrentRate: true
+      isCurrentRate: !contractHasEnded
     });
 
-    // Update unit status to Occupied
-    await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+    if (!contractHasEnded) {
+      await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+    }
 
     await logAudit({
       userId: req.user._id,
       action: 'ASSIGN_TENANT',
       entityType: 'TenantAssignment',
       entityId: assignment._id,
-      description: `Assigned tenant to unit at rate ₹${monthlyRate}/mo`,
+      description: `Assigned tenant to unit at rate ₹${enteredRent}/${rentType === 'Annual Fixed' ? 'year' : 'month'}`,
       newState: { assignment, agreement },
       req
     });
@@ -202,7 +228,9 @@ router.post('/:id/vacate', protect, authorize('admin', 'manager'), [
 
 // @route POST /api/assignments/:id/increase-rent (Effective dated rent increase)
 router.post('/:id/increase-rent', protect, authorize('admin', 'manager'), [
-  body('newRate').isNumeric().withMessage('New rent rate is required'),
+  body('rentType').optional().isIn(['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom']),
+  body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
+  body('newRate').optional().isFloat({ min: 0 }).withMessage('New rent rate must be a non-negative number'),
   body('effectiveFrom').isISO8601().withMessage('Effective date is required'),
   body('reason').trim().notEmpty().withMessage('Reason for rent increase is required')
 ], async (req, res) => {
@@ -212,7 +240,11 @@ router.post('/:id/increase-rent', protect, authorize('admin', 'manager'), [
       return res.status(400).json({ success: false, message: 'Active assignment required for rent revision' });
     }
 
-    const { newRate, effectiveFrom, reason } = req.body;
+    const { rentType, rentAmount, newRate, effectiveFrom, reason } = req.body;
+    const enteredRent = rentAmount ?? newRate;
+    if (enteredRent === undefined || enteredRent === null || enteredRent === '') {
+      return res.status(400).json({ success: false, message: 'New rent amount is required' });
+    }
 
     // Find current active agreement
     const currentAgreement = await RentAgreement.findOne({
@@ -221,6 +253,10 @@ router.post('/:id/increase-rent', protect, authorize('admin', 'manager'), [
     });
 
     const previousRate = currentAgreement ? currentAgreement.monthlyRate : 0;
+    const nextRentType = rentType || (
+      rentAmount !== undefined ? currentAgreement?.rentType || 'Monthly Fixed' : 'Monthly Fixed'
+    );
+    const numericRent = Number(enteredRent);
 
     // Close previous agreement effective date
     if (currentAgreement) {
@@ -234,8 +270,9 @@ router.post('/:id/increase-rent', protect, authorize('admin', 'manager'), [
       assignmentId: assignment._id,
       unitId: assignment.unitId,
       tenantId: assignment.tenantId,
-      rentType: currentAgreement ? currentAgreement.rentType : 'Monthly Fixed',
-      monthlyRate: Number(newRate),
+      rentType: nextRentType,
+      monthlyRate: nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent,
+      annualRate: nextRentType === 'Annual Fixed' ? numericRent : 0,
       previousRate,
       effectiveFrom,
       reasonForChange: reason,
@@ -247,7 +284,7 @@ router.post('/:id/increase-rent', protect, authorize('admin', 'manager'), [
       action: 'RENT_INCREASE',
       entityType: 'RentAgreement',
       entityId: newAgreement._id,
-      description: `Rent increased from ₹${previousRate} to ₹${newRate} effective ${effectiveFrom}: ${reason}`,
+      description: `Rent revised from ₹${previousRate} to ₹${enteredRent} effective ${effectiveFrom}: ${reason}`,
       previousState: currentAgreement ? currentAgreement.toObject() : null,
       newState: newAgreement.toObject(),
       req
@@ -285,30 +322,247 @@ router.get('/agreements/history', protect, async (req, res) => {
   }
 });
 
-// @route PUT /api/assignments/:id (Update contract dates, deposit, notes)
-router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
+// @route PUT /api/assignments/:id (Update contract dates, rate, deposit, notes)
+router.put('/:id', protect, authorize('admin', 'manager'), [
+  body('startDate').optional().isISO8601().withMessage('Valid start date is required'),
+  body('endDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
+  body('tenantId').optional().isMongoId().withMessage('Valid tenant ID is required'),
+  body('unitId').optional().isMongoId().withMessage('Valid unit ID is required'),
+  body('propertyId').optional().isMongoId().withMessage('Valid property ID is required'),
+  body('rentType').optional().isIn(['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom']),
+  body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
+  body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number'),
+  body('depositHeld').optional().isFloat({ min: 0 }).withMessage('Deposit must be a non-negative number'),
+  body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated']).withMessage('Invalid contract status'),
+  body('notes').optional().isString().withMessage('Notes must be text'),
+  body('terms').optional().isString().withMessage('Agreement terms must be text')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+
   try {
     const assignment = await TenantAssignment.findById(req.params.id);
     if (!assignment) {
       return res.status(404).json({ success: false, message: 'Contract assignment not found' });
     }
 
-    const { startDate, endDate, depositHeld, notes, status } = req.body;
-    if (startDate) assignment.startDate = startDate;
-    if (endDate !== undefined) assignment.endDate = endDate || null;
+    const {
+      startDate, endDate, tenantId, unitId, propertyId,
+      rentType, rentAmount, monthlyRate, depositHeld, notes, terms, status
+    } = req.body;
+    const nextTenantId = tenantId || assignment.tenantId;
+    const nextUnitId = unitId || assignment.unitId;
+    const unit = await Unit.findById(nextUnitId);
+    if (!unit) {
+      return res.status(404).json({ success: false, message: 'Selected unit not found' });
+    }
+    if (propertyId && unit.propertyId.toString() !== propertyId) {
+      return res.status(400).json({ success: false, message: 'Selected unit does not belong to the selected property' });
+    }
+    if (tenantId) {
+      const tenant = await Tenant.findById(tenantId);
+      if (!tenant) {
+        return res.status(404).json({ success: false, message: 'Selected tenant not found' });
+      }
+    }
+    const assignmentLinkChanged =
+      nextTenantId.toString() !== assignment.tenantId.toString() ||
+      nextUnitId.toString() !== assignment.unitId.toString();
+    if (assignmentLinkChanged) {
+      const [allocationCount, receiptCount] = await Promise.all([
+        PaymentAllocation.countDocuments({
+          tenantId: assignment.tenantId,
+          unitId: assignment.unitId
+        }),
+        PaymentReceipt.countDocuments({
+          tenantId: assignment.tenantId,
+          unitId: assignment.unitId
+        })
+      ]);
+      if (allocationCount || receiptCount) {
+        return res.status(409).json({
+          success: false,
+          message: 'Tenant or unit cannot be changed because payment history already exists for this contract.'
+        });
+      }
+    }
+
+    const nextStartDate = startDate || assignment.startDate;
+    const nextEndDate = endDate !== undefined ? endDate || null : assignment.endDate;
+    if (nextEndDate && new Date(nextEndDate) < new Date(nextStartDate)) {
+      return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
+    }
+
+    const contractHasEnded = isDateBeforeToday(nextEndDate);
+    const nextStatus = status || (
+      endDate !== undefined
+        ? (contractHasEnded ? 'Past / Vacated' : 'Active')
+        : assignment.status
+    );
+    if (nextStatus === 'Active' && assignment.status !== 'Active') {
+      const otherActiveAssignment = await TenantAssignment.findOne({
+        unitId: nextUnitId,
+        status: 'Active',
+        _id: { $ne: assignment._id }
+      });
+      if (otherActiveAssignment) {
+        return res.status(409).json({
+          success: false,
+          message: 'This unit already has another active contract. End that contract before reopening this one.'
+        });
+      }
+    }
+    if (nextStatus === 'Active' && nextUnitId.toString() !== assignment.unitId.toString()) {
+      const occupiedUnit = await TenantAssignment.findOne({ unitId: nextUnitId, status: 'Active' });
+      if (occupiedUnit) {
+        return res.status(409).json({
+          success: false,
+          message: 'The selected unit already has an active contract.'
+        });
+      }
+    }
+
+    let agreements = await RentAgreement.find({
+      assignmentId: assignment._id
+    }).sort({ effectiveFrom: 1 });
+    if (!agreements.length) {
+      agreements = await RentAgreement.find({
+        assignmentId: { $exists: false },
+        unitId: assignment.unitId,
+        tenantId: assignment.tenantId
+      }).sort({ effectiveFrom: 1 });
+    }
+
+    let agreement = agreements.find((item) => item.isCurrentRate) || agreements[agreements.length - 1];
+    const firstAgreement = agreements[0];
+    if (
+      startDate &&
+      agreements.length > 1 &&
+      new Date(startDate) >= new Date(agreements[1].effectiveFrom)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Contract start date must be earlier than its first rent revision'
+      });
+    }
+
+    const enteredRent = rentAmount ?? monthlyRate;
+    if (enteredRent !== undefined && enteredRent !== null && enteredRent === '') {
+      return res.status(400).json({ success: false, message: 'Rent amount cannot be empty' });
+    }
+    const previousState = {
+      assignment: assignment.toObject(),
+      agreements: agreements.map((item) => item.toObject())
+    };
+
+    assignment.startDate = nextStartDate;
+    assignment.endDate = nextEndDate;
+    assignment.status = nextStatus;
+    assignment.tenantId = nextTenantId;
+    assignment.unitId = nextUnitId;
     if (depositHeld !== undefined) assignment.depositHeld = Number(depositHeld) || 0;
     if (notes !== undefined) assignment.notes = notes;
-    if (status) assignment.status = status;
-
     await assignment.save();
+
+    if (enteredRent !== undefined) {
+      const nextRentType = rentType || (
+        rentAmount !== undefined ? agreement?.rentType || 'Monthly Fixed' : 'Monthly Fixed'
+      );
+      const numericRent = Number(enteredRent);
+      if (!agreement) {
+        agreement = await RentAgreement.create({
+          assignmentId: assignment._id,
+          unitId: nextUnitId,
+          tenantId: nextTenantId,
+          rentType: nextRentType,
+          monthlyRate: nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent,
+          annualRate: nextRentType === 'Annual Fixed' ? numericRent : 0,
+          effectiveFrom: nextStartDate,
+          effectiveTo: nextEndDate,
+          terms: terms || '',
+          isCurrentRate: nextStatus === 'Active'
+        });
+      } else {
+        if (firstAgreement && startDate) firstAgreement.effectiveFrom = nextStartDate;
+        agreement.rentType = nextRentType;
+        agreement.monthlyRate = nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent;
+        agreement.annualRate = nextRentType === 'Annual Fixed' ? numericRent : 0;
+        agreement.effectiveTo = nextEndDate;
+        agreement.isCurrentRate = nextStatus === 'Active';
+        if (terms !== undefined) agreement.terms = terms;
+        await Promise.all(
+          [...new Set([firstAgreement, agreement].filter(Boolean))].map((item) => item.save())
+        );
+      }
+    } else if (agreement) {
+      if (firstAgreement && startDate) firstAgreement.effectiveFrom = nextStartDate;
+      if (terms !== undefined) agreement.terms = terms;
+      if (endDate !== undefined || status !== undefined) {
+        agreement.effectiveTo = nextEndDate;
+        agreement.isCurrentRate = nextStatus === 'Active';
+      }
+      if (firstAgreement && firstAgreement !== agreement && startDate) {
+        await Promise.all([firstAgreement.save(), agreement.save()]);
+      } else if (startDate || endDate !== undefined || status !== undefined || terms !== undefined) {
+        await agreement.save();
+      }
+    }
+
+    if (nextUnitId.toString() !== previousState.assignment.unitId.toString()) {
+      const otherActiveOnOldUnit = await TenantAssignment.findOne({
+        unitId: previousState.assignment.unitId,
+        status: 'Active',
+        _id: { $ne: assignment._id }
+      });
+      await Unit.findByIdAndUpdate(previousState.assignment.unitId, {
+        occupancyStatus: otherActiveOnOldUnit ? 'Occupied' : 'Vacant'
+      });
+    }
+
+    if (endDate !== undefined || status !== undefined || nextUnitId.toString() !== previousState.assignment.unitId.toString()) {
+      const activeAssignment = assignment.status === 'Active'
+        ? assignment
+        : await TenantAssignment.findOne({
+            unitId: nextUnitId,
+            status: 'Active',
+            _id: { $ne: assignment._id }
+          });
+      if (activeAssignment) {
+        await Unit.findByIdAndUpdate(nextUnitId, { occupancyStatus: 'Occupied' });
+      } else {
+        await Unit.findByIdAndUpdate(nextUnitId, { occupancyStatus: 'Vacant' });
+      }
+    }
+
+    for (const rate of agreements) {
+      rate.assignmentId = assignment._id;
+      rate.unitId = nextUnitId;
+      rate.tenantId = nextTenantId;
+    }
+    if (agreements.length) {
+      await Promise.all(agreements.map((rate) => rate.save()));
+    }
+    if (agreement && !agreements.includes(agreement)) {
+      agreement.assignmentId = assignment._id;
+      agreement.unitId = nextUnitId;
+      agreement.tenantId = nextTenantId;
+      await agreement.save();
+    }
 
     await logAudit({
       userId: req.user._id,
       action: 'UPDATE_CONTRACT',
       entityType: 'TenantAssignment',
       entityId: assignment._id,
-      description: `Updated contract ${assignment.assignmentCode}`,
-      newState: assignment.toObject(),
+      description: `Updated contract ${assignment.assignmentCode} (Rate: ₹${enteredRent ?? 'unchanged'})`,
+      previousState,
+      newState: {
+        assignment: assignment.toObject(),
+        agreements: agreements.map((item) => item.toObject()),
+        agreement: agreement ? agreement.toObject() : null
+      },
       req
     });
 
