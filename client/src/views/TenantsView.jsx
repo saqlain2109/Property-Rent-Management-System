@@ -495,12 +495,16 @@ export default function TenantsView({ onDataChanged }) {
         onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
         availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
         columns={TENANTS_COLUMNS_DEF}
+        defaultColumns={DEFAULT_TENANTS_COLS}
         visibleColumns={visibleColumns}
         onChangeVisibleColumns={(cols) => {
           setVisibleColumns(cols);
           try { localStorage.setItem('cols_tenants_v2', JSON.stringify(cols)); } catch(e){}
         }}
+        columnWidths={columnWidths}
         onResetWidths={resetColumnWidths}
+        sortConfig={sortConfig}
+        onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
         filters={activeFilters}

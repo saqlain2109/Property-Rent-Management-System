@@ -14,11 +14,15 @@ export default function ApexToolbar({
   onRowsPerPageChange,
   availableRowsOptions = [5, 10, 25, 50, 100, 'All'],
   columns = [],
+  defaultColumns,
   visibleColumns = [],
   onChangeVisibleColumns,
   onVisibleColumnsChange,
   columnWidths,
   onResetWidths,
+  onSetColumnWidths,
+  sortConfig,
+  onSortChange,
   isHeaderSticky = true,
   onToggleHeaderSticky,
   filters,
@@ -39,7 +43,6 @@ export default function ApexToolbar({
   const currentSearch = search !== undefined ? search : (searchValue !== undefined ? searchValue : '');
   const currentFilters = activeFilters !== undefined ? activeFilters : (filters !== undefined ? filters : []);
   const currentStorageKey = storageKeyPrefix || storageKey || 'default_grid';
-  const currentActiveView = activeViewName || activeViewId || null;
   const triggerExport = onExport || onExportExcel;
 
   const setVisibleCols = (cols) => {
@@ -52,6 +55,33 @@ export default function ApexToolbar({
   const [savedViews, setSavedViews] = useState([]);
   const [newViewName, setNewViewName] = useState('');
   const [showSaveViewInput, setShowSaveViewInput] = useState(false);
+  const [showViewsDropdown, setShowViewsDropdown] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+
+  // Active view management with local persistence
+  const [internalActiveViewId, setInternalActiveViewId] = useState(() => {
+    try {
+      return localStorage.getItem(`active_view_${currentStorageKey}`) || 'default';
+    } catch (e) {
+      return 'default';
+    }
+  });
+
+  const effectiveActiveViewId = (activeViewId !== undefined && activeViewId !== null)
+    ? activeViewId
+    : ((activeViewName !== undefined && activeViewName !== null) ? activeViewName : internalActiveViewId);
+
+  useEffect(() => {
+    if (activeViewId !== undefined && activeViewId !== null) {
+      setInternalActiveViewId(activeViewId);
+    } else if (activeViewName !== undefined && activeViewName !== null) {
+      setInternalActiveViewId(activeViewName);
+    }
+  }, [activeViewId, activeViewName]);
+
+  const currentViewObj = savedViews.find(v => v.id === effectiveActiveViewId);
+  const isCustomViewActive = Boolean(currentViewObj && effectiveActiveViewId !== 'default');
+  const activeViewLabel = isCustomViewActive ? currentViewObj.name : 'Default View';
 
   // Filter Builder Dialog state
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -68,11 +98,16 @@ export default function ApexToolbar({
 
   // Close menus on click outside
   const menuRef = useRef(null);
+  const viewsDropdownRef = useRef(null);
+
   useEffect(() => {
     function handleClickOutside(event) {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setShowActionsMenu(false);
         setActiveSubMenu(null);
+      }
+      if (viewsDropdownRef.current && !viewsDropdownRef.current.contains(event.target)) {
+        setShowViewsDropdown(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -93,7 +128,7 @@ export default function ApexToolbar({
     } catch (e) {}
   };
 
-  const handleSaveView = (e) => {
+  const handleSaveViewSubmit = (e) => {
     e?.preventDefault();
     if (!newViewName.trim()) return;
     const newView = {
@@ -103,6 +138,8 @@ export default function ApexToolbar({
       filters: currentFilters,
       rowsPerPage,
       search: currentSearch,
+      sortConfig: sortConfig || null,
+      columnWidths: columnWidths || null,
       isHeaderSticky,
       createdAt: new Date().toISOString()
     };
@@ -110,50 +147,97 @@ export default function ApexToolbar({
     setSavedViews(updated);
     try {
       localStorage.setItem(`views_${currentStorageKey}`, JSON.stringify(updated));
+      localStorage.setItem(`active_view_${currentStorageKey}`, newView.id);
     } catch (e) {}
+    setInternalActiveViewId(newView.id);
     onViewChange?.(newView.id);
     onSaveView?.(newView);
     setNewViewName('');
+    setShowSaveModal(false);
     setShowSaveViewInput(false);
+    setShowViewsDropdown(false);
     setShowActionsMenu(false);
     setActiveSubMenu(null);
   };
 
   const handleApplySavedView = (view) => {
-    setVisibleCols(view.visibleColumns);
-    onFiltersChange?.(view.filters || []);
+    if (view.visibleColumns) {
+      setVisibleCols(view.visibleColumns);
+      try {
+        localStorage.setItem(`cols_${currentStorageKey}`, JSON.stringify(view.visibleColumns));
+      } catch (e) {}
+    }
+    if (view.filters) onFiltersChange?.(view.filters || []);
     if (view.rowsPerPage) onRowsPerPageChange?.(view.rowsPerPage);
     if (view.search !== undefined) onSearchChange?.(view.search);
+    if (view.sortConfig && onSortChange) onSortChange(view.sortConfig);
+    if (view.columnWidths && onSetColumnWidths) onSetColumnWidths(view.columnWidths);
     if (view.isHeaderSticky !== undefined && onToggleHeaderSticky) {
       onToggleHeaderSticky(view.isHeaderSticky);
     }
+    setInternalActiveViewId(view.id);
+    try {
+      localStorage.setItem(`active_view_${currentStorageKey}`, view.id);
+    } catch (e) {}
     onViewChange?.(view.id);
     onLoadView?.(view);
+    setShowViewsDropdown(false);
     setShowActionsMenu(false);
     setActiveSubMenu(null);
   };
 
+  const handleUpdateCurrentView = () => {
+    if (!currentViewObj) return;
+    const updated = savedViews.map(v => {
+      if (v.id === currentViewObj.id) {
+        return {
+          ...v,
+          visibleColumns,
+          filters: currentFilters,
+          rowsPerPage,
+          search: currentSearch,
+          sortConfig: sortConfig || null,
+          columnWidths: columnWidths || null,
+          isHeaderSticky,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return v;
+    });
+    setSavedViews(updated);
+    try {
+      localStorage.setItem(`views_${currentStorageKey}`, JSON.stringify(updated));
+    } catch (e) {}
+    setShowViewsDropdown(false);
+  };
+
   const handleDeleteSavedView = (viewId, e) => {
-    e.stopPropagation();
+    e?.stopPropagation();
     const updated = savedViews.filter(v => v.id !== viewId);
     setSavedViews(updated);
     try {
       localStorage.setItem(`views_${currentStorageKey}`, JSON.stringify(updated));
     } catch (e) {}
-    if (currentActiveView === viewId) onViewChange?.(null);
+    if (effectiveActiveViewId === viewId) {
+      handleResetToDefault();
+    }
   };
 
   const handleResetToDefault = () => {
-    const defaultCols = columns.filter(c => c.defaultVisible !== false).map(c => c.id);
+    const defaultCols = defaultColumns || columns.filter(c => c.defaultVisible !== false).map(c => c.id);
     setVisibleCols(defaultCols);
     try {
       localStorage.setItem(`cols_${currentStorageKey}`, JSON.stringify(defaultCols));
+      localStorage.setItem(`active_view_${currentStorageKey}`, 'default');
     } catch (e) {}
     onFiltersChange?.([]);
     onRowsPerPageChange?.(10);
     onSearchChange?.('');
     onResetWidths?.();
-    onViewChange?.(null);
+    if (onSortChange) onSortChange({ key: null, direction: null });
+    setInternalActiveViewId('default');
+    onViewChange?.('default');
+    setShowViewsDropdown(false);
     setShowActionsMenu(false);
     setActiveSubMenu(null);
   };
@@ -444,6 +528,157 @@ export default function ApexToolbar({
               </div>
             )}
           </div>
+
+          {/* Saved Views / Reports Dropdown (Oracle APEX Interactive Report Style) */}
+          <div className="relative" ref={viewsDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowViewsDropdown(!showViewsDropdown);
+                setShowActionsMenu(false);
+              }}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                showViewsDropdown
+                  ? 'bg-teal-900 text-white border-teal-900'
+                  : isCustomViewActive
+                    ? 'bg-teal-50 hover:bg-teal-100 text-teal-900 border-teal-300'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+              }`}
+              title="Switch report views or save custom views"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                {isCustomViewActive ? (
+                  <Bookmark className="w-3.5 h-3.5 text-teal-600 fill-teal-600 shrink-0" />
+                ) : (
+                  <span className="text-amber-500 text-xs leading-none shrink-0">⭐️</span>
+                )}
+                <span className="max-w-[110px] sm:max-w-[150px] truncate">
+                  {activeViewLabel}
+                </span>
+              </div>
+              <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${showViewsDropdown ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Views Dropdown Popover */}
+            {showViewsDropdown && (
+              <div className="absolute left-0 top-full mt-1.5 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+                {/* Header */}
+                <div className="px-3.5 py-1.5 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Reports & Views</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSaveModal(true);
+                      setShowViewsDropdown(false);
+                    }}
+                    className="text-[11px] font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> Save View
+                  </button>
+                </div>
+
+                {/* Standard Default View */}
+                <div className="p-1.5">
+                  <div
+                    onClick={handleResetToDefault}
+                    className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors ${
+                      (!effectiveActiveViewId || effectiveActiveViewId === 'default')
+                        ? 'bg-teal-50 text-teal-900 font-bold border border-teal-200/80 shadow-xs'
+                        : 'hover:bg-slate-50 text-slate-700 font-medium'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-500 text-sm leading-none">⭐️</span>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-900">Default View</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Original system columns & list</span>
+                      </div>
+                    </div>
+                    {(!effectiveActiveViewId || effectiveActiveViewId === 'default') && (
+                      <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Saved Custom Views Section */}
+                <div className="px-3.5 pt-2 pb-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-t border-slate-100 flex items-center justify-between">
+                  <span>Custom Saved Views ({savedViews.length})</span>
+                </div>
+
+                <div className="px-1.5 max-h-48 overflow-y-auto space-y-1">
+                  {savedViews.length === 0 ? (
+                    <div className="px-3 py-3 text-center text-xs text-slate-400 italic">
+                      No custom views saved yet.
+                      <div className="text-[10px] text-slate-400 font-normal mt-0.5">Customize columns/filters and click Save View.</div>
+                    </div>
+                  ) : (
+                    savedViews.map(view => {
+                      const isCurrent = effectiveActiveViewId === view.id;
+                      const colCount = view.visibleColumns?.length || 0;
+                      const filterCount = view.filters?.length || 0;
+                      return (
+                        <div
+                          key={view.id}
+                          onClick={() => handleApplySavedView(view)}
+                          className={`group flex items-center justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors ${
+                            isCurrent
+                              ? 'bg-teal-50 text-teal-900 font-bold border border-teal-200/80 shadow-xs'
+                              : 'hover:bg-slate-50 text-slate-700 font-medium'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <Bookmark className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-teal-600 fill-teal-600' : 'text-slate-400'}`} />
+                            <div className="flex flex-col min-w-0">
+                              <span className="truncate font-semibold text-slate-900">{view.name}</span>
+                              <span className="text-[10px] text-slate-400 font-normal">
+                                {colCount} cols {filterCount > 0 ? `• ${filterCount} filters` : ''}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-teal-600 mr-1" />}
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteSavedView(view.id, e)}
+                              className="p-1 rounded-lg hover:bg-rose-100 hover:text-rose-600 text-slate-300 opacity-60 group-hover:opacity-100 transition-opacity"
+                              title="Delete view"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Footer Actions */}
+                <div className="mt-1 pt-1.5 border-t border-slate-100 px-1.5 space-y-1">
+                  {isCustomViewActive && (
+                    <button
+                      type="button"
+                      onClick={handleUpdateCurrentView}
+                      className="w-full px-3 py-1.5 rounded-xl text-left text-xs font-semibold text-teal-700 hover:bg-teal-50 flex items-center gap-2 transition-colors"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span className="truncate">Update "{activeViewLabel}" with current settings</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSaveModal(true);
+                      setShowViewsDropdown(false);
+                    }}
+                    className="w-full px-3 py-1.5 rounded-xl text-left text-xs font-bold text-teal-700 hover:bg-teal-50 flex items-center gap-2 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Save Current View as Report...</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Side: Quick Action & Active Views indicator */}
@@ -715,6 +950,93 @@ export default function ApexToolbar({
                 Apply Filters
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save View Modal (Oracle APEX Interactive Report Style) */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
+                  <Bookmark className="w-4 h-4 fill-teal-700" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Save Custom Report View</h3>
+                  <p className="text-[11px] text-slate-500">Save current columns, filters, and settings as a named view</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSaveModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveViewSubmit} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  View / Report Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. Active Tenants, High Rent, Mumbai Partitions"
+                  value={newViewName}
+                  onChange={(e) => setNewViewName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 font-medium text-slate-800 placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* View Summary Pill Grid */}
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80 space-y-2 text-xs">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Settings to be captured:</div>
+                <div className="flex flex-wrap gap-1.5">
+                  <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold">
+                    {visibleColumns.length} of {columns.length} Columns
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold">
+                    {currentFilters.length} Active Filters
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold">
+                    {rowsPerPage} Rows/Page
+                  </span>
+                  {currentSearch && (
+                    <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold">
+                      Search: "{currentSearch}"
+                    </span>
+                  )}
+                  {sortConfig?.key && (
+                    <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold">
+                      Sort: {sortConfig.key} ({sortConfig.direction})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSaveModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newViewName.trim()}
+                  className="px-4 py-2 text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white rounded-xl shadow-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save View</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

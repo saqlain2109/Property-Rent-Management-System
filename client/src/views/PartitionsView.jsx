@@ -382,12 +382,16 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
         onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
         availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
         columns={PARTITIONS_COLUMNS_DEF}
+        defaultColumns={DEFAULT_PARTITIONS_COLS}
         visibleColumns={visibleColumns}
         onChangeVisibleColumns={(cols) => {
           setVisibleColumns(cols);
           try { localStorage.setItem('cols_partitions', JSON.stringify(cols)); } catch(e){}
         }}
+        columnWidths={columnWidths}
         onResetWidths={resetColumnWidths}
+        sortConfig={sortConfig}
+        onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
         filters={activeFilters}
