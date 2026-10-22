@@ -28,6 +28,14 @@ const unitSchema = new mongoose.Schema({
     type: Number,
     default: 0, // Area of partition in square feet
   },
+  carpetAreaSqFt: {
+    type: Number,
+    default: 0,
+  },
+  monthlyRentExpected: {
+    type: Number,
+    default: 0,
+  },
   unitType: {
     type: String,
     default: 'Godown Partition',
