@@ -160,7 +160,8 @@ async function syncAll() {
           displayOrder: p.order,
           totalAreaSqFt: p.area,
           propertyType: p.type,
-          address: { city: 'Mumbai', state: p.name.includes('Goa') ? 'Goa' : 'Maharashtra' }
+          address: p.name.includes('Goa') ? 'Goa' : 'Mumbai',
+          city: p.name.includes('Goa') ? 'Goa' : 'Mumbai'
         });
       }
       propMap[p.code] = doc;
