@@ -21,7 +21,7 @@ const assignmentSchema = new mongoose.Schema({
   },
   startDate: {
     type: Date,
-    required: true,
+    default: null,
   },
   endDate: {
     type: Date, // null if active
@@ -29,7 +29,7 @@ const assignmentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['Active', 'Past / Vacated', 'Terminated'],
+    enum: ['Active', 'Past / Vacated', 'Terminated', 'Ended'],
     default: 'Active',
   },
   depositHeld: {

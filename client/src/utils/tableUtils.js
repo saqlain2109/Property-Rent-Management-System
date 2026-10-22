@@ -18,50 +18,86 @@ export function cycleThreeStateSort(prevSort, colId) {
 
 /**
  * Evaluates a single filter rule against a source value
+ * Robust matching supporting composite strings (e.g., "Garage - Shop 1" vs "Garage Shop 1"),
+ * numeric values (ignoring ₹ / commas), and case-insensitive normalization.
  */
 export function evaluateFilterRule(srcVal, operator, filterVal) {
   const src = String(srcVal ?? '').toLowerCase().trim();
   const target = String(filterVal ?? '').toLowerCase().trim();
 
+  // Normalize delimiters (hyphens, slashes, multiple spaces) for composite labels
+  const norm = (s) => s.replace(/[\s\-_/\\,]+/g, ' ').trim();
+  const normSrc = norm(src);
+  const normTarget = norm(target);
+
+  // Check if both operands are numeric (e.g., rent, deposit, area)
+  const rawNumSrc = src.replace(/[^\d.-]/g, '');
+  const rawNumTarget = target.replace(/[^\d.-]/g, '');
+  const isBothNumbers = rawNumSrc !== '' && rawNumTarget !== '' && !isNaN(Number(rawNumSrc)) && !isNaN(Number(rawNumTarget));
+
   switch (operator) {
     case 'contains':
-      return src.includes(target);
+      if (isBothNumbers) {
+        return rawNumSrc.includes(rawNumTarget) || Number(rawNumSrc) === Number(rawNumTarget);
+      }
+      return src.includes(target) || normSrc.includes(normTarget);
+
     case 'does_not_contain':
-      return !src.includes(target);
+      if (isBothNumbers) {
+        return !rawNumSrc.includes(rawNumTarget) && Number(rawNumSrc) !== Number(rawNumTarget);
+      }
+      return !src.includes(target) && !normSrc.includes(normTarget);
+
     case 'equals':
-      return src === target;
+      if (isBothNumbers) {
+        return Number(rawNumSrc) === Number(rawNumTarget);
+      }
+      return (
+        src === target ||
+        normSrc === normTarget ||
+        (src.includes(' - ') && src.split(/\s+-\s+/).some(part => norm(part) === normTarget))
+      );
+
     case 'not_equals':
-      return src !== target;
+      if (isBothNumbers) {
+        return Number(rawNumSrc) !== Number(rawNumTarget);
+      }
+      return !(
+        src === target ||
+        normSrc === normTarget ||
+        (src.includes(' - ') && src.split(/\s+-\s+/).some(part => norm(part) === normTarget))
+      );
+
     case 'starts_with':
-      return src.startsWith(target);
+      return src.startsWith(target) || normSrc.startsWith(normTarget);
+
     case 'ends_with':
-      return src.endsWith(target);
-    case 'greater_than': {
-      const numSrc = Number(src.replace(/[^\d.-]/g, ''));
-      const numTarget = Number(target.replace(/[^\d.-]/g, ''));
-      return !isNaN(numSrc) && !isNaN(numTarget) ? numSrc > numTarget : src > target;
-    }
-    case 'greater_than_or_equal': {
-      const numSrc = Number(src.replace(/[^\d.-]/g, ''));
-      const numTarget = Number(target.replace(/[^\d.-]/g, ''));
-      return !isNaN(numSrc) && !isNaN(numTarget) ? numSrc >= numTarget : src >= target;
-    }
-    case 'less_than': {
-      const numSrc = Number(src.replace(/[^\d.-]/g, ''));
-      const numTarget = Number(target.replace(/[^\d.-]/g, ''));
-      return !isNaN(numSrc) && !isNaN(numTarget) ? numSrc < numTarget : src < target;
-    }
-    case 'less_than_or_equal': {
-      const numSrc = Number(src.replace(/[^\d.-]/g, ''));
-      const numTarget = Number(target.replace(/[^\d.-]/g, ''));
-      return !isNaN(numSrc) && !isNaN(numTarget) ? numSrc <= numTarget : src <= target;
-    }
+      return src.endsWith(target) || normSrc.endsWith(normTarget);
+
+    case 'greater_than':
+      if (isBothNumbers) return Number(rawNumSrc) > Number(rawNumTarget);
+      return src > target;
+
+    case 'greater_than_or_equal':
+      if (isBothNumbers) return Number(rawNumSrc) >= Number(rawNumTarget);
+      return src >= target;
+
+    case 'less_than':
+      if (isBothNumbers) return Number(rawNumSrc) < Number(rawNumTarget);
+      return src < target;
+
+    case 'less_than_or_equal':
+      if (isBothNumbers) return Number(rawNumSrc) <= Number(rawNumTarget);
+      return src <= target;
+
     case 'is_empty':
-      return src === '' || src === '—' || src === 'none' || src === 'null' || src === 'n/a';
+      return src === '' || src === '—' || src === 'none' || src === 'null' || src === 'n/a' || src === '0';
+
     case 'is_not_empty':
-      return src !== '' && src !== '—' && src !== 'none' && src !== 'null' && src !== 'n/a';
+      return !(src === '' || src === '—' || src === 'none' || src === 'null' || src === 'n/a' || src === '0');
+
     default:
-      return src.includes(target);
+      return src.includes(target) || normSrc.includes(normTarget);
   }
 }
 

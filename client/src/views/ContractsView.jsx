@@ -8,44 +8,57 @@ import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../compon
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import {
   FileText, Plus, Search, Calendar, TrendingUp, Edit2, LogOut, History,
-  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown
+  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown, AlertCircle
 } from 'lucide-react';
 
 const CONTRACTS_COLUMNS_DEF = [
-  { id: 'assignmentCode', label: 'Contract Code' },
-  { id: 'tenant', label: 'Tenant Details' },
-  { id: 'property', label: 'Property & Partition' },
+  { id: 'property', label: 'Property' },
+  { id: 'subUnit', label: 'Sub-Property / Partition' },
+  { id: 'tenant', label: 'Tenant' },
+  { id: 'monthlyRent', label: 'Rent Per Month' },
+  { id: 'annualRent', label: 'Rent Per Annum' },
+  { id: 'depositHeld', label: 'Deposit' },
   { id: 'startDate', label: 'Start Date' },
   { id: 'endDate', label: 'End Date' },
-  { id: 'rentType', label: 'Rent Frequency' },
-  { id: 'currentRate', label: 'Contract Rent' },
-  { id: 'totalReceived', label: 'Received' },
-  { id: 'outstanding', label: 'Outstanding' },
-  { id: 'history', label: 'Rate History' },
+  { id: 'status', label: 'Contract Status' },
+  { id: 'notes', label: 'Comments / Notes' },
+  { id: 'actions', label: 'Actions' },
+  // Preserved secondary columns available in Column Manager
+  { id: 'assignmentCode', label: 'Contract Code', defaultVisible: false },
+  { id: 'rentType', label: 'Rent Frequency', defaultVisible: false },
+  { id: 'currentRate', label: 'Contract Rent', defaultVisible: false },
+  { id: 'totalReceived', label: 'Received', defaultVisible: false },
+  { id: 'outstanding', label: 'Outstanding', defaultVisible: false },
+  { id: 'history', label: 'Rate History', defaultVisible: false },
   { id: 'createdAt', label: 'Created Date', defaultVisible: false },
   { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
-  { id: 'actions', label: 'Actions' },
 ];
 
 const DEFAULT_CONTRACTS_COLS = [
-  'assignmentCode', 'tenant', 'property', 'startDate', 'endDate',
-  'rentType', 'currentRate', 'totalReceived', 'outstanding', 'history', 'actions'
+  'property', 'subUnit', 'tenant', 'monthlyRent', 'annualRent',
+  'depositHeld', 'startDate', 'endDate', 'status', 'notes', 'actions'
 ];
 
 const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
-  assignmentCode: 130,
-  tenant: 170,
-  property: 170,
-  startDate: 120,
-  endDate: 120,
+  property: 160,
+  subUnit: 140,
+  tenant: 150,
+  monthlyRent: 120,
+  annualRent: 125,
+  depositHeld: 110,
+  startDate: 110,
+  endDate: 110,
+  status: 110,
+  notes: 190,
+  actions: 140,
+  assignmentCode: 120,
   rentType: 110,
   currentRate: 120,
-  totalReceived: 120,
-  outstanding: 125,
-  history: 105,
-  createdAt: 110,
-  updatedAt: 110,
-  actions: 220
+  totalReceived: 110,
+  outstanding: 110,
+  history: 100,
+  createdAt: 105,
+  updatedAt: 105,
 };
 
 const getContractRentType = (contract) => (
@@ -93,12 +106,12 @@ export default function ContractsView() {
 
   // Column management & resizable widths with localStorage persistence
   const [visibleColumns, setVisibleColumns] = useState(() => {
-    const saved = localStorage.getItem('cols_contracts_v1');
+    const saved = localStorage.getItem('cols_contracts_v2');
     if (!saved) return DEFAULT_CONTRACTS_COLS;
     try {
       const allowed = CONTRACTS_COLUMNS_DEF.map((c) => c.id);
       const savedColumns = JSON.parse(saved).filter((c) => allowed.includes(c));
-      return [...new Set([...savedColumns, 'startDate', 'endDate', 'rentType'])];
+      return savedColumns.length > 0 ? savedColumns : DEFAULT_CONTRACTS_COLS;
     } catch {
       return DEFAULT_CONTRACTS_COLS;
     }
@@ -108,7 +121,7 @@ export default function ContractsView() {
     columnWidths,
     handleResizeStart,
     resetColumnWidths
-  } = useResizableColumns('contracts_v1', DEFAULT_CONTRACTS_COLUMN_WIDTHS);
+  } = useResizableColumns('contracts_v2', DEFAULT_CONTRACTS_COLUMN_WIDTHS);
 
   // Controls & Toolbar States (APEX Integration)
   const [search, setSearch] = useState('');
@@ -117,18 +130,19 @@ export default function ContractsView() {
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
-  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: 'property', direction: 'asc' });
 
   // Dynamic suggestions for APEX filter builder dropdown
   const filterSuggestions = useMemo(() => {
     return {
-      assignmentCode: extractUniqueValues(contracts, c => c.assignmentCode),
+      property: extractUniqueValues(contracts, c => c.unitId?.propertyId?.name),
+      subUnit: extractUniqueValues(contracts, c => c.unitId?.subUnitPartition || c.unitId?.unitName),
       tenant: extractUniqueValues(contracts, c => c.tenantId?.name),
-      property: extractUniqueValues(contracts, c => `${c.unitId?.propertyId?.name || ''} - ${c.unitId?.unitName || ''}`.trim()),
-      rentType: ['Monthly Fixed', 'Annual Fixed'],
-      status: ['Active', 'Vacated'],
+      status: ['Active', 'Ended'],
       startDate: extractUniqueValues(contracts, c => c.startDate ? formatDate(c.startDate) : ''),
-      endDate: extractUniqueValues(contracts, c => c.endDate ? formatDate(c.endDate) : 'Ongoing')
+      endDate: extractUniqueValues(contracts, c => c.endDate ? formatDate(c.endDate) : 'Ongoing'),
+      rentType: ['Monthly Fixed', 'Annual Fixed'],
+      assignmentCode: extractUniqueValues(contracts, c => c.assignmentCode)
     };
   }, [contracts]);
 
@@ -154,8 +168,9 @@ export default function ContractsView() {
     tenantId: '',
     propertyId: '',
     unitId: '',
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: '',
     endDate: '',
+    status: 'Active',
     rentType: 'Monthly Fixed',
     rentAmount: '',
     depositHeld: 0,
@@ -169,6 +184,7 @@ export default function ContractsView() {
     unitId: '',
     startDate: '',
     endDate: '',
+    status: 'Active',
     rentType: 'Monthly Fixed',
     rentAmount: '',
     depositHeld: 0,
@@ -222,15 +238,31 @@ export default function ContractsView() {
     u => !editForm.propertyId || String(u.propertyId?._id || u.propertyId) === editForm.propertyId
   );
 
+  // Active conflict check: exactly 1 active contract allowed per unit
+  const activeConflictInCreate = useMemo(() => {
+    if (!createForm.unitId || createForm.status !== 'Active') return null;
+    return contracts.find(c => c.status === 'Active' && String(c.unitId?._id || c.unitId) === createForm.unitId);
+  }, [contracts, createForm.unitId, createForm.status]);
+
+  const activeConflictInEdit = useMemo(() => {
+    if (!editForm.unitId || editForm.status !== 'Active' || !selectedContract) return null;
+    return contracts.find(c => c.status === 'Active' && String(c.unitId?._id || c.unitId) === editForm.unitId && c._id !== selectedContract._id);
+  }, [contracts, editForm.unitId, editForm.status, selectedContract]);
+
   const handleCreateContract = async (e) => {
     e.preventDefault();
+    if (createForm.status === 'Active' && activeConflictInCreate) {
+      alert(`Cannot activate contract: This sub-property already has an active contract (${activeConflictInCreate.assignmentCode}) with ${activeConflictInCreate.tenantId?.name}. Please end or vacate the current contract first, or save as 'Ended' for historical tracking.`);
+      return;
+    }
     try {
       setSubmitting(true);
       const res = await API.post('/assignments', {
         tenantId: createForm.tenantId,
         unitId: createForm.unitId,
-        startDate: createForm.startDate,
+        startDate: createForm.startDate || null,
         endDate: createForm.endDate || null,
+        status: createForm.status,
         rentType: createForm.rentType,
         rentAmount: Number(createForm.rentAmount),
         depositHeld: Number(createForm.depositHeld) || 0,
@@ -238,14 +270,15 @@ export default function ContractsView() {
         notes: createForm.notes,
       });
       if (res.data.success) {
-        if (statusFilter === 'Active' && isContractEndDatePast(createForm.endDate)) setStatusFilter('Past');
+        if (createForm.status === 'Active' && isContractEndDatePast(createForm.endDate)) setStatusFilter('Past');
         setShowCreateModal(false);
         setCreateForm({
           tenantId: '',
           propertyId: '',
           unitId: '',
-          startDate: new Date().toISOString().split('T')[0],
+          startDate: '',
           endDate: '',
+          status: 'Active',
           rentType: 'Monthly Fixed',
           rentAmount: '',
           depositHeld: 0,
@@ -264,14 +297,19 @@ export default function ContractsView() {
   const handleEditContract = async (e) => {
     e.preventDefault();
     if (!selectedContract) return;
+    if (editForm.status === 'Active' && activeConflictInEdit) {
+      alert(`Cannot activate contract: This sub-property already has an active contract (${activeConflictInEdit.assignmentCode}) with ${activeConflictInEdit.tenantId?.name}. Only 1 active contract is allowed per sub-property.`);
+      return;
+    }
     try {
       setSubmitting(true);
       const res = await API.put(`/assignments/${selectedContract._id}`, {
         tenantId: editForm.tenantId,
         unitId: editForm.unitId,
         propertyId: editForm.propertyId,
-        startDate: editForm.startDate,
+        startDate: editForm.startDate || null,
         endDate: editForm.endDate || null,
+        status: editForm.status,
         rentType: editForm.rentType,
         rentAmount: Number(editForm.rentAmount),
         depositHeld: Number(editForm.depositHeld) || 0,
@@ -279,9 +317,6 @@ export default function ContractsView() {
         notes: editForm.notes,
       });
       if (res.data.success) {
-        const contractEnded = isContractEndDatePast(editForm.endDate);
-        if (statusFilter === 'Active' && contractEnded) setStatusFilter('Past');
-        if (statusFilter === 'Past' && !contractEnded) setStatusFilter('Active');
         setShowEditModal(false);
         setSelectedContract(null);
         fetchData();
@@ -349,7 +384,7 @@ export default function ContractsView() {
     return contracts.filter((c) => {
       const tName = c.tenantId?.name || '';
       const pName = c.unitId?.propertyId?.name || '';
-      const uName = c.unitId?.unitName || '';
+      const uName = c.unitId?.subUnitPartition || c.unitId?.unitName || '';
       const code = c.assignmentCode || '';
       const rentType = getContractRentType(c);
       const rentAmount = String(getContractRentAmount(c));
@@ -381,11 +416,17 @@ export default function ContractsView() {
       // 4. Custom APEX Filters
       for (const f of activeFilters) {
         let fieldVal = '';
-        if (f.columnId === 'assignmentCode') fieldVal = code;
+        if (f.columnId === 'property') fieldVal = pName;
+        else if (f.columnId === 'subUnit') fieldVal = uName;
         else if (f.columnId === 'tenant') fieldVal = tName;
-        else if (f.columnId === 'property') fieldVal = `${pName} ${uName}`;
+        else if (f.columnId === 'monthlyRent') fieldVal = String(c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)));
+        else if (f.columnId === 'annualRent') fieldVal = String(c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0));
+        else if (f.columnId === 'depositHeld') fieldVal = String(c.depositHeld || 0);
         else if (f.columnId === 'startDate') fieldVal = sDate;
         else if (f.columnId === 'endDate') fieldVal = eDate;
+        else if (f.columnId === 'status') fieldVal = c.status || '';
+        else if (f.columnId === 'notes') fieldVal = c.notes || '';
+        else if (f.columnId === 'assignmentCode') fieldVal = code;
         else if (f.columnId === 'rentType') fieldVal = rentType;
         else if (f.columnId === 'currentRate') fieldVal = rentAmount;
         else if (f.columnId === 'totalReceived') fieldVal = String(c.totalReceived || 0);
@@ -403,11 +444,17 @@ export default function ContractsView() {
   // Sorted Contracts based on 3-state sortConfig
   const sortedContracts = useMemo(() => {
     return sortDataRows(filteredContracts, sortConfig, {
-      assignmentCode: c => c.assignmentCode,
-      tenant: c => c.tenantId?.name,
-      property: c => `${c.unitId?.propertyId?.name || ''} ${c.unitId?.unitName || ''}`,
+      property: c => (c.unitId?.propertyId?.displayOrder && c.unitId.propertyId.displayOrder > 0) ? c.unitId.propertyId.displayOrder : (c.unitId?.propertyId?.name || ''),
+      subUnit: c => c.unitId?.subUnitPartition || c.unitId?.unitName || '',
+      tenant: c => c.tenantId?.name || '',
+      monthlyRent: c => c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
+      annualRent: c => c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
+      depositHeld: c => c.depositHeld || 0,
       startDate: c => c.startDate,
       endDate: c => c.endDate,
+      status: c => c.status || '',
+      notes: c => c.notes || '',
+      assignmentCode: c => c.assignmentCode,
       rentType: c => getContractRentType(c),
       currentRate: c => getContractRentAmount(c),
       totalReceived: c => c.totalReceived || 0,
@@ -438,21 +485,20 @@ export default function ContractsView() {
   const exportToExcel = () => {
     try {
       const dataToExport = filteredContracts.map((c) => ({
-        'Contract Code': c.assignmentCode || '',
-        'Status': c.status || 'Active',
-        'Tenant Name': c.tenantId?.name || '',
-        'Tenant Phone': c.tenantId?.phone || '',
-        'Tenant Email': c.tenantId?.email || '',
         'Property': c.unitId?.propertyId?.name || '',
-        'Partition / Unit': c.unitId?.unitName || '',
+        'Sub Property / Partition': c.unitId?.subUnitPartition || c.unitId?.unitName || '',
+        'Tenant': c.tenantId?.name || '',
+        'Rent Per month': c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
+        'Rent per Annum': c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
+        'Deposit': c.depositHeld || 0,
         'Start Date': c.startDate ? formatDate(c.startDate) : '',
         'End Date': c.endDate ? formatDate(c.endDate) : 'Ongoing',
+        'Contract Status': c.status || 'Active',
+        'Comments': c.notes || '',
+        'Contract Code': c.assignmentCode || '',
         'Rent Frequency': getContractRentType(c),
-        'Contract Rent (₹)': getContractRentAmount(c),
         'Total Received (₹)': c.totalReceived || 0,
-        'Outstanding Balance (₹)': c.outstandingBalance || 0,
-        'Deposit Held (₹)': c.depositHeld || 0,
-        'Notes': c.notes || ''
+        'Outstanding Balance (₹)': c.outstandingBalance || 0
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -483,9 +529,9 @@ export default function ContractsView() {
         </div>
 
         {/* Quick Property & Status Filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto">
           <SearchableSelect
-            className="w-44 sm:w-52"
+            className="w-full sm:w-52"
             value={propertyFilter}
             onChange={setPropertyFilter}
             placeholder="All Properties"
@@ -493,7 +539,7 @@ export default function ContractsView() {
             options={properties.map((p) => ({ value: p._id, label: p.name }))}
           />
 
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 w-full sm:w-auto justify-between sm:justify-start">
             <button
               onClick={() => { setStatusFilter('Active'); setCurrentPage(1); }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
@@ -531,7 +577,10 @@ export default function ContractsView() {
         availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
         columns={CONTRACTS_COLUMNS_DEF}
         visibleColumns={visibleColumns}
-        onChangeVisibleColumns={setVisibleColumns}
+        onChangeVisibleColumns={(cols) => {
+          setVisibleColumns(cols);
+          try { localStorage.setItem('cols_contracts_v2', JSON.stringify(cols)); } catch(e){}
+        }}
         onResetWidths={resetColumnWidths}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
@@ -539,7 +588,7 @@ export default function ContractsView() {
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
         filterSuggestions={filterSuggestions}
         onExport={exportToExcel}
-        storageKey="contracts_v1"
+        storageKey="contracts_v2"
         activeViewName={activeViewId}
         onViewChange={setActiveViewId}
         primaryAction={
@@ -555,6 +604,12 @@ export default function ContractsView() {
 
       {/* Contracts Table with Sticky Header & APEX Drag-Resize Columns */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+        {/* Mobile Swipe Cue */}
+        <div className="sm:hidden px-3 py-1.5 bg-teal-50 border-b border-teal-100 text-[11px] text-teal-800 font-medium flex items-center justify-between">
+          <span>Swipe horizontally to view all columns</span>
+          <span>→</span>
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="w-7 h-7 border-4 border-teal-500 border-t-transparent rounded-full animate-spin" />
@@ -564,7 +619,7 @@ export default function ContractsView() {
             No contracts found matching your filters.
           </div>
         ) : (
-          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
             <table
               className="w-full text-left text-xs border-collapse table-fixed"
               style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + getContractColumnWidth(colId, columnWidths), 0)}px` }}
@@ -584,14 +639,17 @@ export default function ContractsView() {
                     if (!def) return null;
                     const width = getContractColumnWidth(colId, columnWidths);
                     let alignClass = 'text-left';
-                    if (['history', 'createdAt', 'updatedAt'].includes(colId)) alignClass = 'text-center';
-                    if (['currentRate', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
+                    if (['history', 'createdAt', 'updatedAt', 'status'].includes(colId)) alignClass = 'text-center';
+                    if (['monthlyRent', 'annualRent', 'currentRate', 'depositHeld', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
                     if (colId === 'actions') alignClass = 'text-center';
 
                     return (
                       <th
                         key={colId}
-                        {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'contracts_v1')}
+                        {...getHeaderDragProps(colId, visibleColumns, (cols) => {
+                          setVisibleColumns(cols);
+                          try { localStorage.setItem('cols_contracts_v2', JSON.stringify(cols)); } catch(e){}
+                        }, 'contracts_v2')}
                         style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
                         className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 whitespace-nowrap overflow-hidden select-none ${alignClass}`}
                       >
@@ -653,6 +711,26 @@ export default function ContractsView() {
                           );
                         }
 
+                        if (colId === 'property') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                              <span className="font-semibold text-slate-800 text-xs block truncate" title={c.unitId?.propertyId?.name}>
+                                {c.unitId?.propertyId?.name || '—'}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'subUnit') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                              <span className="font-semibold text-teal-700 text-xs block truncate" title={c.unitId?.subUnitPartition || c.unitId?.unitName}>
+                                {c.unitId?.subUnitPartition || c.unitId?.unitName || '—'}
+                              </span>
+                            </td>
+                          );
+                        }
+
                         if (colId === 'tenant') {
                           return (
                             <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
@@ -666,15 +744,28 @@ export default function ContractsView() {
                           );
                         }
 
-                        if (colId === 'property') {
+                        if (colId === 'monthlyRent') {
+                          const monthly = c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c));
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
-                              <span className="font-semibold text-slate-800 text-xs block truncate">
-                                {c.unitId?.propertyId?.name || '—'}
-                              </span>
-                              <span className="text-teal-700 font-medium text-[11px] block truncate">
-                                {c.unitId?.unitName || '—'}
-                              </span>
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
+                              {monthly ? formatCurrency(monthly) : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'annualRent') {
+                          const annual = c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0);
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-semibold text-slate-700 font-mono">
+                              {annual ? formatCurrency(annual) : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'depositHeld') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-medium text-slate-700">
+                              {c.depositHeld ? formatCurrency(c.depositHeld) : '—'}
                             </td>
                           );
                         }
@@ -700,6 +791,27 @@ export default function ContractsView() {
                                   Ongoing
                                 </span>
                               )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'status') {
+                          const isActive = c.status === 'Active';
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
+                              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                isActive ? 'bg-emerald-100 text-emerald-800 border border-emerald-300/60' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}>
+                                {c.status}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'notes') {
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-slate-600 text-xs max-w-xs truncate" title={c.notes}>
+                              {c.notes || '—'}
                             </td>
                           );
                         }
@@ -784,6 +896,7 @@ export default function ContractsView() {
                                       unitId: c.unitId?._id || '',
                                       startDate: c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : '',
                                       endDate: c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : '',
+                                      status: c.status || 'Active',
                                       rentType,
                                       rentAmount: String(
                                         rentType === 'Annual Fixed'
@@ -921,7 +1034,7 @@ export default function ContractsView() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateContract} className="p-5 sm:p-6 space-y-5 overflow-y-auto">
+            <form onSubmit={handleCreateContract} className="p-5 sm:p-6 space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Select Tenant *</label>
                 <select
@@ -954,45 +1067,71 @@ export default function ContractsView() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Partition / Unit *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Property / Partition *</label>
                   <select
                     required
                     value={createForm.unitId}
                     onChange={(e) => setCreateForm({ ...createForm, unitId: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
                   >
-                    <option value="">-- Choose Unit --</option>
+                    <option value="">-- Choose Sub-Property --</option>
                     {availableUnitsForProperty.map(u => (
-                      <option key={u._id} value={u._id}>{u.unitName}</option>
+                      <option key={u._id} value={u._id}>
+                        {u.subUnitPartition || u.unitName} {u.unitCode ? `(${u.unitCode})` : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Start Date *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Status *</label>
+                  <select
+                    value={createForm.status}
+                    onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Ended">Ended / Past</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Start Date <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
                   <input
                     type="date"
-                    required
                     value={createForm.startDate}
                     onChange={(e) => setCreateForm({ ...createForm, startDate: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Agreement commencement date</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Commencement date</p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract End Date (Optional)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    End Date <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
                   <input
                     type="date"
                     value={createForm.endDate}
                     onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank for ongoing tenancies</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank if ongoing</p>
                 </div>
               </div>
+
+              {activeConflictInCreate && createForm.status === 'Active' && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Active Contract Conflict:</span> This sub-property already has an active contract ({activeConflictInCreate.assignmentCode}) with <strong>{activeConflictInCreate.tenantId?.name}</strong>. Only 1 active contract is permitted per sub-property. Set status to "Ended" if recording a past contract, or vacate the current tenant first.
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1020,6 +1159,16 @@ export default function ContractsView() {
                     onChange={(e) => setCreateForm({ ...createForm, rentAmount: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
+                  <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+                    <span>{createForm.rentType === 'Annual Fixed' ? 'Monthly Equivalent:' : 'Annual Equivalent:'}</span>
+                    <span className="font-bold text-slate-800">
+                      {createForm.rentAmount
+                        ? (createForm.rentType === 'Annual Fixed'
+                            ? formatCurrency(Math.round(Number(createForm.rentAmount) / 12)) + ' / month'
+                            : formatCurrency(Number(createForm.rentAmount) * 12) + ' / year')
+                        : '—'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1047,6 +1196,17 @@ export default function ContractsView() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Comments / Notes</label>
+                <textarea
+                  rows="2"
+                  placeholder="e.g. Rent increased from 20000 to 22000 in Jan 25, deposit details, etc."
+                  value={createForm.notes}
+                  onChange={(e) => setCreateForm({ ...createForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+
               <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -1057,8 +1217,8 @@ export default function ContractsView() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 disabled:opacity-50"
+                  disabled={submitting || Boolean(activeConflictInCreate && createForm.status === 'Active')}
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {submitting ? 'Creating...' : 'Create Contract'}
                 </button>
@@ -1090,31 +1250,104 @@ export default function ContractsView() {
               </button>
             </div>
 
-            <form onSubmit={handleEditContract} className="p-5 sm:p-6 space-y-5 overflow-y-auto">
+            <form onSubmit={handleEditContract} className="p-5 sm:p-6 space-y-4 overflow-y-auto">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Tenant *</label>
+                <select
+                  required
+                  value={editForm.tenantId}
+                  onChange={(e) => setEditForm({ ...editForm, tenantId: e.target.value })}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                >
+                  <option value="">-- Choose Tenant --</option>
+                  {tenants.map(t => (
+                    <option key={t._id} value={t._id}>{t.name} {t.phone ? `(${t.phone})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Start Date *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Property *</label>
+                  <select
+                    required
+                    value={editForm.propertyId}
+                    onChange={(e) => setEditForm({ ...editForm, propertyId: e.target.value, unitId: '' })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="">-- Choose Property --</option>
+                    {properties.map(p => (
+                      <option key={p._id} value={p._id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Property / Partition *</label>
+                  <select
+                    required
+                    value={editForm.unitId}
+                    onChange={(e) => setEditForm({ ...editForm, unitId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="">-- Choose Sub-Property --</option>
+                    {availableUnitsForEdit.map(u => (
+                      <option key={u._id} value={u._id}>
+                        {u.subUnitPartition || u.unitName} {u.unitCode ? `(${u.unitCode})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Status *</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Ended">Ended / Past</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Start Date <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
                   <input
                     type="date"
-                    required
                     value={editForm.startDate}
                     onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Agreement commencement date</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Commencement date</p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract End Date</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    End Date <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
                   <input
                     type="date"
                     value={editForm.endDate}
                     onChange={(e) => setEditForm({ ...editForm, endDate: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank for ongoing contracts</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank if ongoing</p>
                 </div>
               </div>
+
+              {activeConflictInEdit && editForm.status === 'Active' && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Active Contract Conflict:</span> This sub-property already has an active contract ({activeConflictInEdit.assignmentCode}) with <strong>{activeConflictInEdit.tenantId?.name}</strong>. Only 1 active contract is permitted per sub-property. Set status to "Ended" if recording a past contract, or vacate the current tenant first.
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1141,6 +1374,16 @@ export default function ContractsView() {
                     onChange={(e) => setEditForm({ ...editForm, rentAmount: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
+                  <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
+                    <span>{editForm.rentType === 'Annual Fixed' ? 'Monthly Equivalent:' : 'Annual Equivalent:'}</span>
+                    <span className="font-bold text-slate-800">
+                      {editForm.rentAmount
+                        ? (editForm.rentType === 'Annual Fixed'
+                            ? formatCurrency(Math.round(Number(editForm.rentAmount) / 12)) + ' / month'
+                            : formatCurrency(Number(editForm.rentAmount) * 12) + ' / year')
+                        : '—'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1168,7 +1411,7 @@ export default function ContractsView() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Notes / Special Conditions</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Comments / Notes</label>
                 <textarea
                   rows="2"
                   value={editForm.notes}
@@ -1187,8 +1430,8 @@ export default function ContractsView() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                  disabled={submitting || Boolean(activeConflictInEdit && editForm.status === 'Active')}
+                  className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md disabled:opacity-50 cursor-pointer"
                 >
                   {submitting ? 'Saving...' : 'Save Changes'}
                 </button>

@@ -88,6 +88,9 @@ export default function ApexToolbar({
       next = [...visibleColumns, colId];
     }
     setVisibleCols(next);
+    try {
+      localStorage.setItem(`cols_${currentStorageKey}`, JSON.stringify(next));
+    } catch (e) {}
   };
 
   const handleSaveView = (e) => {
@@ -141,8 +144,11 @@ export default function ApexToolbar({
   };
 
   const handleResetToDefault = () => {
-    const allColIds = columns.map(c => c.id);
-    setVisibleCols(allColIds);
+    const defaultCols = columns.filter(c => c.defaultVisible !== false).map(c => c.id);
+    setVisibleCols(defaultCols);
+    try {
+      localStorage.setItem(`cols_${currentStorageKey}`, JSON.stringify(defaultCols));
+    } catch (e) {}
     onFiltersChange?.([]);
     onRowsPerPageChange?.(10);
     onSearchChange?.('');
@@ -241,7 +247,7 @@ export default function ApexToolbar({
 
             {/* APEX Context Menu */}
             {showActionsMenu && (
-              <div className="absolute left-0 top-full mt-1.5 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute left-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
                 {/* 1. Columns Submenu Trigger */}
                 <button
                   type="button"
@@ -528,8 +534,8 @@ export default function ApexToolbar({
 
       {/* APEX-style Filter Modal with Value Dropdown & Condition Builder */}
       {showFilterModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-xl max-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-teal-600" />

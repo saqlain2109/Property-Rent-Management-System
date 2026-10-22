@@ -58,7 +58,7 @@ export default function TenantsView({ onDataChanged }) {
   const [search, setSearch] = useState('');
   const [propertyFilter, setPropertyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
@@ -70,10 +70,10 @@ export default function TenantsView({ onDataChanged }) {
     return {
       tenant: extractUniqueValues(tenants, t => t.name),
       property: extractUniqueValues(tenants, t => {
-        if (!t.activeAssignment) return '';
-        const p = t.activeAssignment.unitId?.propertyId?.name || '';
-        const u = t.activeAssignment.unitId?.unitName || '';
-        return `${p} - ${u}`.trim();
+        const p = t.activeUnit?.propertyId?.name || t.activeAssignment?.unitId?.propertyId?.name || '';
+        const u = t.activeUnit?.subUnitPartition || t.activeUnit?.unitName || t.activeAssignment?.unitId?.subUnitPartition || t.activeAssignment?.unitId?.unitName || '';
+        if (!p && !u) return '';
+        return p && u ? `${p} - ${u}` : (p || u);
       }),
       rentType: ['Monthly Fixed', 'Annual Fixed'],
       status: ['Active', 'Inactive'],
@@ -93,7 +93,7 @@ export default function TenantsView({ onDataChanged }) {
     try {
       const allowed = TENANTS_COLUMNS_DEF.map((column) => column.id);
       const savedColumns = JSON.parse(saved).filter((column) => allowed.includes(column));
-      return [...new Set([...savedColumns, 'startDate', 'endDate', 'rentType'])];
+      return savedColumns.length > 0 ? savedColumns : DEFAULT_TENANTS_COLS;
     } catch {
       return DEFAULT_TENANTS_COLS;
     }
@@ -349,7 +349,7 @@ export default function TenantsView({ onDataChanged }) {
       for (const f of activeFilters) {
         let fieldVal = '';
         if (f.columnId === 'tenant') fieldVal = tName;
-        else if (f.columnId === 'property') fieldVal = `${propName} ${unitName}`;
+        else if (f.columnId === 'property') fieldVal = propName && unitName ? `${propName} - ${unitName}` : (propName || unitName);
         else if (f.columnId === 'startDate') fieldVal = sDate;
         else if (f.columnId === 'endDate') fieldVal = eDate;
         else if (f.columnId === 'rentType') fieldVal = rentType;
@@ -449,9 +449,9 @@ export default function TenantsView({ onDataChanged }) {
         </div>
 
         {/* Quick Filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <SearchableSelect
-            className="w-44 sm:w-52"
+            className="w-full sm:w-52"
             value={propertyFilter}
             onChange={(val) => { setPropertyFilter(val); setCurrentPage(1); }}
             placeholder="All Properties"
@@ -496,7 +496,10 @@ export default function TenantsView({ onDataChanged }) {
         availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
         columns={TENANTS_COLUMNS_DEF}
         visibleColumns={visibleColumns}
-        onChangeVisibleColumns={setVisibleColumns}
+        onChangeVisibleColumns={(cols) => {
+          setVisibleColumns(cols);
+          try { localStorage.setItem('cols_tenants_v2', JSON.stringify(cols)); } catch(e){}
+        }}
         onResetWidths={resetColumnWidths}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
@@ -520,7 +523,13 @@ export default function TenantsView({ onDataChanged }) {
 
       {/* Excel Table Grid */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
-        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+        {/* Mobile Swipe Cue */}
+        <div className="sm:hidden px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 text-[11px] text-emerald-800 font-medium flex items-center justify-between">
+          <span>Swipe horizontally to view all columns</span>
+          <span>→</span>
+        </div>
+
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table
             className="w-full text-left text-xs border-collapse table-fixed"
             style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_TENANTS_COLUMN_WIDTHS[colId] || 100), 0)}px` }}

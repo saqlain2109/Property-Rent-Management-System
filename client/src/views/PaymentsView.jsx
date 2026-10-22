@@ -1120,8 +1120,8 @@ export default function PaymentsView() {
     if (!sheetSortConfig.key || !sheetSortConfig.direction) {
       // Natural order: Property Master displayOrder, then property name, then unit name
       return [...filteredOut].sort((a, b) => {
-        const orderA = a.property?.displayOrder ?? 9999;
-        const orderB = b.property?.displayOrder ?? 9999;
+        const orderA = (a.property?.displayOrder && a.property.displayOrder > 0) ? a.property.displayOrder : 9999;
+        const orderB = (b.property?.displayOrder && b.property.displayOrder > 0) ? b.property.displayOrder : 9999;
         if (orderA !== orderB) return orderA - orderB;
         const nameA = a.property?.name || '';
         const nameB = b.property?.name || '';
@@ -1133,9 +1133,9 @@ export default function PaymentsView() {
     }
 
     return sortDataRows(filteredOut, sheetSortConfig, {
-      index: (d, idx) => idx,
+      index: (d, idx) => (d.property?.displayOrder && d.property.displayOrder > 0) ? d.property.displayOrder : idx,
       tenant: d => d.tenant?.name || '',
-      property: d => d.property?.name || '',
+      property: d => (d.property?.displayOrder && d.property.displayOrder > 0) ? d.property.displayOrder : 9999,
       subUnit: d => d.unit?.subUnitPartition || d.unit?.unitName || '',
       monthlyRent: d => d.monthsBreakdown?.find(m => m.monthYear === selectedMonth)?.expectedRate ?? (d.unit?.monthlyRentExpected || 0),
       outstanding: d => d.totalOutstanding || 0,
@@ -1322,7 +1322,10 @@ export default function PaymentsView() {
             availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
             columns={RENT_SHEET_COLUMNS_DEF}
             visibleColumns={visibleSheetColumns}
-            onChangeVisibleColumns={setVisibleSheetColumns}
+            onChangeVisibleColumns={(cols) => {
+              setVisibleSheetColumns(cols);
+              try { localStorage.setItem('cols_payments_sheet_v5', JSON.stringify(cols)); } catch(e){}
+            }}
             onResetWidths={resetColumnWidths}
             isHeaderSticky={isSheetHeaderSticky}
             onToggleHeaderSticky={setIsSheetHeaderSticky}
@@ -1349,12 +1352,18 @@ export default function PaymentsView() {
 
           {/* The Excel Grid Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            {/* Mobile Swipe Cue */}
+            <div className="sm:hidden px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 text-[11px] text-emerald-800 font-medium flex items-center justify-between">
+              <span>Swipe horizontally to view all columns</span>
+              <span>→</span>
+            </div>
+
             {loading ? (
               <div className="py-20 text-center text-slate-400 text-sm">Loading collection sheet for {formatMonthYear(selectedMonth)}...</div>
             ) : sortedSheetRows.length === 0 ? (
               <div className="py-20 text-center text-slate-400 text-sm">No tenant records found matching your filters.</div>
             ) : (
-              <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+              <div className="overflow-x-auto max-h-[70vh] overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
                 <table
                   className="w-full text-left text-sm border-collapse table-fixed"
                   style={{ minWidth: `${visibleSheetColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120), 0)}px` }}
@@ -1463,8 +1472,14 @@ export default function PaymentsView() {
                           {visibleSheetColumns.map((colId) => {
                             if (colId === 'index') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs text-slate-400 font-mono">
-                                  {idx + 1}
+                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-mono">
+                                  {item.property?.displayOrder ? (
+                                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 font-bold text-slate-700 text-[11px]" title={`Property Order: ${item.property.displayOrder}`}>
+                                      {item.property.displayOrder}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">{idx + 1}</span>
+                                  )}
                                 </td>
                               );
                             }
@@ -1511,8 +1526,8 @@ export default function PaymentsView() {
                                       {formatCurrency(outstandingTotal)}
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 font-mono">
-                                      ₹0 (Clear)
+                                    <span className="font-semibold text-slate-700 text-xs font-mono">
+                                      ₹0
                                     </span>
                                   )}
                                 </td>
@@ -1859,7 +1874,10 @@ export default function PaymentsView() {
             availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
             columns={RECEIPTS_COLUMNS_DEF}
             visibleColumns={visibleReceiptsColumns}
-            onChangeVisibleColumns={setVisibleReceiptsColumns}
+            onChangeVisibleColumns={(cols) => {
+              setVisibleReceiptsColumns(cols);
+              try { localStorage.setItem('cols_payments_receipts', JSON.stringify(cols)); } catch(e){}
+            }}
             onResetWidths={resetReceiptsWidths}
             isHeaderSticky={isReceiptsHeaderSticky}
             onToggleHeaderSticky={setIsReceiptsHeaderSticky}
@@ -2013,7 +2031,13 @@ export default function PaymentsView() {
           {receipts.length === 0 ? (
             <div className="py-16 text-center text-slate-400 text-sm">No payment receipts found.</div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              {/* Mobile Swipe Cue */}
+              <div className="sm:hidden px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 text-[11px] text-emerald-800 font-medium flex items-center justify-between">
+                <span>Swipe horizontally to view all columns</span>
+                <span>→</span>
+              </div>
+              <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
               <table
                 className="w-full text-left text-sm border-collapse table-fixed"
                 style={hasCustomReceiptsWidths ? { minWidth: `${visibleReceiptsColumns.reduce((sum, colId) => sum + (receiptsWidths[colId] || DEFAULT_RECEIPTS_COLUMN_WIDTHS[colId] || 100), 0)}px` } : undefined}
@@ -2243,6 +2267,7 @@ export default function PaymentsView() {
                 </tbody>
               </table>
             </div>
+          </>
           )}
 
           {/* Receipts Pagination Bar */}

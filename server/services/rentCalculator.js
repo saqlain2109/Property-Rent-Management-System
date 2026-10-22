@@ -74,7 +74,7 @@ async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAs
 
   if (!assignment) return 0;
 
-  const assignStart = new Date(assignment.startDate);
+  const assignStart = assignment.startDate ? new Date(assignment.startDate) : (assignment.createdAt ? new Date(assignment.createdAt) : new Date(0));
   if (assignStart > monthEnd) {
     return 0; // Tenant has not occupied yet this month
   }
@@ -90,23 +90,28 @@ async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAs
 
   if (windowStart > windowEnd) return 0;
 
-  // Find all rent agreements active during this window
+  // Find all rent agreements active during this window for this specific assignment
   const agreements = await RentAgreement.find({
-    unitId,
-    tenantId,
-    effectiveFrom: { $lte: windowEnd },
+    assignmentId: assignment._id,
     $or: [
-      { effectiveTo: null },
-      { effectiveTo: { $gte: windowStart } }
+      { effectiveFrom: null },
+      { effectiveFrom: { $lte: windowEnd } }
+    ],
+    $and: [
+      {
+        $or: [
+          { effectiveTo: null },
+          { effectiveTo: { $gte: windowStart } }
+        ]
+      }
     ]
   }).sort({ effectiveFrom: 1 });
 
   if (!agreements || agreements.length === 0) {
     const latestAgreement = await RentAgreement.findOne({
-      unitId,
-      tenantId
+      assignmentId: assignment._id
     }).sort({ effectiveFrom: -1 });
-    if (!latestAgreement) return 0;
+    if (!latestAgreement) return assignment.monthlyRentExpected || 0;
 
     const sDay = getDayNumber(windowStart);
     const eDay = getDayNumber(windowEnd);
@@ -116,7 +121,7 @@ async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAs
 
   let totalProratedRent = 0;
   for (const ag of agreements) {
-    const agFrom = new Date(ag.effectiveFrom);
+    const agFrom = ag.effectiveFrom ? new Date(ag.effectiveFrom) : monthStart;
     const agTo = ag.effectiveTo ? new Date(ag.effectiveTo) : null;
 
     const segStart = agFrom > windowStart ? agFrom : windowStart;
@@ -162,13 +167,15 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear) {
     };
   }
 
-  // Determine starting month from occupancy startDate
-  const startMonthStr = `${assignment.startDate.getFullYear()}-${String(assignment.startDate.getMonth() + 1).padStart(2, '0')}`;
+  // Determine starting month from occupancy startDate (safely handle optional dates)
+  const aStartDate = assignment.startDate ? new Date(assignment.startDate) : (assignment.createdAt ? new Date(assignment.createdAt) : new Date());
+  const startMonthStr = `${aStartDate.getFullYear()}-${String(aStartDate.getMonth() + 1).padStart(2, '0')}`;
   
   // If assignment has ended before effectiveUpTo, cap it
   let endMonthStr = effectiveUpTo;
   if (assignment.endDate) {
-    const assignEndStr = `${assignment.endDate.getFullYear()}-${String(assignment.endDate.getMonth() + 1).padStart(2, '0')}`;
+    const aEndDate = new Date(assignment.endDate);
+    const assignEndStr = `${aEndDate.getFullYear()}-${String(aEndDate.getMonth() + 1).padStart(2, '0')}`;
     if (assignEndStr < endMonthStr) {
       endMonthStr = assignEndStr;
     }

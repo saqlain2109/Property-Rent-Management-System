@@ -39,11 +39,17 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
           API.get('/tenants'),
           API.get('/assignments'),
         ]);
+
+        const allTenants = tRes.data?.data || [];
+        const allContracts = cRes.data?.data || [];
+        const activeTenants = allTenants.filter(t => t.activeAssignment || t.isActive).length;
+        const activeContracts = allContracts.filter(c => c.status === 'Active').length;
+
         setCounts({
           properties: pRes.data?.data?.length || 0,
           units: uRes.data?.data?.length || 0,
-          tenants: tRes.data?.data?.length || 0,
-          contracts: cRes.data?.data?.length || 0,
+          tenants: activeTenants || allTenants.length,
+          contracts: activeContracts || allContracts.length,
         });
       } catch (e) {
         // quiet error
@@ -83,7 +89,7 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
               <Building2 className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="font-extrabold text-white tracking-wide text-base leading-tight">EstateLedger</h1>
+              <h1 className="font-extrabold text-white tracking-wide text-base leading-tight">Property Management</h1>
               <p className="text-[11px] text-emerald-400 font-semibold tracking-wide">Property Manager</p>
             </div>
           </div>

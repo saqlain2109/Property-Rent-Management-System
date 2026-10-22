@@ -46,7 +46,7 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
   const [search, setSearch] = useState(initialSearch);
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState(initialPropertyFilter || '');
   const [occupancyFilter, setOccupancyFilter] = useState('');
-  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
@@ -260,6 +260,19 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
   }, [units, search, selectedPropertyFilter, occupancyFilter, activeFilters]);
 
   const sortedUnits = useMemo(() => {
+    if (!sortConfig.key || !sortConfig.direction) {
+      return [...filteredUnits].sort((a, b) => {
+        const orderA = (a.propertyId?.displayOrder && a.propertyId.displayOrder > 0) ? a.propertyId.displayOrder : 9999;
+        const orderB = (b.propertyId?.displayOrder && b.propertyId.displayOrder > 0) ? b.propertyId.displayOrder : 9999;
+        if (orderA !== orderB) return orderA - orderB;
+        const pNameA = a.propertyId?.name || '';
+        const pNameB = b.propertyId?.name || '';
+        if (pNameA.localeCompare(pNameB) !== 0) return pNameA.localeCompare(pNameB);
+        const partA = a.subUnitPartition || a.unitName || '';
+        const partB = b.subUnitPartition || b.unitName || '';
+        return partA.localeCompare(partB);
+      });
+    }
     return sortDataRows(filteredUnits, sortConfig, {
       property: u => u.propertyId?.name,
       partition: u => u.subUnitPartition || u.unitName,
@@ -333,11 +346,11 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
         </div>
 
         {/* Quick Filter Selects */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <select
             value={selectedPropertyFilter}
             onChange={(e) => { setSelectedPropertyFilter(e.target.value); setCurrentPage(1); }}
-            className="w-44 sm:w-52 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full sm:w-52 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="">All Properties ({properties.length})</option>
             {properties.map(p => (
@@ -347,7 +360,7 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
           <select
             value={occupancyFilter}
             onChange={(e) => { setOccupancyFilter(e.target.value); setCurrentPage(1); }}
-            className="w-36 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full sm:w-36 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="">All statuses</option>
             <option value="Vacant">Vacant</option>
@@ -370,7 +383,10 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
         availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
         columns={PARTITIONS_COLUMNS_DEF}
         visibleColumns={visibleColumns}
-        onChangeVisibleColumns={setVisibleColumns}
+        onChangeVisibleColumns={(cols) => {
+          setVisibleColumns(cols);
+          try { localStorage.setItem('cols_partitions', JSON.stringify(cols)); } catch(e){}
+        }}
         onResetWidths={resetColumnWidths}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
@@ -394,7 +410,13 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
 
       {/* Excel-Style Grid Card */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
-        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+        {/* Mobile Swipe Cue */}
+        <div className="sm:hidden px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 text-[11px] text-emerald-800 font-medium flex items-center justify-between">
+          <span>Swipe horizontally to view all columns</span>
+          <span>→</span>
+        </div>
+
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table
             className="w-full text-left text-xs border-collapse table-fixed"
             style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_PARTITIONS_COLUMN_WIDTHS[colId] || 100), 0)}px` }}

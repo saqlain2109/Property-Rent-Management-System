@@ -11,6 +11,7 @@ import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../compon
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 
 const PROPERTIES_COLUMNS_DEF = [
+  { id: 'displayOrder', label: 'Order #' },
   { id: 'details', label: 'Property' },
   { id: 'type', label: 'Property Type' },
   { id: 'area', label: 'Total Area (Sq Ft)' },
@@ -22,17 +23,18 @@ const PROPERTIES_COLUMNS_DEF = [
   { id: 'actions', label: 'Actions' },
 ];
 
-const DEFAULT_PROPERTIES_COLS = ['details', 'type', 'partitions', 'address', 'actions'];
+const DEFAULT_PROPERTIES_COLS = ['displayOrder', 'details', 'type', 'area', 'partitions', 'address', 'actions'];
 
 // Screen-fitting default column widths to guarantee zero horizontal scroll by default!
 const DEFAULT_PROPERTIES_COLUMN_WIDTHS = {
+  displayOrder: 80,
   details: 180,
   type: 130,
-  partitions: 100,
-  address: 220,
-  actions: 120,
   area: 110,
   ownership: 95,
+  partitions: 100,
+  address: 200,
+  actions: 120,
   createdAt: 110,
   updatedAt: 110
 };
@@ -44,7 +46,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [propertyTypeFilter, setPropertyTypeFilter] = useState('');
-  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
@@ -54,6 +56,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   // Suggestions for APEX filter builder dropdown
   const filterSuggestions = useMemo(() => {
     return {
+      displayOrder: extractUniqueValues(properties, p => p.displayOrder ? String(p.displayOrder) : ''),
       details: extractUniqueValues(properties, p => p.name),
       type: extractUniqueValues(properties, p => p.propertyType),
       address: extractUniqueValues(properties, p => p.address)
@@ -91,6 +94,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   const [form, setForm] = useState({
     name: '',
     propertyType: 'Commercial Godown',
+    displayOrder: '',
     totalAreaSqFt: '',
     ownershipPercentage: '100',
     address: '',
@@ -142,6 +146,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
     try {
       const payload = {
         ...form,
+        displayOrder: form.displayOrder ? Number(form.displayOrder) : 0,
         totalAreaSqFt: Number(form.totalAreaSqFt) || 0,
         ownershipPercentage: Number(form.ownershipPercentage) || 100,
         // keep legacy fields with sensible defaults
@@ -180,6 +185,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
           setForm({
             name: '',
             propertyType: 'Commercial Godown',
+            displayOrder: '',
             totalAreaSqFt: '',
             ownershipPercentage: '100',
             address: '',
@@ -204,6 +210,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
     setForm({
       name: '',
       propertyType: 'Commercial Godown',
+      displayOrder: '',
       totalAreaSqFt: '',
       ownershipPercentage: '100',
       address: '',
@@ -222,6 +229,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
     setForm({
       name: p.name || '',
       propertyType: p.propertyType || 'Commercial Godown',
+      displayOrder: (p.displayOrder && p.displayOrder > 0) ? String(p.displayOrder) : '',
       totalAreaSqFt: p.totalAreaSqFt || '',
       ownershipPercentage: p.ownershipPercentage !== undefined ? String(p.ownershipPercentage) : '100',
       ownerOrResponsiblePerson: p.ownerOrResponsiblePerson || 'Owner',
@@ -276,7 +284,8 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
       // 3. APEX Filters
       for (const f of activeFilters) {
         let fieldVal = '';
-        if (f.columnId === 'details') fieldVal = pName;
+        if (f.columnId === 'displayOrder') fieldVal = String(p.displayOrder || '');
+        else if (f.columnId === 'details') fieldVal = pName;
         else if (f.columnId === 'type') fieldVal = pType;
         else if (f.columnId === 'area') fieldVal = pArea;
         else if (f.columnId === 'ownership') fieldVal = pOwnership;
@@ -293,7 +302,16 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   }, [properties, search, initialPropertyFilter, propertyTypeFilter, activeFilters]);
 
   const sortedProperties = useMemo(() => {
+    if (!sortConfig.key || !sortConfig.direction) {
+      return [...filteredProperties].sort((a, b) => {
+        const orderA = (a.displayOrder && a.displayOrder > 0) ? a.displayOrder : 9999;
+        const orderB = (b.displayOrder && b.displayOrder > 0) ? b.displayOrder : 9999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    }
     return sortDataRows(filteredProperties, sortConfig, {
+      displayOrder: p => (p.displayOrder && p.displayOrder > 0) ? p.displayOrder : 9999,
       details: p => p.name,
       type: p => p.propertyType,
       area: p => p.totalAreaSqFt || 0,
@@ -365,11 +383,11 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
         </div>
 
         {/* Quick Property Type Filter */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <select
             value={propertyTypeFilter}
             onChange={(e) => { setPropertyTypeFilter(e.target.value); setCurrentPage(1); }}
-            className="w-48 sm:w-56 px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full sm:w-56 px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="">All property types</option>
             {['Commercial Godown', 'Residential Apartment', 'Commercial Office', 'Garage', 'PG Facility', 'Room', 'Mixed Use', 'Other'].map((type) => (
@@ -391,7 +409,10 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
         availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
         columns={PROPERTIES_COLUMNS_DEF}
         visibleColumns={visibleColumns}
-        onChangeVisibleColumns={setVisibleColumns}
+        onChangeVisibleColumns={(cols) => {
+          setVisibleColumns(cols);
+          try { localStorage.setItem('cols_properties', JSON.stringify(cols)); } catch(e){}
+        }}
         onResetWidths={resetColumnWidths}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
@@ -415,7 +436,13 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
 
       {/* Excel Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
-        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+        {/* Mobile Swipe Cue */}
+        <div className="sm:hidden px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 text-[11px] text-emerald-800 font-medium flex items-center justify-between">
+          <span>Swipe horizontally to view all columns</span>
+          <span>→</span>
+        </div>
+
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table
             className="w-full text-left text-xs border-collapse table-fixed"
             style={{ minWidth: `${visibleColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_PROPERTIES_COLUMN_WIDTHS[colId] || 100), 0)}px` }}
@@ -493,6 +520,19 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                   <React.Fragment key={p._id}>
                     <tr className="hover:bg-emerald-50/30 transition-colors">
                       {visibleColumns.map(colId => {
+                        if (colId === 'displayOrder') {
+                          return (
+                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-center font-bold">
+                              {p.displayOrder && p.displayOrder > 0 ? (
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-extrabold text-emerald-700">
+                                  {p.displayOrder}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300 font-normal text-xs">—</span>
+                              )}
+                            </td>
+                          );
+                        }
                         if (colId === 'details') {
                           return (
                             <td key={colId} className="py-3 px-4 border-r border-slate-200">
@@ -783,7 +823,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Property Type */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Property Type</label>
@@ -801,6 +841,20 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                     <option value="Mixed Use">Mixed Use</option>
                     <option value="Other">Other</option>
                   </select>
+                </div>
+                {/* Display Order */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Display Order # <span className="text-slate-400 font-normal">(1, 2, 3...)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 1"
+                    value={form.displayOrder}
+                    onChange={(e) => setForm({ ...form, displayOrder: e.target.value })}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-emerald-800"
+                  />
                 </div>
                 {/* Total Area */}
                 <div>

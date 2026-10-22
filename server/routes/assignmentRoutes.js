@@ -61,32 +61,47 @@ router.get('/', protect, async (req, res) => {
 
       const currentAgr = rateHistory.find(r => r.isCurrentRate) || rateHistory[rateHistory.length - 1];
 
-      // Calculate expected to date and received
-      try {
-        const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id);
-        return {
-          ...obj,
-          rateHistory,
-          currentAgreement: currentAgr,
-          currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
-          totalExpected: ledger.totalExpected || 0,
-          totalReceived: ledger.totalAllocated || 0,
-          outstandingBalance: ledger.totalOutstanding || 0,
-          paidTillMonth: ledger.paidTillMonth,
-          nextUnpaidMonth: ledger.nextUnpaidMonth,
-          monthsBreakdown: ledger.monthsBreakdown || []
-        };
-      } catch (err) {
-        return {
-          ...obj,
-          rateHistory,
-          currentAgreement: currentAgr,
-          currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
-          totalExpected: 0,
-          totalReceived: 0,
-          outstandingBalance: 0
-        };
+      // Calculate ledger for active contracts (fast response for legacy/ended contracts)
+      if (assign.status === 'Active') {
+        try {
+          const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id);
+          return {
+            ...obj,
+            rateHistory,
+            currentAgreement: currentAgr,
+            currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+            totalExpected: ledger.totalExpected || 0,
+            totalReceived: ledger.totalAllocated || 0,
+            outstandingBalance: ledger.totalOutstanding || 0,
+            paidTillMonth: ledger.paidTillMonth,
+            nextUnpaidMonth: ledger.nextUnpaidMonth,
+            monthsBreakdown: ledger.monthsBreakdown || []
+          };
+        } catch (err) {
+          return {
+            ...obj,
+            rateHistory,
+            currentAgreement: currentAgr,
+            currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+            totalExpected: 0,
+            totalReceived: 0,
+            outstandingBalance: 0
+          };
+        }
       }
+
+      return {
+        ...obj,
+        rateHistory,
+        currentAgreement: currentAgr,
+        currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+        totalExpected: 0,
+        totalReceived: 0,
+        outstandingBalance: 0,
+        paidTillMonth: null,
+        nextUnpaidMonth: null,
+        monthsBreakdown: []
+      };
     }));
 
     res.json({ success: true, count: enriched.length, data: enriched });
@@ -99,8 +114,9 @@ router.get('/', protect, async (req, res) => {
 router.post('/', protect, authorize('admin', 'manager'), [
   body('tenantId').isMongoId().withMessage('Valid tenant ID is required'),
   body('unitId').isMongoId().withMessage('Valid unit ID is required'),
-  body('startDate').isISO8601().withMessage('Valid start date is required'),
+  body('startDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid start date is required'),
   body('endDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
+  body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated', 'Ended']).withMessage('Invalid status'),
   body('rentType').optional().isIn(['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom']),
   body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
   body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number')
@@ -113,27 +129,29 @@ router.post('/', protect, authorize('admin', 'manager'), [
   try {
     const {
       tenantId, unitId, startDate, endDate, depositHeld,
-      rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes
+      rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes, status
     } = req.body;
     const enteredRent = rentAmount ?? monthlyRate;
     if (enteredRent === undefined || enteredRent === null || enteredRent === '') {
       return res.status(400).json({ success: false, message: 'Rent amount is required' });
     }
     const contractEndDate = endDate || null;
-    if (contractEndDate && new Date(contractEndDate) < new Date(startDate)) {
+    const contractStartDate = startDate || null;
+    if (contractStartDate && contractEndDate && new Date(contractEndDate) < new Date(contractStartDate)) {
       return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
     }
     const contractHasEnded = isDateBeforeToday(contractEndDate);
+    const finalStatus = status || (contractHasEnded ? 'Ended' : 'Active');
 
-    // Check if unit is already occupied by an active assignment
-    const existingActive = contractHasEnded
-      ? null
-      : await TenantAssignment.findOne({ unitId, status: 'Active' });
-    if (existingActive) {
-      return res.status(400).json({
-        success: false,
-        message: 'This unit currently has an active tenant assignment. Vacate the current tenant first.'
-      });
+    // Strict single-active-contract rule: Only 1 active contract allowed per unit
+    if (finalStatus === 'Active') {
+      const existingActive = await TenantAssignment.findOne({ unitId, status: 'Active' });
+      if (existingActive) {
+        return res.status(409).json({
+          success: false,
+          message: 'This sub-property/unit already has an active contract. Only one active contract is permitted per sub-property.'
+        });
+      }
     }
 
     const count = await TenantAssignment.countDocuments();
@@ -143,12 +161,17 @@ router.post('/', protect, authorize('admin', 'manager'), [
       assignmentCode,
       tenantId,
       unitId,
-      startDate,
+      startDate: contractStartDate,
       endDate: contractEndDate,
       depositHeld: Number(depositHeld) || 0,
       notes: notes || '',
-      status: contractHasEnded ? 'Past / Vacated' : 'Active'
+      status: finalStatus
     });
+
+    const isAnnual = rentType === 'Annual Fixed';
+    const numRent = Number(enteredRent);
+    const agreementMonthly = isAnnual ? numRent / 12 : numRent;
+    const agreementAnnual = isAnnual ? numRent : numRent * 12;
 
     // Create initial rent agreement rate
     const agreement = await RentAgreement.create({
@@ -156,16 +179,20 @@ router.post('/', protect, authorize('admin', 'manager'), [
       unitId,
       tenantId,
       rentType: rentType || 'Monthly Fixed',
-      monthlyRate: rentType === 'Annual Fixed' ? Number(enteredRent) / 12 : Number(enteredRent),
-      annualRate: rentType === 'Annual Fixed' ? Number(enteredRent) : 0,
-      effectiveFrom: startDate,
+      monthlyRate: agreementMonthly,
+      annualRate: agreementAnnual,
+      effectiveFrom: contractStartDate,
       effectiveTo: contractEndDate,
       terms: terms || '',
-      isCurrentRate: !contractHasEnded
+      isCurrentRate: finalStatus === 'Active'
     });
 
-    if (!contractHasEnded) {
+    if (finalStatus === 'Active') {
       await Unit.findByIdAndUpdate(unitId, { occupancyStatus: 'Occupied' });
+    } else {
+      // Check if unit has any other active assignment
+      const otherActive = await TenantAssignment.findOne({ unitId, status: 'Active' });
+      await Unit.findByIdAndUpdate(unitId, { occupancyStatus: otherActive ? 'Occupied' : 'Vacant' });
     }
 
     await logAudit({
@@ -324,7 +351,7 @@ router.get('/agreements/history', protect, async (req, res) => {
 
 // @route PUT /api/assignments/:id (Update contract dates, rate, deposit, notes)
 router.put('/:id', protect, authorize('admin', 'manager'), [
-  body('startDate').optional().isISO8601().withMessage('Valid start date is required'),
+  body('startDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid start date is required'),
   body('endDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
   body('tenantId').optional().isMongoId().withMessage('Valid tenant ID is required'),
   body('unitId').optional().isMongoId().withMessage('Valid unit ID is required'),
@@ -333,7 +360,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
   body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
   body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number'),
   body('depositHeld').optional().isFloat({ min: 0 }).withMessage('Deposit must be a non-negative number'),
-  body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated']).withMessage('Invalid contract status'),
+  body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated', 'Ended']).withMessage('Invalid contract status'),
   body('notes').optional().isString().withMessage('Notes must be text'),
   body('terms').optional().isString().withMessage('Agreement terms must be text')
 ], async (req, res) => {
@@ -389,19 +416,21 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       }
     }
 
-    const nextStartDate = startDate || assignment.startDate;
-    const nextEndDate = endDate !== undefined ? endDate || null : assignment.endDate;
-    if (nextEndDate && new Date(nextEndDate) < new Date(nextStartDate)) {
+    const nextStartDate = startDate !== undefined ? (startDate || null) : assignment.startDate;
+    const nextEndDate = endDate !== undefined ? (endDate || null) : assignment.endDate;
+    if (nextStartDate && nextEndDate && new Date(nextEndDate) < new Date(nextStartDate)) {
       return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
     }
 
     const contractHasEnded = isDateBeforeToday(nextEndDate);
     const nextStatus = status || (
       endDate !== undefined
-        ? (contractHasEnded ? 'Past / Vacated' : 'Active')
+        ? (contractHasEnded ? 'Ended' : 'Active')
         : assignment.status
     );
-    if (nextStatus === 'Active' && assignment.status !== 'Active') {
+
+    // Strict single-active-contract rule: Only 1 active contract allowed per unit
+    if (nextStatus === 'Active') {
       const otherActiveAssignment = await TenantAssignment.findOne({
         unitId: nextUnitId,
         status: 'Active',
@@ -410,16 +439,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       if (otherActiveAssignment) {
         return res.status(409).json({
           success: false,
-          message: 'This unit already has another active contract. End that contract before reopening this one.'
-        });
-      }
-    }
-    if (nextStatus === 'Active' && nextUnitId.toString() !== assignment.unitId.toString()) {
-      const occupiedUnit = await TenantAssignment.findOne({ unitId: nextUnitId, status: 'Active' });
-      if (occupiedUnit) {
-        return res.status(409).json({
-          success: false,
-          message: 'The selected unit already has an active contract.'
+          message: 'This sub-property/unit already has another active contract. Only one active contract is permitted per sub-property.'
         });
       }
     }
@@ -478,7 +498,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
           tenantId: nextTenantId,
           rentType: nextRentType,
           monthlyRate: nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent,
-          annualRate: nextRentType === 'Annual Fixed' ? numericRent : 0,
+          annualRate: nextRentType === 'Annual Fixed' ? numericRent : numericRent * 12,
           effectiveFrom: nextStartDate,
           effectiveTo: nextEndDate,
           terms: terms || '',
@@ -488,7 +508,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
         if (firstAgreement && startDate) firstAgreement.effectiveFrom = nextStartDate;
         agreement.rentType = nextRentType;
         agreement.monthlyRate = nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent;
-        agreement.annualRate = nextRentType === 'Annual Fixed' ? numericRent : 0;
+        agreement.annualRate = nextRentType === 'Annual Fixed' ? numericRent : numericRent * 12;
         agreement.effectiveTo = nextEndDate;
         agreement.isCurrentRate = nextStatus === 'Active';
         if (terms !== undefined) agreement.terms = terms;

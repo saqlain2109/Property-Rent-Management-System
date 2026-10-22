@@ -62,11 +62,12 @@ router.get('/outstanding-summary', protect, async (req, res) => {
       .populate('tenantId', 'name tenantCode phone')
       .populate({
         path: 'unitId',
-        populate: { path: 'propertyId', select: 'name propertyCode' }
+        populate: { path: 'propertyId', select: 'name propertyCode displayOrder totalAreaSqFt propertyType address' }
       });
 
     const summaries = [];
     for (const assign of activeAssignments) {
+      if (!assign.unitId || !assign.tenantId) continue;
       const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id, targetMonth);
       summaries.push({
         assignmentId: assign._id,
@@ -86,6 +87,18 @@ router.get('/outstanding-summary', protect, async (req, res) => {
         monthsBreakdown: ledger.monthsBreakdown
       });
     }
+
+    summaries.sort((a, b) => {
+      const orderA = (a.property?.displayOrder && a.property.displayOrder > 0) ? a.property.displayOrder : 9999;
+      const orderB = (b.property?.displayOrder && b.property.displayOrder > 0) ? b.property.displayOrder : 9999;
+      if (orderA !== orderB) return orderA - orderB;
+      const nameA = a.property?.name || '';
+      const nameB = b.property?.name || '';
+      if (nameA.localeCompare(nameB) !== 0) return nameA.localeCompare(nameB);
+      const unitA = a.unit?.subUnitPartition || a.unit?.unitName || '';
+      const unitB = b.unit?.subUnitPartition || b.unit?.unitName || '';
+      return unitA.localeCompare(unitB);
+    });
 
     res.json({ success: true, targetMonth, count: summaries.length, data: summaries });
   } catch (error) {

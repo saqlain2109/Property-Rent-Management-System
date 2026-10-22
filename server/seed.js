@@ -1,14 +1,15 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const User = require('./models/User');
-const { executeMigration } = require('./routes/migrationRoutes');
+const { syncAll } = require('./scripts/syncAll5Sheets');
 
 dotenv.config();
 
 async function runSeed() {
   try {
-    console.log('[Seed] Connecting to MongoDB...');
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/property_rent_db');
+    const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/property_rent_db';
+    console.log('[Seed] Connecting to MongoDB:', mongoUri);
+    await mongoose.connect(mongoUri);
     console.log('[Seed] Connected successfully.');
 
     // 1. Create Default Admin if not existing
@@ -38,10 +39,9 @@ async function runSeed() {
       console.log('[Seed] Admin user already exists:', admin.email);
     }
 
-    // 2. Execute full migration from reference Excel workbooks
-    console.log('[Seed] Running full reference workbook migration...');
-    const summary = await executeMigration({ dryRun: false, user: admin });
-    console.log('[Seed] Migration Summary:', JSON.stringify(summary, null, 2));
+    // 2. Execute full sync of 11 properties, 22 sub-units, 21 contracts, and receipts from the 5 sheets
+    console.log('[Seed] Running canonical 5-sheet sync...');
+    await syncAll();
 
     console.log('[Seed] Database initialization and migration completed successfully!');
     process.exit(0);

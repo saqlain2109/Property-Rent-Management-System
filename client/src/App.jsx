@@ -117,7 +117,7 @@ export default function App() {
               <div className="w-7 h-7 rounded-lg bg-teal-500 flex items-center justify-center text-white">
                 <Building2 className="w-4 h-4" />
               </div>
-              <span className="font-extrabold text-sm tracking-wide">EstateLedger</span>
+              <span className="font-extrabold text-sm tracking-wide">Property Management</span>
             </div>
           </div>
           <span className="text-[11px] font-bold text-teal-400 capitalize px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700">

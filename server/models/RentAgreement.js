@@ -43,7 +43,7 @@ const rentAgreementSchema = new mongoose.Schema({
   },
   effectiveFrom: {
     type: Date, // Date when this rate took effect (e.g. 2025-11-01)
-    required: true,
+    default: null,
   },
   effectiveTo: {
     type: Date, // null if currently ongoing
