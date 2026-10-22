@@ -40,6 +40,7 @@ router.get('/', protect, async (req, res) => {
     // Enrich each assignment with rate history, total expected, and total received
     const enriched = await Promise.all(assignments.map(async (assign) => {
       const obj = assign.toObject();
+      obj.contractType = obj.contractType || 'Rent';
       if (!assign.unitId || !assign.tenantId) {
         return {
           ...obj,
@@ -117,6 +118,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
   body('startDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid start date is required'),
   body('endDate').optional({ checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
   body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated', 'Ended']).withMessage('Invalid status'),
+  body('contractType').optional().isIn(['Rent', 'Business']).withMessage('Contract type must be Rent or Business'),
   body('rentType').optional().isIn(['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom']),
   body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
   body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number')
@@ -128,9 +130,10 @@ router.post('/', protect, authorize('admin', 'manager'), [
 
   try {
     const {
-      tenantId, unitId, startDate, endDate, depositHeld,
+      tenantId, unitId, startDate, endDate, depositHeld, contractType = 'Rent',
       rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes, status
     } = req.body;
+    const finalContractType = contractType === 'Business' ? 'Business' : 'Rent';
     const enteredRent = rentAmount ?? monthlyRate;
     if (enteredRent === undefined || enteredRent === null || enteredRent === '') {
       return res.status(400).json({ success: false, message: 'Rent amount is required' });
@@ -164,6 +167,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       startDate: contractStartDate,
       endDate: contractEndDate,
       depositHeld: Number(depositHeld) || 0,
+      contractType: finalContractType,
       notes: notes || '',
       status: finalStatus
     });
@@ -178,6 +182,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       assignmentId: assignment._id,
       unitId,
       tenantId,
+      contractType: finalContractType,
       rentType: rentType || 'Monthly Fixed',
       monthlyRate: agreementMonthly,
       annualRate: agreementAnnual,
@@ -361,6 +366,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
   body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number'),
   body('depositHeld').optional().isFloat({ min: 0 }).withMessage('Deposit must be a non-negative number'),
   body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated', 'Ended']).withMessage('Invalid contract status'),
+  body('contractType').optional().isIn(['Rent', 'Business']).withMessage('Contract type must be Rent or Business'),
   body('notes').optional().isString().withMessage('Notes must be text'),
   body('terms').optional().isString().withMessage('Agreement terms must be text')
 ], async (req, res) => {
@@ -376,7 +382,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     }
 
     const {
-      startDate, endDate, tenantId, unitId, propertyId,
+      startDate, endDate, tenantId, unitId, propertyId, contractType,
       rentType, rentAmount, monthlyRate, depositHeld, notes, terms, status
     } = req.body;
     const nextTenantId = tenantId || assignment.tenantId;
@@ -482,6 +488,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     assignment.status = nextStatus;
     assignment.tenantId = nextTenantId;
     assignment.unitId = nextUnitId;
+    if (contractType !== undefined) assignment.contractType = contractType === 'Business' ? 'Business' : 'Rent';
     if (depositHeld !== undefined) assignment.depositHeld = Number(depositHeld) || 0;
     if (notes !== undefined) assignment.notes = notes;
     await assignment.save();
@@ -496,6 +503,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
           assignmentId: assignment._id,
           unitId: nextUnitId,
           tenantId: nextTenantId,
+          contractType: assignment.contractType || 'Rent',
           rentType: nextRentType,
           monthlyRate: nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent,
           annualRate: nextRentType === 'Annual Fixed' ? numericRent : numericRent * 12,
@@ -506,6 +514,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
         });
       } else {
         if (firstAgreement && startDate) firstAgreement.effectiveFrom = nextStartDate;
+        if (contractType !== undefined) agreement.contractType = contractType === 'Business' ? 'Business' : 'Rent';
         agreement.rentType = nextRentType;
         agreement.monthlyRate = nextRentType === 'Annual Fixed' ? numericRent / 12 : numericRent;
         agreement.annualRate = nextRentType === 'Annual Fixed' ? numericRent : numericRent * 12;
@@ -518,6 +527,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       }
     } else if (agreement) {
       if (firstAgreement && startDate) firstAgreement.effectiveFrom = nextStartDate;
+      if (contractType !== undefined) agreement.contractType = contractType === 'Business' ? 'Business' : 'Rent';
       if (terms !== undefined) agreement.terms = terms;
       if (endDate !== undefined || status !== undefined) {
         agreement.effectiveTo = nextEndDate;
@@ -525,7 +535,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       }
       if (firstAgreement && firstAgreement !== agreement && startDate) {
         await Promise.all([firstAgreement.save(), agreement.save()]);
-      } else if (startDate || endDate !== undefined || status !== undefined || terms !== undefined) {
+      } else if (startDate || endDate !== undefined || status !== undefined || terms !== undefined || contractType !== undefined) {
         await agreement.save();
       }
     }

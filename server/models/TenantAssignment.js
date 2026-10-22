@@ -32,6 +32,12 @@ const assignmentSchema = new mongoose.Schema({
     enum: ['Active', 'Past / Vacated', 'Terminated', 'Ended'],
     default: 'Active',
   },
+  contractType: {
+    type: String,
+    enum: ['Rent', 'Business'],
+    default: 'Rent',
+    trim: true,
+  },
   depositHeld: {
     type: Number,
     default: 0,

@@ -15,6 +15,7 @@ const CONTRACTS_COLUMNS_DEF = [
   { id: 'property', label: 'Property' },
   { id: 'subUnit', label: 'Sub-Property / Partition' },
   { id: 'tenant', label: 'Tenant' },
+  { id: 'contractType', label: 'Contract Type' },
   { id: 'monthlyRent', label: 'Rent Per Month' },
   { id: 'annualRent', label: 'Rent Per Annum' },
   { id: 'depositHeld', label: 'Deposit' },
@@ -35,7 +36,7 @@ const CONTRACTS_COLUMNS_DEF = [
 ];
 
 const DEFAULT_CONTRACTS_COLS = [
-  'property', 'subUnit', 'tenant', 'monthlyRent', 'annualRent',
+  'property', 'subUnit', 'tenant', 'contractType', 'monthlyRent', 'annualRent',
   'depositHeld', 'startDate', 'endDate', 'status', 'notes', 'actions'
 ];
 
@@ -43,6 +44,7 @@ const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
   property: 160,
   subUnit: 140,
   tenant: 150,
+  contractType: 120,
   monthlyRent: 120,
   annualRent: 125,
   depositHeld: 110,
@@ -111,7 +113,15 @@ export default function ContractsView() {
     try {
       const allowed = CONTRACTS_COLUMNS_DEF.map((c) => c.id);
       const savedColumns = JSON.parse(saved).filter((c) => allowed.includes(c));
-      return savedColumns.length > 0 ? savedColumns : DEFAULT_CONTRACTS_COLS;
+      if (savedColumns.length > 0) {
+        if (!savedColumns.includes('contractType')) {
+          const tIdx = savedColumns.indexOf('tenant');
+          if (tIdx !== -1) savedColumns.splice(tIdx + 1, 0, 'contractType');
+          else savedColumns.push('contractType');
+        }
+        return savedColumns;
+      }
+      return DEFAULT_CONTRACTS_COLS;
     } catch {
       return DEFAULT_CONTRACTS_COLS;
     }
@@ -138,6 +148,7 @@ export default function ContractsView() {
       property: extractUniqueValues(contracts, c => c.unitId?.propertyId?.name),
       subUnit: extractUniqueValues(contracts, c => c.unitId?.subUnitPartition || c.unitId?.unitName),
       tenant: extractUniqueValues(contracts, c => c.tenantId?.name),
+      contractType: ['Rent', 'Business'],
       status: ['Active', 'Ended'],
       startDate: extractUniqueValues(contracts, c => c.startDate ? formatDate(c.startDate) : ''),
       endDate: extractUniqueValues(contracts, c => c.endDate ? formatDate(c.endDate) : 'Ongoing'),
@@ -168,6 +179,7 @@ export default function ContractsView() {
     tenantId: '',
     propertyId: '',
     unitId: '',
+    contractType: 'Rent',
     startDate: '',
     endDate: '',
     status: 'Active',
@@ -182,6 +194,7 @@ export default function ContractsView() {
     tenantId: '',
     propertyId: '',
     unitId: '',
+    contractType: 'Rent',
     startDate: '',
     endDate: '',
     status: 'Active',
@@ -263,6 +276,7 @@ export default function ContractsView() {
         startDate: createForm.startDate || null,
         endDate: createForm.endDate || null,
         status: createForm.status,
+        contractType: createForm.contractType || 'Rent',
         rentType: createForm.rentType,
         rentAmount: Number(createForm.rentAmount),
         depositHeld: Number(createForm.depositHeld) || 0,
@@ -276,6 +290,7 @@ export default function ContractsView() {
           tenantId: '',
           propertyId: '',
           unitId: '',
+          contractType: 'Rent',
           startDate: '',
           endDate: '',
           status: 'Active',
@@ -310,6 +325,7 @@ export default function ContractsView() {
         startDate: editForm.startDate || null,
         endDate: editForm.endDate || null,
         status: editForm.status,
+        contractType: editForm.contractType || 'Rent',
         rentType: editForm.rentType,
         rentAmount: Number(editForm.rentAmount),
         depositHeld: Number(editForm.depositHeld) || 0,
@@ -398,6 +414,7 @@ export default function ContractsView() {
         pName.toLowerCase().includes(search.toLowerCase()) ||
         uName.toLowerCase().includes(search.toLowerCase()) ||
         code.toLowerCase().includes(search.toLowerCase()) ||
+        (c.contractType || 'Rent').toLowerCase().includes(search.toLowerCase()) ||
         rentAmount.includes(search);
 
       // 2. Property Dropdown Filter
@@ -419,6 +436,7 @@ export default function ContractsView() {
         if (f.columnId === 'property') fieldVal = pName;
         else if (f.columnId === 'subUnit') fieldVal = uName;
         else if (f.columnId === 'tenant') fieldVal = tName;
+        else if (f.columnId === 'contractType') fieldVal = c.contractType || 'Rent';
         else if (f.columnId === 'monthlyRent') fieldVal = String(c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)));
         else if (f.columnId === 'annualRent') fieldVal = String(c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0));
         else if (f.columnId === 'depositHeld') fieldVal = String(c.depositHeld || 0);
@@ -447,6 +465,7 @@ export default function ContractsView() {
       property: c => (c.unitId?.propertyId?.displayOrder && c.unitId.propertyId.displayOrder > 0) ? c.unitId.propertyId.displayOrder : (c.unitId?.propertyId?.name || ''),
       subUnit: c => c.unitId?.subUnitPartition || c.unitId?.unitName || '',
       tenant: c => c.tenantId?.name || '',
+      contractType: c => c.contractType || 'Rent',
       monthlyRent: c => c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
       annualRent: c => c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
       depositHeld: c => c.depositHeld || 0,
@@ -488,6 +507,7 @@ export default function ContractsView() {
         'Property': c.unitId?.propertyId?.name || '',
         'Sub Property / Partition': c.unitId?.subUnitPartition || c.unitId?.unitName || '',
         'Tenant': c.tenantId?.name || '',
+        'Contract Type': c.contractType || 'Rent',
         'Rent Per month': c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
         'Rent per Annum': c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
         'Deposit': c.depositHeld || 0,
@@ -748,6 +768,19 @@ export default function ContractsView() {
                           );
                         }
 
+                        if (colId === 'contractType') {
+                          const isBiz = (c.contractType || 'Rent') === 'Business';
+                          return (
+                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                isBiz ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}>
+                                {c.contractType || 'Rent'}
+                              </span>
+                            </td>
+                          );
+                        }
+
                         if (colId === 'monthlyRent') {
                           const monthly = c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c));
                           return (
@@ -901,6 +934,7 @@ export default function ContractsView() {
                                       startDate: c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : '',
                                       endDate: c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : '',
                                       status: c.status || 'Active',
+                                      contractType: c.contractType || 'Rent',
                                       rentType,
                                       rentAmount: String(
                                         rentType === 'Annual Fixed'
@@ -1088,7 +1122,19 @@ export default function ContractsView() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Type *</label>
+                  <select
+                    value={createForm.contractType || 'Rent'}
+                    onChange={(e) => setCreateForm({ ...createForm, contractType: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Rent">Rent</option>
+                    <option value="Business">Business</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Status *</label>
                   <select
@@ -1304,7 +1350,19 @@ export default function ContractsView() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Type *</label>
+                  <select
+                    value={editForm.contractType || 'Rent'}
+                    onChange={(e) => setEditForm({ ...editForm, contractType: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Rent">Rent</option>
+                    <option value="Business">Business</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Status *</label>
                   <select

@@ -24,6 +24,12 @@ const rentAgreementSchema = new mongoose.Schema({
     enum: ['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom'],
     default: 'Monthly Fixed',
   },
+  contractType: {
+    type: String,
+    enum: ['Rent', 'Business'],
+    default: 'Rent',
+    trim: true,
+  },
   monthlyRate: {
     type: Number,
     required: true,

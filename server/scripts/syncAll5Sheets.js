@@ -353,6 +353,7 @@ async function syncAll() {
         assignment.endDate = c.endDate ? new Date(c.endDate) : assignment.endDate;
         assignment.depositHeld = c.deposit || assignment.depositHeld;
         assignment.initialPaidTillMonth = c.initialPaidTillMonth !== undefined ? c.initialPaidTillMonth : assignment.initialPaidTillMonth;
+        assignment.contractType = c.contractType || 'Rent';
         assignment.notes = c.comments || assignment.notes;
         assignment.status = c.status;
         await assignment.save();
@@ -365,6 +366,7 @@ async function syncAll() {
           startDate: c.startDate ? new Date(c.startDate) : null,
           endDate: c.endDate ? new Date(c.endDate) : null,
           status: c.status,
+          contractType: c.contractType || 'Rent',
           depositHeld: c.deposit || 0,
           initialPaidTillMonth: c.initialPaidTillMonth || null,
           notes: c.comments || ''
@@ -388,6 +390,7 @@ async function syncAll() {
         agreement.annualRate = c.annualRent || (c.monthlyRent * 12);
         agreement.effectiveFrom = c.startDate ? new Date(c.startDate) : agreement.effectiveFrom;
         agreement.effectiveTo = c.endDate ? new Date(c.endDate) : agreement.effectiveTo;
+        agreement.contractType = c.contractType || 'Rent';
         agreement.terms = c.comments || agreement.terms;
         agreement.isCurrentRate = c.status === 'Active';
         await agreement.save();
@@ -397,6 +400,7 @@ async function syncAll() {
           unitId: unit._id,
           tenantId: tenant._id,
           rentType: 'Monthly Fixed',
+          contractType: c.contractType || 'Rent',
           monthlyRate: c.monthlyRent,
           annualRate: c.annualRent || (c.monthlyRent * 12),
           effectiveFrom: c.startDate ? new Date(c.startDate) : null,
