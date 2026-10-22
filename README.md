@@ -1,17 +1,18 @@
-# EstateLedger — Production Property & Rent Management System
+# Property Management — Production Property & Rent Management System
 
-EstateLedger is a full-stack, enterprise-grade Property and Rent Management platform built with **React (Vite), Tailwind CSS, GSAP, Node.js (Express), and MongoDB**. It completely replaces manual Excel spreadsheets (`Rent Details 2026.xlsx`, `Jan 26.xlsx`, `Feb 26.xlsx`, `Mar 26.xlsx`) with an automated, audited system.
+Property Management is a full-stack, enterprise-grade Property and Rent Management platform built with **React (Vite), Tailwind CSS, GSAP, Node.js (Express), and MongoDB**. It completely replaces manual Excel spreadsheets (`Rent Details Actual`, `Jan 26.xlsx`, `Feb 26.xlsx`, `Mar 26.xlsx`) with an automated, audited system.
 
 ---
 
 ## 🚀 Key Features
 
 1. **Dashboard & KPIs**: Real-time calculated figures directly from MongoDB:
-   - Total properties, partitions/units, active tenants, and vacant spaces.
+   - 11 Properties, 22 Sub-Properties/Units, 21 Active Tenants, and 1 Vacant unit.
    - Live rent collected, expenses, and pending balances by month/year filter.
    - Interactive Cash Flow bar charts (Recharts) and Recent Receipts/Expense tables.
 2. **Property & Unit Master**:
-   - Hierarchical property management supporting multiple partitions/units (e.g. `Kotak Godown` -> `KO-PG`, `KO-WATER`).
+   - Hierarchical property management supporting 11 properties and 22 sub-properties (e.g. `Kotak Godaown (66 Godown)` -> `KO-PG`, `KO-SMALL`).
+   - Order-based arrangement (1 to 11) matching the master Excel sheets.
    - Occupancy tracking (Occupied, Vacant, Maintenance) and space type classifications.
 3. **Tenant Master & Occupancy History**:
    - Complete tenant profiles with contact info and lease agreements.
@@ -19,12 +20,14 @@ EstateLedger is a full-stack, enterprise-grade Property and Rent Management plat
 4. **Effective-Dated Rent Agreement History**:
    - Rent revisions preserve exact historical effective dates (`effectiveFrom` / `effectiveTo`).
    - Previous months are never overwritten; calculations use the rent rate applicable to each specific month.
+   - Kotak PG rate calibrated to ₹81,050 settled collection rate.
 5. **Multi-Month Rent Payments & Allocations**:
    - Decoupled receipt date from allocated rent months (e.g. January payment covering September rent).
    - Partial payments, advance payments, and multi-month split receipts.
    - Audited reversal mechanism with reason tracking.
 6. **Paid-Till & Outstanding Status**:
    - Automatically determines current paid-till month, next unpaid month, and total pending balance.
+   - Historical Clearance Rule: Any tenant marked "Paid till [Month]" has all previous months marked Fully Paid with ₹0 overdue.
    - Interactive month-by-month financial ledger breakdown for every tenant.
 7. **Variable Rent & PG Management**:
    - Dedicated PG settlement ledger for gross collections and operator share deductions (Altaf, Anand, Bisleri water).
@@ -40,6 +43,7 @@ EstateLedger is a full-stack, enterprise-grade Property and Rent Management plat
     - Handles questions on pending rent, recent payments, monthly collections, occupancy, and expenses.
 11. **Reports & Excel Export**:
     - One-click generation of complete multi-sheet Excel workbooks (`.xlsx`) directly in the browser.
+    - Apex-style toolbar with column customization, localStorage persistence, and 3-state sorting.
 12. **Auditing & Enterprise Security**:
     - JWT token authentication with bcrypt password hashing.
     - Rate-limiting on authentication routes.
@@ -97,11 +101,11 @@ VITE_API_URL=http://localhost:5000/api
 Run the migration seeder script from the `server` directory:
 ```bash
 cd server
-node seed.js
+npm run seed   # or node seed.js
 ```
 This automatically:
 1. Creates the administrator account (`admin` or `admin@propertyrent.com` / `AdminPassword123!`).
-2. Extracts and migrates all 10 properties, 25 units, 25 tenants, 31 verified payment receipts, 36 allocations, 4 PG settlements, 12 expenses, and 3 monthly ledgers from `Rent Details 2026.xlsx`, `Jan 26.xlsx`, `Feb 26.xlsx`, and `Mar 26.xlsx`.
+2. Syncs the 11 properties (Order 1 to 11), 22 sub-properties, 21 active contracts, correct rates (Kotak PG: ₹81,050), "Paid Till" status across all units, 31 payment receipts (Jan, Feb, Mar 2026), and monthly financial ledger from the 5 Excel workbooks.
 
 ### 4. Run Automated Backend Tests
 
@@ -109,7 +113,7 @@ This automatically:
 cd server
 node test_runner.js
 ```
-All 9 test suites verify health, login, CRUD, live dashboard calculations, monthly ledger reconciliations, PG settlements, and chatbot queries.
+All 10 test suites verify health, login, CRUD, live dashboard calculations, monthly ledger reconciliations, PG settlements, and chatbot queries.
 
 ### 5. Start Application
 
@@ -147,12 +151,16 @@ Visit `http://localhost:5173` in your browser.
    - `MONGODB_URI`: Your MongoDB Atlas connection string (`mongodb+srv://...`).
    - `JWT_SECRET`: A strong secret key.
    - `NODE_ENV`: `production`
-6. Deploy!
+6. Run database seed (in Render Shell or as a post-deploy step):
+   ```bash
+   npm run seed
+   ```
 
 ### Database (MongoDB Atlas)
 1. Create a free shared cluster (M0 Sandbox) on MongoDB Atlas.
 2. Under Network Access, allow IP `0.0.0.0/0` (or Render's outbound IPs).
 3. Under Database Access, create a database user and paste the connection string into Render's `MONGODB_URI`.
+4. Run `npm run seed` to seed the database with the exact 11 properties, 22 units, 21 contracts, and receipts.
 
 ---
 
