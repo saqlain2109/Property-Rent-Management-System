@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import { 
   Plus, Search, RotateCcw, X, Edit2, Trash2, 
   Calendar, ChevronLeft, ChevronRight, Download, Check, 
-  Layers, Receipt, IndianRupee, ArrowRight, Building, 
+  Layers, Receipt, IndianRupee, ArrowRight, Building, Building2,
   Sparkles, Filter, CheckCircle2, Clock, ArrowUp, ArrowDown, ArrowUpDown, SlidersHorizontal, Tag
 } from 'lucide-react';
 
