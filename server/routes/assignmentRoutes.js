@@ -52,57 +52,48 @@ router.get('/', protect, async (req, res) => {
         };
       }
 
-      // Fetch all rent agreements for this assignment/unit/tenant
-      const rateHistory = await RentAgreement.find({
-        $or: [
-          { assignmentId: assign._id },
-          { unitId: assign.unitId._id, tenantId: assign.tenantId._id }
-        ]
-      }).sort({ effectiveFrom: 1 });
-
-      const currentAgr = rateHistory.find(r => r.isCurrentRate) || rateHistory[rateHistory.length - 1];
-
-      // Calculate ledger for active contracts (fast response for legacy/ended contracts)
-      if (assign.status === 'Active') {
-        try {
-          const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id);
-          return {
-            ...obj,
-            rateHistory,
-            currentAgreement: currentAgr,
-            currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
-            totalExpected: ledger.totalExpected || 0,
-            totalReceived: ledger.totalAllocated || 0,
-            outstandingBalance: ledger.totalOutstanding || 0,
-            paidTillMonth: ledger.paidTillMonth,
-            nextUnpaidMonth: ledger.nextUnpaidMonth,
-            monthsBreakdown: ledger.monthsBreakdown || []
-          };
-        } catch (err) {
-          return {
-            ...obj,
-            rateHistory,
-            currentAgreement: currentAgr,
-            currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
-            totalExpected: 0,
-            totalReceived: 0,
-            outstandingBalance: 0
-          };
-        }
+      // Fetch rent agreements strictly for this specific assignment
+      let rateHistory = await RentAgreement.find({ assignmentId: assign._id }).sort({ effectiveFrom: 1 });
+      if (!rateHistory.length) {
+        rateHistory = await RentAgreement.find({
+          assignmentId: { $exists: false },
+          unitId: assign.unitId._id,
+          tenantId: assign.tenantId._id
+        }).sort({ effectiveFrom: 1 });
       }
 
-      return {
-        ...obj,
-        rateHistory,
-        currentAgreement: currentAgr,
-        currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
-        totalExpected: 0,
-        totalReceived: 0,
-        outstandingBalance: 0,
-        paidTillMonth: null,
-        nextUnpaidMonth: null,
-        monthsBreakdown: []
-      };
+      const currentAgr = assign.status === 'Active'
+        ? (rateHistory.find(r => r.isCurrentRate) || rateHistory[rateHistory.length - 1] || null)
+        : (rateHistory[rateHistory.length - 1] || null);
+
+      try {
+        const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id, null, assign);
+        return {
+          ...obj,
+          rateHistory,
+          currentAgreement: currentAgr,
+          currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+          totalExpected: ledger.totalExpected || 0,
+          totalReceived: ledger.totalAllocated || 0,
+          outstandingBalance: ledger.totalOutstanding || 0,
+          paidTillMonth: ledger.paidTillMonth,
+          nextUnpaidMonth: ledger.nextUnpaidMonth,
+          monthsBreakdown: ledger.monthsBreakdown || []
+        };
+      } catch (err) {
+        return {
+          ...obj,
+          rateHistory,
+          currentAgreement: currentAgr,
+          currentMonthlyRate: currentAgr ? currentAgr.monthlyRate : 0,
+          totalExpected: 0,
+          totalReceived: 0,
+          outstandingBalance: 0,
+          paidTillMonth: null,
+          nextUnpaidMonth: null,
+          monthsBreakdown: []
+        };
+      }
     }));
 
     res.json({ success: true, count: enriched.length, data: enriched });

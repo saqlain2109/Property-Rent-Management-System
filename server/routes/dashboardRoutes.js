@@ -68,15 +68,31 @@ router.get('/summary', protect, async (req, res) => {
     ]);
     const currentMonthExpenses = monthExpenseResult.length > 0 ? monthExpenseResult[0].total : 0;
 
-    // Compute expected rent & outstanding across all active assignments for targetMonth
+    // Compute expected rent & outstanding across assignments effective in targetMonth
     let totalExpected = 0;
     let totalOutstanding = 0;
     let monthExpectedRent = 0;
     let monthOutstandingRent = 0;
     let overdueTenantsCount = 0;
 
-    for (const assign of activeAssignments) {
-      const ledger = await calculateTenantUnitLedger(assign.unitId, assign.tenantId, targetMonth);
+    // Resolve assignments active during targetMonth via calendar date-range
+    const monthAssignments = await TenantAssignment.find({
+      $or: [
+        { startDate: null },
+        { startDate: { $lte: endOfMonth } }
+      ],
+      $and: [
+        {
+          $or: [
+            { endDate: null },
+            { endDate: { $gte: startOfMonth } }
+          ]
+        }
+      ]
+    });
+
+    for (const assign of monthAssignments) {
+      const ledger = await calculateTenantUnitLedger(assign.unitId, assign.tenantId, targetMonth, assign);
       totalExpected += ledger.totalExpected;
       totalOutstanding += ledger.totalOutstanding;
       if (ledger.totalOutstanding > 0) {

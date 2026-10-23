@@ -25,6 +25,8 @@ export default function ApexToolbar({
   onSortChange,
   isHeaderSticky = true,
   onToggleHeaderSticky,
+  frozenColumnCount = 0,
+  onFrozenColumnCountChange,
   filters,
   activeFilters,
   onFiltersChange,
@@ -405,6 +407,68 @@ export default function ApexToolbar({
                     <span className="text-[10px] text-slate-400">Normal</span>
                   )}
                 </button>
+
+                {/* 3b. Freeze Columns (Left Panes) */}
+                <button
+                  type="button"
+                  onClick={() => setActiveSubMenu(activeSubMenu === 'freeze' ? null : 'freeze')}
+                  className={`w-full px-3.5 py-2 text-left text-xs font-semibold flex items-center justify-between hover:bg-slate-50 transition-colors ${
+                    activeSubMenu === 'freeze' ? 'bg-teal-50 text-teal-800' : 'text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Columns3 className="w-4 h-4 text-slate-400" />
+                    <span>Freeze Columns</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {frozenColumnCount > 0 ? (
+                      <span className="text-[10px] font-bold text-teal-700 bg-teal-100 px-2 py-0.5 rounded-full">
+                        {frozenColumnCount} col{frozenColumnCount > 1 ? 's' : ''}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">None</span>
+                    )}
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
+                </button>
+
+                {activeSubMenu === 'freeze' && (
+                  <div className="px-3 py-2 border-t border-b border-slate-100 bg-slate-50/70 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onFrozenColumnCountChange?.(0);
+                        setShowActionsMenu(false);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between ${
+                        frozenColumnCount === 0 ? 'bg-teal-600 text-white font-bold' : 'hover:bg-white text-slate-700'
+                      }`}
+                    >
+                      <span>No Freeze (0 columns)</span>
+                      {frozenColumnCount === 0 && <Check className="w-3.5 h-3.5" />}
+                    </button>
+                    {[1, 2, 3, 4].map(num => {
+                      if (num > visibleColumns.length) return null;
+                      const colLabel = columns.find(c => c.id === visibleColumns[num - 1])?.label || `Col ${num}`;
+                      return (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => {
+                            onFrozenColumnCountChange?.(num);
+                            setShowActionsMenu(false);
+                          }}
+                          className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between ${
+                            frozenColumnCount === num ? 'bg-teal-600 text-white font-bold' : 'hover:bg-white text-slate-700'
+                          }`}
+                        >
+                          <span>Freeze up to {colLabel} ({num})</span>
+                          {frozenColumnCount === num && <Check className="w-3.5 h-3.5" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 <div className="my-1 border-t border-slate-100"></div>
 

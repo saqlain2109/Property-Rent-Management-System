@@ -11,6 +11,7 @@ const RentAgreement = require('../models/RentAgreement');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const PaymentAllocation = require('../models/PaymentAllocation');
 const Expense = require('../models/Expense');
+const ExpenseCategory = require('../models/ExpenseCategory');
 const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 
 // 1. Exact 11 Properties with Display Order and Carpet Area
@@ -26,6 +27,7 @@ const PROPERTIES = [
   { order: 9, name: 'Byculla Club', code: 'PROP-BYCULLA', area: 2500, type: 'Commercial Office' },
   { order: 10, name: 'Kandivli', code: 'PROP-KANDIVLI', area: 2500, type: 'Residential Apartment' },
   { order: 11, name: 'Goa Flat', code: 'PROP-GOA', area: 2500, type: 'Residential Apartment' },
+  { order: 12, name: 'General Common', code: 'PROP-COMMON', area: 0, type: 'General / Common' },
 ];
 
 // 2. Exact 22 Sub Properties (Units) with Codes, Default Rates, and Aliases
@@ -531,6 +533,28 @@ async function syncAll() {
       });
     }
     console.log(`Successfully imported ${rCount} historical receipts and allocations.`);
+
+    // Step 4b: Sync Expense Categories with separate Property and Common heads
+    const defaultCommonHeads = ['MOM', 'Miscellaneous', 'Zakat', 'Sadka', 'Margaret', 'Other'];
+    const defaultPropertyHeads = [
+      'Maintenance', 'Electricity & Utilities', 'Repairs & Renovation', 
+      'Sweeper & Cleaning', 'Property Rent Paid', 'Deposit Refund', 'Water Charges', 'Property Tax'
+    ];
+    for (const name of defaultCommonHeads) {
+      await ExpenseCategory.updateOne(
+        { name },
+        { $set: { headType: 'Common' }, $setOnInsert: { name, isDefault: true } },
+        { upsert: true }
+      );
+    }
+    for (const name of defaultPropertyHeads) {
+      await ExpenseCategory.updateOne(
+        { name },
+        { $set: { headType: 'Property' }, $setOnInsert: { name, isDefault: true } },
+        { upsert: true }
+      );
+    }
+    console.log('Expense heads initialized (Property vs Common).');
 
     // Step 5: Sync Monthly Financial Ledger
     console.log('\n--- 5. Synchronizing Monthly Financial Ledger ---');

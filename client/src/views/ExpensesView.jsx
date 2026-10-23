@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
-import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
@@ -10,29 +10,52 @@ import {
   Plus, Search, RotateCcw, X, Edit2, Trash2, 
   Calendar, ChevronLeft, ChevronRight, Download, Check, 
   Layers, Receipt, IndianRupee, ArrowRight, Building, 
-  Sparkles, Filter, CheckCircle2, Clock, ArrowUp, ArrowDown, ArrowUpDown
+  Sparkles, Filter, CheckCircle2, Clock, ArrowUp, ArrowDown, ArrowUpDown, SlidersHorizontal, Tag
 } from 'lucide-react';
 
-const CATEGORY_OPTIONS = [
+const DEFAULT_PROPERTY_HEADS = [
   'Maintenance',
   'Electricity & Utilities',
+  'Repairs & Renovation',
+  'Sweeper & Cleaning',
   'Property Rent Paid',
   'Deposit Refund',
-  'Repair',
-  'Cleaning',
-  'Security',
+  'Water Charges',
+  'Property Tax'
+];
+
+const DEFAULT_COMMON_HEADS = [
+  'MOM',
   'Miscellaneous',
+  'Zakat',
+  'Sadka',
+  'Margaret',
+  'Other'
+];
+
+const CATEGORY_OPTIONS = [
+  ...DEFAULT_PROPERTY_HEADS,
+  ...DEFAULT_COMMON_HEADS
 ];
 
 const CATEGORY_COLORS = {
   'Maintenance': 'bg-blue-100 text-blue-700 border-blue-200',
   'Electricity & Utilities': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'Repairs & Renovation': 'bg-orange-100 text-orange-700 border-orange-200',
+  'Sweeper & Cleaning': 'bg-cyan-100 text-cyan-700 border-cyan-200',
   'Property Rent Paid': 'bg-purple-100 text-purple-700 border-purple-200',
   'Deposit Refund': 'bg-teal-100 text-teal-700 border-teal-200',
+  'Water Charges': 'bg-sky-100 text-sky-700 border-sky-200',
+  'Property Tax': 'bg-rose-100 text-rose-700 border-rose-200',
+  'MOM': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  'Miscellaneous': 'bg-slate-100 text-slate-700 border-slate-200',
+  'Zakat': 'bg-amber-100 text-amber-800 border-amber-200',
+  'Sadka': 'bg-lime-100 text-lime-800 border-lime-200',
+  'Margaret': 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200',
+  'Other': 'bg-gray-100 text-gray-700 border-gray-200',
   'Repair': 'bg-orange-100 text-orange-700 border-orange-200',
   'Cleaning': 'bg-cyan-100 text-cyan-700 border-cyan-200',
   'Security': 'bg-indigo-100 text-indigo-700 border-indigo-200',
-  'Miscellaneous': 'bg-slate-100 text-slate-700 border-slate-200',
 };
 
 const EXPENSES_SHEET_COLUMNS_DEF = [
@@ -100,10 +123,24 @@ export default function ExpensesView() {
   const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // New Category Modal states
+  // New Category & Master Heads Modal states
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryType, setNewCategoryType] = useState('Property');
   const [creatingCategory, setCreatingCategory] = useState(false);
+
+  // Manage Expense Heads Master Modal states
+  const [showManageHeadsModal, setShowManageHeadsModal] = useState(false);
+  const [manageHeadsTab, setManageHeadsTab] = useState('Property'); // 'Property' | 'Common'
+  const [newHeadName, setNewHeadName] = useState('');
+  const [editingHeadId, setEditingHeadId] = useState(null);
+  const [editingHeadName, setEditingHeadName] = useState('');
+  const [headSaving, setHeadSaving] = useState(false);
+  const [headError, setHeadError] = useState('');
+
+  // Frozen Columns
+  const [frozenSheetCount, setFrozenSheetCount] = useFrozenColumns('expenses_sheet_freeze_v1', 0);
+  const [frozenRegisterCount, setFrozenRegisterCount] = useFrozenColumns('expenses_register_freeze_v1', 0);
 
   // Filters for Sheet and Register
   const [sheetSearch, setSheetSearch] = useState('');
@@ -238,27 +275,71 @@ export default function ExpensesView() {
     fetchData();
   }, []);
 
-  // Compute merged category names from defaults and DB
-  const allCategoryNames = React.useMemo(() => {
-    const list = [...CATEGORY_OPTIONS];
-    categories.forEach(c => {
-      const name = typeof c === 'string' ? c : c?.name;
-      if (name && !list.includes(name)) {
-        list.push(name);
-      }
-    });
-    return list;
+  // Separate Common vs Property Heads
+  const commonCategories = React.useMemo(() => {
+    const fromApi = categories
+      .filter(c => typeof c === 'object' && c.headType === 'Common')
+      .map(c => c.name);
+    const set = new Set([...DEFAULT_COMMON_HEADS, ...fromApi]);
+    return Array.from(set);
   }, [categories]);
 
+  const propertyCategories = React.useMemo(() => {
+    const fromApi = categories
+      .filter(c => typeof c === 'object' && c.headType !== 'Common')
+      .map(c => c.name);
+    const set = new Set([...DEFAULT_PROPERTY_HEADS, ...fromApi]);
+    return Array.from(set);
+  }, [categories]);
+
+  // Compute merged category names from defaults and DB
+  const allCategoryNames = React.useMemo(() => {
+    return Array.from(new Set([...propertyCategories, ...commonCategories]));
+  }, [propertyCategories, commonCategories]);
+
+  // Check if property is General Common (no income, only expenses)
+  const isGeneralCommonProperty = (propId) => {
+    if (!propId) return true;
+    const prop = properties.find(p => String(p._id) === String(propId));
+    if (!prop) return false;
+    return prop.propertyCode === 'PROP-COMMON' || 
+           prop.name?.toLowerCase().includes('general common') || 
+           prop.propertyType === 'General / Common';
+  };
+
+  const handleQuickPropertyChange = (newPropId) => {
+    const isCommon = isGeneralCommonProperty(newPropId);
+    let nextCat = quickForm.category;
+    if (isCommon && !commonCategories.includes(quickForm.category)) {
+      nextCat = commonCategories[0] || 'MOM';
+    } else if (!isCommon && !propertyCategories.includes(quickForm.category)) {
+      nextCat = propertyCategories[0] || 'Maintenance';
+    }
+    setQuickForm(prev => ({ ...prev, propertyId: newPropId, unitId: '', category: nextCat }));
+  };
+
+  const handleModalPropertyChange = (newPropId) => {
+    const isCommon = isGeneralCommonProperty(newPropId);
+    let nextCat = form.category;
+    if (isCommon && !commonCategories.includes(form.category)) {
+      nextCat = commonCategories[0] || 'MOM';
+    } else if (!isCommon && !propertyCategories.includes(form.category)) {
+      nextCat = propertyCategories[0] || 'Maintenance';
+    }
+    setForm(prev => ({ ...prev, propertyId: newPropId, unitId: '', category: nextCat }));
+  };
+
   // Handle creating new expense category on the fly
-  const handleCreateCategory = async (name) => {
+  const handleCreateCategory = async (name, explicitType) => {
     const catName = (name || newCategoryName).trim();
     if (!catName) return;
+    const activePropId = showModal ? form.propertyId : quickForm.propertyId;
+    const type = explicitType || newCategoryType || (isGeneralCommonProperty(activePropId) ? 'Common' : 'Property');
     try {
       setCreatingCategory(true);
-      const res = await API.post('/expenses/categories', { name: catName });
+      const res = await API.post('/expenses/categories', { name: catName, headType: type });
       if (res.data.success) {
-        setCategories(prev => [...prev, res.data.data]);
+        await fetchData();
         if (showModal) {
           setForm(f => ({ ...f, category: catName }));
         } else {
@@ -271,6 +352,69 @@ export default function ExpensesView() {
       alert(err.response?.data?.message || 'Failed to create category');
     } finally {
       setCreatingCategory(false);
+    }
+  };
+
+  // Manage Expense Heads Master actions
+  const handleAddNewHead = async (e) => {
+    if (e) e.preventDefault();
+    const name = newHeadName.trim();
+    if (!name) return;
+    try {
+      setHeadSaving(true);
+      setHeadError('');
+      const res = await API.post('/expenses/categories', {
+        name,
+        headType: manageHeadsTab
+      });
+      if (res.data.success) {
+        setNewHeadName('');
+        await fetchData();
+      }
+    } catch (err) {
+      setHeadError(err.response?.data?.message || 'Failed to add head');
+    } finally {
+      setHeadSaving(false);
+    }
+  };
+
+  const handleUpdateHead = async (catId) => {
+    const name = editingHeadName.trim();
+    if (!name) return;
+    try {
+      setHeadSaving(true);
+      setHeadError('');
+      const res = await API.put(`/expenses/categories/${catId}`, {
+        name,
+        headType: manageHeadsTab
+      });
+      if (res.data.success) {
+        setEditingHeadId(null);
+        setEditingHeadName('');
+        await fetchData();
+      }
+    } catch (err) {
+      setHeadError(err.response?.data?.message || 'Failed to update head');
+    } finally {
+      setHeadSaving(false);
+    }
+  };
+
+  const handleDeleteHead = async (catId) => {
+    if (!window.confirm('Are you sure you want to delete this expense head?')) return;
+    try {
+      setHeadSaving(true);
+      setHeadError('');
+      const res = await API.delete(`/expenses/categories/${catId}`);
+      if (res.data.success) {
+        await fetchData();
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to delete head';
+      setHeadError(msg);
+      alert(msg);
+    } finally {
+      setHeadSaving(false);
     }
   };
 
@@ -758,8 +902,17 @@ export default function ExpensesView() {
             </div>
 
             <button
+              onClick={() => setShowManageHeadsModal(true)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-2xs active:scale-95 shrink-0 cursor-pointer"
+              title="Manage Expense Heads (Property Heads vs Common Heads)"
+            >
+              <Tag className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Expense Heads Master</span>
+            </button>
+
+            <button
               onClick={handleOpenCreate}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 active:scale-95 shrink-0"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 active:scale-95 shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Full Form</span>
@@ -871,12 +1024,14 @@ export default function ExpensesView() {
                 </label>
                 <select
                   value={quickForm.propertyId}
-                  onChange={(e) => setQuickForm({ ...quickForm, propertyId: e.target.value, unitId: '' })}
+                  onChange={(e) => handleQuickPropertyChange(e.target.value)}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
-                  <option value="">General / Common Expense</option>
+                  <option value="">General Common (All Properties / Misc)</option>
                   {properties.map(p => (
-                    <option key={p._id} value={p._id}>{p.name}</option>
+                    <option key={p._id} value={p._id}>
+                      {p.name} {p.propertyCode ? `(${p.propertyCode})` : ''}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -888,7 +1043,7 @@ export default function ExpensesView() {
                 </label>
                 <select
                   value={quickForm.unitId}
-                  disabled={!quickForm.propertyId}
+                  disabled={!quickForm.propertyId || isGeneralCommonProperty(quickForm.propertyId)}
                   onChange={(e) => setQuickForm({ ...quickForm, unitId: e.target.value })}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:text-slate-400 shadow-2xs"
                 >
@@ -928,10 +1083,34 @@ export default function ExpensesView() {
                   }}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
-                  {allCategoryNames.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                  <option value="__add_new__">+ Add New Head...</option>
+                  {isGeneralCommonProperty(quickForm.propertyId) ? (
+                    <>
+                      <optgroup label="Common Expense Heads (General Common)">
+                        {commonCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Property Expense Heads">
+                        {propertyCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </optgroup>
+                    </>
+                  ) : (
+                    <>
+                      <optgroup label="Property Expense Heads">
+                        {propertyCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Common Expense Heads">
+                        {commonCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </optgroup>
+                    </>
+                  )}
+                  <option value="__add_new__" className="font-bold text-emerald-600">+ Add New Head...</option>
                 </select>
               </div>
 
@@ -1008,6 +1187,8 @@ export default function ExpensesView() {
             onVisibleColumnsChange={setVisibleSheetColumns}
             columnWidths={sheetColumnWidths}
             onResetWidths={resetSheetColumnWidths}
+            frozenCount={frozenSheetCount}
+            onFrozenCountChange={setFrozenSheetCount}
             activeFilters={sheetFilters}
             onFiltersChange={setSheetFilters}
             filterSuggestions={sheetFilterSuggestions}
@@ -1056,9 +1237,10 @@ export default function ExpensesView() {
                     isSheetHeaderSticky ? 'sticky top-0 z-20 shadow-sm' : ''
                   }`}>
                     <tr>
-                      {visibleSheetColumns.map(colId => {
+                      {visibleSheetColumns.map((colId, colIdx) => {
                         const dragProps = getHeaderDragProps(colId, visibleSheetColumns, setVisibleSheetColumns, 'expenses_sheet_v1');
                         const width = sheetColumnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        const frozenStyle = getFrozenColumnStyle(colIdx, frozenSheetCount, visibleSheetColumns, sheetColumnWidths, true);
                         let label = colId;
                         let align = 'text-left';
 
@@ -1082,10 +1264,10 @@ export default function ExpensesView() {
                             key={colId}
                             {...dragProps}
                             onClick={() => isSortable && handleSheetHeaderSort(colId)}
-                            style={{ minWidth: `${Math.max(width, 95)}px`, width: `${Math.max(width, 95)}px` }}
-                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
+                            style={{ minWidth: `${Math.max(width, 95)}px`, width: `${Math.max(width, 95)}px`, ...frozenStyle }}
+                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group select-none whitespace-nowrap overflow-hidden ${align} ${
                               isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
-                            }`}
+                            } ${frozenStyle.backgroundColor ? '' : 'bg-slate-100/95'}`}
                             title={isSortable ? `${label} (Click: 1st Desc, 2nd Asc, 3rd Off)` : label}
                           >
                             <div className={`flex items-center gap-1.5 w-full overflow-hidden ${align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'}`}>
@@ -1116,20 +1298,22 @@ export default function ExpensesView() {
                       const rowNum = (isAllSheetRows ? 0 : (sheetCurrentPage - 1) * Number(sheetRowsPerPage)) + idx + 1;
 
                       return (
-                        <tr key={e._id} className="hover:bg-slate-50/80 transition-colors">
-                          {visibleSheetColumns.map(colId => {
+                        <tr key={e._id} className="hover:bg-slate-50/80 transition-colors group">
+                          {visibleSheetColumns.map((colId, colIdx) => {
+                            const frozenStyle = getFrozenColumnStyle(colIdx, frozenSheetCount, visibleSheetColumns, sheetColumnWidths, false);
+
                             if (colId === 'index') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100 text-center text-xs text-slate-400 font-mono">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100 text-center text-xs text-slate-400 font-mono">
                                   {rowNum}
                                 </td>
                               );
                             }
                             if (colId === 'property') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
                                   <div className="font-bold text-slate-800 text-xs">
-                                    {e.propertyId?.name || <span className="text-slate-400 italic font-normal">General (Common)</span>}
+                                    {e.propertyId?.name || <span className="text-slate-400 italic font-normal">General Common</span>}
                                   </div>
                                   {e.propertyId && (
                                     <p className="text-[10px] text-slate-500 font-medium">
@@ -1141,7 +1325,7 @@ export default function ExpensesView() {
                             }
                             if (colId === 'category') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold border ${CATEGORY_COLORS[e.category] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
                                     {e.category}
                                   </span>
@@ -1150,7 +1334,7 @@ export default function ExpensesView() {
                             }
                             if (colId === 'description') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
                                   <span className="text-xs font-semibold text-slate-800 block truncate" title={e.description}>
                                     {e.description}
                                   </span>
@@ -1159,14 +1343,14 @@ export default function ExpensesView() {
                             }
                             if (colId === 'payee') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100 text-xs text-slate-600">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100 text-xs text-slate-600">
                                   {e.vendorOrPayee || <span className="text-slate-400">—</span>}
                                 </td>
                               );
                             }
                             if (colId === 'paymentMode') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
                                   <span className="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700">
                                     {e.paymentMode || 'Cash'}
                                   </span>
@@ -1175,7 +1359,7 @@ export default function ExpensesView() {
                             }
                             if (colId === 'amount') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100 text-right">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100 text-right">
                                   {isInlineEditing ? (
                                     <div className="flex items-center gap-1 justify-end">
                                       <div className="relative">
@@ -1234,14 +1418,14 @@ export default function ExpensesView() {
                             }
                             if (colId === 'createdAt' || colId === 'updatedAt') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
                                   {e[colId] ? formatDate(e[colId]) : '—'}
                                 </td>
                               );
                             }
                             if (colId === 'actions') {
                               return (
-                                <td key={colId} className="px-3 py-3 text-center border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 text-center border-r border-slate-100">
                                   <div className="flex items-center justify-center gap-1.5">
                                     <button
                                       onClick={() => {
@@ -1390,6 +1574,8 @@ export default function ExpensesView() {
             onVisibleColumnsChange={setVisibleRegisterColumns}
             columnWidths={registerColumnWidths}
             onResetWidths={resetRegisterColumnWidths}
+            frozenCount={frozenRegisterCount}
+            onFrozenCountChange={setFrozenRegisterCount}
             activeFilters={registerFilters}
             onFiltersChange={setRegisterFilters}
             filterSuggestions={registerFilterSuggestions}
@@ -1451,9 +1637,10 @@ export default function ExpensesView() {
                     isRegisterHeaderSticky ? 'sticky top-0 z-20 shadow-sm' : ''
                   }`}>
                     <tr className="text-[11px] text-slate-500 uppercase tracking-wide font-extrabold select-none">
-                      {visibleRegisterColumns.map(colId => {
+                      {visibleRegisterColumns.map((colId, colIdx) => {
                         const dragProps = getHeaderDragProps(colId, visibleRegisterColumns, setVisibleRegisterColumns, 'expenses_register_v1');
                         const width = registerColumnWidths[colId] || DEFAULT_REGISTER_COLUMN_WIDTHS[colId] || 100;
+                        const frozenStyle = getFrozenColumnStyle(colIdx, frozenRegisterCount, visibleRegisterColumns, registerColumnWidths, true);
                         let label = colId;
                         let align = 'text-left';
                         if (colId === 'date') label = 'Month / Date';
@@ -1475,10 +1662,10 @@ export default function ExpensesView() {
                             key={colId}
                             {...dragProps}
                             onClick={() => isSortable && handleRegisterHeaderSort(colId)}
-                            style={{ minWidth: `${Math.max(width, 100)}px`, width: `${Math.max(width, 100)}px` }}
-                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
+                            style={{ minWidth: `${Math.max(width, 100)}px`, width: `${Math.max(width, 100)}px`, ...frozenStyle }}
+                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group select-none whitespace-nowrap overflow-hidden ${align} ${
                               isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
-                            }`}
+                            } ${frozenStyle.backgroundColor ? '' : 'bg-slate-100/95'}`}
                             title={isSortable ? `${label} (Click: 1st Desc, 2nd Asc, 3rd Off)` : label}
                           >
                             <div className={`flex items-center gap-1.5 w-full overflow-hidden ${align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'}`}>
@@ -1505,11 +1692,13 @@ export default function ExpensesView() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {paginatedRegister.map((e) => (
-                      <tr key={e._id} className={`hover:bg-slate-50/60 transition-colors ${e.isReversed ? 'opacity-50' : ''}`}>
-                        {visibleRegisterColumns.map(colId => {
+                      <tr key={e._id} className={`hover:bg-slate-50/60 transition-colors group ${e.isReversed ? 'opacity-50' : ''}`}>
+                        {visibleRegisterColumns.map((colId, colIdx) => {
+                          const frozenStyle = getFrozenColumnStyle(colIdx, frozenRegisterCount, visibleRegisterColumns, registerColumnWidths, false);
+
                           if (colId === 'date') {
                             return (
-                              <td key={colId} className="px-5 py-3.5 text-xs text-slate-500 whitespace-nowrap">
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-xs text-slate-500 whitespace-nowrap border-r border-slate-100">
                                 <span className="font-semibold text-slate-700 block">
                                   {e.expenseMonth ? formatMonthYear(e.expenseMonth) : formatDate(e.expenseDate)}
                                 </span>
@@ -1523,8 +1712,8 @@ export default function ExpensesView() {
                           }
                           if (colId === 'property') {
                             return (
-                              <td key={colId} className="px-5 py-3.5 text-xs font-semibold text-slate-800">
-                                <div>{e.propertyId?.name || <span className="text-slate-400 italic font-normal">General</span>}</div>
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-xs font-semibold text-slate-800 border-r border-slate-100">
+                                <div>{e.propertyId?.name || <span className="text-slate-400 italic font-normal">General Common</span>}</div>
                                 {e.propertyId && (
                                   <span className="text-[10px] text-slate-500 font-medium block">
                                     {e.unitId?.subUnitPartition || e.unitId?.unitName || 'Entire Property'}
@@ -1535,19 +1724,19 @@ export default function ExpensesView() {
                           }
                           if (colId === 'category') {
                             return (
-                              <td key={colId} className="px-5 py-3.5">
-                                <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${CATEGORY_COLORS[e.category] || 'bg-slate-100 text-slate-600'}`}>
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 border-r border-slate-100">
+                                <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${CATEGORY_COLORS[e.category] || 'bg-slate-100 text-slate-600'}`}>
                                   {e.category}
                                 </span>
                               </td>
                             );
                           }
                           if (colId === 'description') {
-                            return <td key={colId} className="px-5 py-3.5 text-xs text-slate-700 max-w-xs">{e.description}</td>;
+                            return <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-xs text-slate-700 max-w-xs border-r border-slate-100">{e.description}</td>;
                           }
                           if (colId === 'payee') {
                             return (
-                              <td key={colId} className="px-5 py-3.5 text-xs text-slate-500">
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-xs text-slate-500 border-r border-slate-100">
                                 {e.vendorOrPayee || '—'}
                                 <span className="ml-1 text-slate-300">·</span>
                                 <span className="ml-1 text-slate-400">{e.paymentMode}</span>
@@ -1556,21 +1745,21 @@ export default function ExpensesView() {
                           }
                           if (colId === 'amount') {
                             return (
-                              <td key={colId} className="px-5 py-3.5 text-right font-bold text-rose-600 text-sm">
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-right font-bold text-rose-600 text-sm border-r border-slate-100">
                                 {formatCurrency(e.amount)}
                               </td>
                             );
                           }
                           if (colId === 'createdAt' || colId === 'updatedAt') {
                             return (
-                              <td key={colId} className="px-5 py-3.5 text-xs text-slate-600 whitespace-nowrap">
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-xs text-slate-600 whitespace-nowrap border-r border-slate-100">
                                 {e[colId] ? formatDate(e[colId]) : '—'}
                               </td>
                             );
                           }
                           if (colId === 'actions') {
                             return (
-                              <td key={colId} className="px-5 py-3.5 text-center">
+                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 text-center border-r border-slate-100">
                                 <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                                   {!e.isReversed && (
                                     <>
@@ -1711,11 +1900,17 @@ export default function ExpensesView() {
                 <div>
                   <SearchableSelect
                     label="Property"
-                    placeholder="General (No property)"
+                    placeholder="General Common (All Properties / Misc)"
                     searchPlaceholder="Search properties..."
-                    options={properties.map((property) => ({ value: property._id, label: property.name }))}
+                    options={[
+                      { value: '', label: 'General Common (All Properties / Misc)' },
+                      ...properties.map((property) => ({
+                        value: property._id,
+                        label: `${property.name} ${property.propertyCode ? `(${property.propertyCode})` : ''}`
+                      }))
+                    ]}
                     value={form.propertyId}
-                    onChange={(propertyId) => setForm((prev) => ({ ...prev, propertyId, unitId: '' }))}
+                    onChange={(propertyId) => handleModalPropertyChange(propertyId)}
                   />
                 </div>
                 <div>
@@ -1724,7 +1919,7 @@ export default function ExpensesView() {
                   </label>
                   <select
                     value={form.unitId}
-                    disabled={!form.propertyId}
+                    disabled={!form.propertyId || isGeneralCommonProperty(form.propertyId)}
                     onChange={(e) => setForm({ ...form, unitId: e.target.value })}
                     className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                   >
@@ -1743,13 +1938,22 @@ export default function ExpensesView() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-slate-600">Expense Type / Head *</label>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddCategoryModal(true)}
-                    className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-0.5 cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" /> + Add New Category
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowManageHeadsModal(true)}
+                      className="text-[11px] font-bold text-slate-500 hover:text-slate-700 underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Tag className="w-3 h-3 text-emerald-600" /> Manage Heads
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddCategoryModal(true)}
+                      className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" /> + Add New Head
+                    </button>
+                  </div>
                 </div>
                 <select
                   value={form.category}
@@ -1762,10 +1966,34 @@ export default function ExpensesView() {
                   }}
                   className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
                 >
-                  {allCategoryNames.map((category) => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                  <option value="__add_new__">+ Add New Category...</option>
+                  {isGeneralCommonProperty(form.propertyId) ? (
+                    <>
+                      <optgroup label="Common Expense Heads (General Common)">
+                        {commonCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Property Expense Heads">
+                        {propertyCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </optgroup>
+                    </>
+                  ) : (
+                    <>
+                      <optgroup label="Property Expense Heads">
+                        {propertyCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Common Expense Heads">
+                        {commonCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </optgroup>
+                    </>
+                  )}
+                  <option value="__add_new__">+ Add New Head...</option>
                 </select>
               </div>
 
@@ -1869,6 +2097,176 @@ export default function ExpensesView() {
         </div>
       )}
 
+      {/* Manage Expense Heads Master Modal */}
+      {showManageHeadsModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-scaleUp">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">Expense Heads Master</h3>
+                  <p className="text-xs text-slate-500">Configure separate heads for Property vs Common expenses</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowManageHeadsModal(false); setEditingHeadId(null); setHeadError(''); }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Error banner if any */}
+            {headError && (
+              <div className="mb-3 px-3.5 py-2 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 flex items-center justify-between">
+                <span>{headError}</span>
+                <button onClick={() => setHeadError('')} className="text-rose-500 hover:text-rose-800">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Tabs: Property Heads vs Common Heads */}
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl mb-4">
+              <button
+                type="button"
+                onClick={() => { setManageHeadsTab('Property'); setEditingHeadId(null); }}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                  manageHeadsTab === 'Property'
+                    ? 'bg-white text-emerald-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Property Heads ({propertyCategories.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => { setManageHeadsTab('Common'); setEditingHeadId(null); }}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                  manageHeadsTab === 'Common'
+                    ? 'bg-white text-emerald-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Common Heads ({commonCategories.length})
+              </button>
+            </div>
+
+            {/* Add New Head Input */}
+            <form onSubmit={handleAddNewHead} className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder={`Enter new ${manageHeadsTab} Head name...`}
+                value={newHeadName}
+                onChange={(e) => setNewHeadName(e.target.value)}
+                className="flex-1 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <button
+                type="submit"
+                disabled={headSaving || !newHeadName.trim()}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Head</span>
+              </button>
+            </form>
+
+            {/* Heads List */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-100">
+              {(manageHeadsTab === 'Property' ? propertyCategories : commonCategories).map(catName => {
+                const dbCat = categories.find(c => (typeof c === 'object' ? c.name === catName : c === catName));
+                const isEditing = editingHeadId === (dbCat?._id || catName);
+                const isDefault = dbCat ? dbCat.isDefault : (DEFAULT_PROPERTY_HEADS.includes(catName) || DEFAULT_COMMON_HEADS.includes(catName));
+
+                return (
+                  <div key={catName} className="pt-2 flex items-center justify-between gap-3 text-xs">
+                    {isEditing ? (
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingHeadName}
+                          onChange={(e) => setEditingHeadName(e.target.value)}
+                          className="flex-1 px-2.5 py-1 text-xs font-bold text-slate-800 border border-emerald-500 rounded-lg focus:outline-none"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateHead(dbCat._id)}
+                          disabled={headSaving || !editingHeadName.trim()}
+                          className="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                          title="Save"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingHeadId(null); setEditingHeadName(''); }}
+                          className="p-1 text-slate-400 hover:bg-slate-100 rounded cursor-pointer"
+                          title="Cancel"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold border ${CATEGORY_COLORS[catName] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                            {catName}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {isDefault ? '(Standard)' : '(Custom)'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {dbCat && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingHeadId(dbCat._id);
+                                setEditingHeadName(catName);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Head Name"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {dbCat && !isDefault && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteHead(dbCat._id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Head"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-4 mt-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => { setShowManageHeadsModal(false); setEditingHeadId(null); setHeadError(''); }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mini-Modal to Add New Custom Expense Head / Category */}
       {showAddCategoryModal && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-scaleUp">
@@ -1902,11 +2300,37 @@ export default function ExpensesView() {
                   type="text"
                   required
                   autoFocus
-                  placeholder="e.g. Legal Fees, Municipal Tax, Generator..."
+                  placeholder="e.g. Legal Fees, Municipal Tax, Margaret..."
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Head Scope
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="headScope"
+                      checked={newCategoryType === 'Property'}
+                      onChange={() => setNewCategoryType('Property')}
+                    />
+                    <span>Property Expense</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="headScope"
+                      checked={newCategoryType === 'Common'}
+                      onChange={() => setNewCategoryType('Common')}
+                    />
+                    <span>Common (General)</span>
+                  </label>
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">

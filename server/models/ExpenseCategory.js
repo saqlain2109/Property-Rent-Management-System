@@ -7,6 +7,12 @@ const expenseCategorySchema = new mongoose.Schema({
     unique: true,
     trim: true,
   },
+  headType: {
+    type: String,
+    enum: ['Property', 'Common'],
+    default: 'Property',
+    index: true,
+  },
   description: {
     type: String,
     trim: true,

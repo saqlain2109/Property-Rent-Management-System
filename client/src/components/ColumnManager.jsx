@@ -442,3 +442,55 @@ export default function ColumnManager({
     </div>
   );
 }
+
+/**
+ * Hook to manage customizable frozen (sticky left) columns with localStorage persistence.
+ * Gives full Excel-like column freeze functionality.
+ */
+export function useFrozenColumns(storageKey, defaultCount = 0) {
+  const [frozenCount, setFrozenCount] = useState(() => {
+    if (!storageKey) return defaultCount;
+    try {
+      const saved = localStorage.getItem(`freeze_${storageKey}`);
+      return saved !== null ? Number(saved) : defaultCount;
+    } catch {
+      return defaultCount;
+    }
+  });
+
+  const updateFrozenCount = (count) => {
+    const num = Math.max(0, Number(count) || 0);
+    setFrozenCount(num);
+    if (storageKey) {
+      try {
+        localStorage.setItem(`freeze_${storageKey}`, String(num));
+      } catch {}
+    }
+  };
+
+  return [frozenCount, updateFrozenCount];
+}
+
+/**
+ * Calculates cumulative left sticky position and border divider for frozen columns.
+ */
+export function getFrozenColumnStyle(colIndex, frozenCount, visibleColumns, columnWidths, isHeader = false) {
+  if (colIndex >= frozenCount) return {};
+
+  let leftOffset = 0;
+  for (let i = 0; i < colIndex; i++) {
+    const colId = visibleColumns[i];
+    leftOffset += (columnWidths?.[colId] || 120);
+  }
+
+  const isLastFrozen = colIndex === frozenCount - 1;
+
+  return {
+    position: 'sticky',
+    left: `${leftOffset}px`,
+    zIndex: isHeader ? 35 : 15,
+    backgroundColor: isHeader ? '#f8fafc' : '#ffffff',
+    boxShadow: isLastFrozen ? '3px 0 6px -2px rgba(0, 0, 0, 0.12)' : undefined,
+    borderRight: isLastFrozen ? '2px solid #94a3b8' : undefined
+  };
+}

@@ -25,7 +25,7 @@ const propertySchema = new mongoose.Schema({
   },
   propertyType: {
     type: String,
-    enum: ['Commercial Godown', 'Residential Apartment', 'Commercial Office', 'Garage', 'PG Facility', 'Room', 'Mixed Use', 'Other'],
+    enum: ['Commercial Godown', 'Residential Apartment', 'Commercial Office', 'Garage', 'PG Facility', 'Room', 'Mixed Use', 'General / Common', 'Other'],
     default: 'Commercial Godown',
   },
   ownerOrResponsiblePerson: {

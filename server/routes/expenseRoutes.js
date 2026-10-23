@@ -54,7 +54,39 @@ router.get('/', protect, async (req, res) => {
 // @route GET /api/expenses/categories
 router.get('/categories', protect, async (req, res) => {
   try {
-    const categories = await ExpenseCategory.find().sort({ name: 1 });
+    const { headType } = req.query;
+    const filter = {};
+    if (headType && ['Property', 'Common'].includes(headType)) {
+      filter.headType = headType;
+    }
+
+    let categories = await ExpenseCategory.find(filter).sort({ headType: 1, name: 1 });
+
+    // Auto-seed default heads if empty
+    if (categories.length === 0 && !headType) {
+      const defaultPropertyHeads = [
+        'Maintenance', 'Electricity Meters', 'Repairs', 'Sweeper', 
+        'Water Charges', 'Property Rent Paid', 'Deposit Refund', 'Renovation', 'Legal & Professional'
+      ];
+      const defaultCommonHeads = ['MOM', 'Miscellaneous', 'Zakat', 'Sadka', 'Margaret', 'Other'];
+
+      for (const name of defaultPropertyHeads) {
+        await ExpenseCategory.updateOne(
+          { name },
+          { $setOnInsert: { name, headType: 'Property', isDefault: true } },
+          { upsert: true }
+        );
+      }
+      for (const name of defaultCommonHeads) {
+        await ExpenseCategory.updateOne(
+          { name },
+          { $setOnInsert: { name, headType: 'Common', isDefault: true } },
+          { upsert: true }
+        );
+      }
+      categories = await ExpenseCategory.find(filter).sort({ headType: 1, name: 1 });
+    }
+
     res.json({ success: true, count: categories.length, data: categories });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -63,7 +95,8 @@ router.get('/categories', protect, async (req, res) => {
 
 // @route POST /api/expenses/categories
 router.post('/categories', protect, authorize('admin', 'manager'), [
-  body('name').trim().notEmpty().withMessage('Category name is required')
+  body('name').trim().notEmpty().withMessage('Category name is required'),
+  body('headType').optional().isIn(['Property', 'Common']).withMessage('headType must be Property or Common')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -71,17 +104,78 @@ router.post('/categories', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    const existing = await ExpenseCategory.findOne({ name: req.body.name.trim() });
+    const name = req.body.name.trim();
+    const headType = req.body.headType || 'Property';
+    const existing = await ExpenseCategory.findOne({ name });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Category already exists' });
     }
 
     const cat = await ExpenseCategory.create({
-      name: req.body.name.trim(),
+      name,
+      headType,
       description: req.body.description || ''
     });
 
     res.status(201).json({ success: true, data: cat });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route PUT /api/expenses/categories/:id
+router.put('/categories/:id', protect, authorize('admin', 'manager'), [
+  body('name').optional().trim().notEmpty().withMessage('Category name cannot be empty'),
+  body('headType').optional().isIn(['Property', 'Common']).withMessage('headType must be Property or Common')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+
+  try {
+    const { name, headType, description } = req.body;
+    const cat = await ExpenseCategory.findById(req.params.id);
+    if (!cat) {
+      return res.status(404).json({ success: false, message: 'Expense head not found' });
+    }
+
+    if (name && name !== cat.name) {
+      const duplicate = await ExpenseCategory.findOne({ name: name.trim(), _id: { $ne: cat._id } });
+      if (duplicate) {
+        return res.status(400).json({ success: false, message: 'Another category with this name already exists' });
+      }
+      cat.name = name.trim();
+    }
+    if (headType) cat.headType = headType;
+    if (description !== undefined) cat.description = description;
+
+    await cat.save();
+    res.json({ success: true, data: cat });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route DELETE /api/expenses/categories/:id
+router.delete('/categories/:id', protect, authorize('admin', 'manager'), async (req, res) => {
+  try {
+    const cat = await ExpenseCategory.findById(req.params.id);
+    if (!cat) {
+      return res.status(404).json({ success: false, message: 'Expense head not found' });
+    }
+
+    // Check if currently used by any expense
+    const inUseCount = await Expense.countDocuments({ category: cat.name, isReversed: false });
+    if (inUseCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete '${cat.name}' because it is actively used in ${inUseCount} expense record(s).`
+      });
+    }
+
+    await cat.deleteOne();
+    res.json({ success: true, message: 'Expense head deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

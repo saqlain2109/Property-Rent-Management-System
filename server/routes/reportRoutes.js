@@ -10,7 +10,7 @@ const PaymentReceipt = require('../models/PaymentReceipt');
 const Expense = require('../models/Expense');
 const MonthlyLedger = require('../models/MonthlyLedger');
 const PaymentAllocation = require('../models/PaymentAllocation');
-const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
+const { calculateTenantUnitLedger, getEffectiveRentForMonth, getCurrentMonthYear } = require('../services/rentCalculator');
 const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 const { protect } = require('../middleware/auth');
 
@@ -421,6 +421,286 @@ router.get('/export-monthly-excel', protect, async (req, res) => {
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Disposition', `attachment; filename="Monthly_Report_${targetMonth}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/reports/property-account-summary
+router.get('/property-account-summary', protect, async (req, res) => {
+  try {
+    const { propertyId, month = getCurrentMonthYear() } = req.query;
+    if (!propertyId) {
+      return res.status(400).json({ success: false, message: 'propertyId query param is required' });
+    }
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const [year, m] = month.split('-').map(Number);
+    const totalDays = new Date(year, m, 0).getDate();
+    const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, m - 1, totalDays, 23, 59, 59, 999));
+
+    // Units for this property
+    const units = await Unit.find({ propertyId: property._id }).sort({ displayOrder: 1, unitCode: 1 });
+
+    // Reversed receipts list
+    const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+
+    // 1. RENT & EARNINGS FOR THIS PROPERTY IN THIS MONTH
+    const earnings = [];
+    let totalExpectedRent = 0;
+    let totalRentReceived = 0;
+
+    for (const unit of units) {
+      // Find assignment effective for this unit in this month
+      const assignment = await TenantAssignment.findOne({
+        unitId: unit._id,
+        $or: [
+          { startDate: null },
+          { startDate: { $lte: endOfMonth } }
+        ],
+        $and: [
+          {
+            $or: [
+              { endDate: null },
+              { endDate: { $gte: startOfMonth } }
+            ]
+          }
+        ]
+      }).populate('tenantId').sort({ startDate: -1 });
+
+      let expectedRent = 0;
+      let tenantName = 'Vacant';
+      let tenantPhone = '';
+      let contractType = 'Rent';
+      let assignmentStatus = 'Vacant';
+      let assignmentCode = '';
+
+      if (assignment) {
+        expectedRent = await getEffectiveRentForMonth(unit._id, assignment.tenantId?._id, month, assignment);
+        tenantName = assignment.tenantId?.name || 'Unknown Tenant';
+        tenantPhone = assignment.tenantId?.phone || '';
+        contractType = assignment.contractType || 'Rent';
+        assignmentStatus = assignment.status;
+        assignmentCode = assignment.assignmentCode || '';
+      }
+
+      // Allocations received for this unit and month
+      const allocations = await PaymentAllocation.find({
+        unitId: unit._id,
+        rentMonthYear: month,
+        receiptId: { $nin: reversedReceipts }
+      }).populate('receiptId');
+
+      const receivedRent = allocations.reduce((sum, a) => sum + (a.allocatedAmount || 0), 0);
+      const latestReceipt = allocations.length > 0 ? allocations[allocations.length - 1].receiptId : null;
+
+      const balanceDue = Math.max(0, expectedRent - receivedRent);
+      let status = 'Unpaid';
+      if (receivedRent >= expectedRent && expectedRent > 0) status = 'Paid';
+      else if (receivedRent > 0) status = 'Partial';
+      else if (expectedRent === 0 && receivedRent === 0) status = assignment ? 'Paid' : 'Vacant';
+
+      totalExpectedRent += expectedRent;
+      totalRentReceived += receivedRent;
+
+      earnings.push({
+        unitId: unit._id,
+        unitName: unit.subUnitPartition || unit.unitName,
+        unitCode: unit.unitCode,
+        tenantName,
+        tenantPhone,
+        contractType,
+        assignmentCode,
+        assignmentStatus,
+        expectedRent,
+        receivedRent,
+        balanceDue,
+        status,
+        receiptNumber: latestReceipt?.receiptNumber || '',
+        paidDate: latestReceipt?.receiptDate || null,
+        paymentMode: latestReceipt?.paymentMode || ''
+      });
+    }
+
+    // 2. EXPENSES FOR THIS PROPERTY IN THIS MONTH
+    const expenses = await Expense.find({
+      propertyId: property._id,
+      isReversed: false,
+      $or: [
+        { expenseMonth: month },
+        { expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }
+      ]
+    }).sort({ expenseDate: 1 });
+
+    const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const netOperatingIncome = totalRentReceived - totalExpenses;
+    const totalPendingRent = Math.max(0, totalExpectedRent - totalRentReceived);
+
+    res.json({
+      success: true,
+      property: {
+        _id: property._id,
+        name: property.name,
+        propertyCode: property.propertyCode,
+        propertyType: property.propertyType,
+        totalAreaSqFt: property.totalAreaSqFt
+      },
+      month,
+      earnings,
+      expenses,
+      summary: {
+        totalExpectedRent,
+        totalRentReceived,
+        totalExpenses,
+        netOperatingIncome,
+        totalPendingRent,
+        occupiedUnits: earnings.filter(e => e.assignmentStatus !== 'Vacant').length,
+        totalUnits: units.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/reports/export-property-account-summary-excel
+router.get('/export-property-account-summary-excel', protect, async (req, res) => {
+  try {
+    const { propertyId, month = getCurrentMonthYear() } = req.query;
+    if (!propertyId) {
+      return res.status(400).json({ success: false, message: 'propertyId is required' });
+    }
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const [year, m] = month.split('-').map(Number);
+    const totalDays = new Date(year, m, 0).getDate();
+    const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, m - 1, totalDays, 23, 59, 59, 999));
+
+    const units = await Unit.find({ propertyId: property._id }).sort({ displayOrder: 1, unitCode: 1 });
+    const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+
+    const rentRows = [];
+    let totalExp = 0;
+    let totalRec = 0;
+
+    for (const unit of units) {
+      const assignment = await TenantAssignment.findOne({
+        unitId: unit._id,
+        $or: [
+          { startDate: null },
+          { startDate: { $lte: endOfMonth } }
+        ],
+        $and: [
+          {
+            $or: [
+              { endDate: null },
+              { endDate: { $gte: startOfMonth } }
+            ]
+          }
+        ]
+      }).populate('tenantId').sort({ startDate: -1 });
+
+      let expected = 0;
+      let tenant = 'Vacant';
+      let cType = 'Rent';
+      if (assignment) {
+        expected = await getEffectiveRentForMonth(unit._id, assignment.tenantId?._id, month, assignment);
+        tenant = assignment.tenantId?.name || 'Unknown';
+        cType = assignment.contractType || 'Rent';
+      }
+
+      const allocations = await PaymentAllocation.find({
+        unitId: unit._id,
+        rentMonthYear: month,
+        receiptId: { $nin: reversedReceipts }
+      }).populate('receiptId');
+
+      const received = allocations.reduce((sum, a) => sum + (a.allocatedAmount || 0), 0);
+      const latestReceipt = allocations.length > 0 ? allocations[allocations.length - 1].receiptId : null;
+      const balance = Math.max(0, expected - received);
+      const status = (received >= expected && expected > 0) ? 'Paid' : (received > 0 ? 'Partial' : (expected === 0 ? 'N/A' : 'Unpaid'));
+
+      totalExp += expected;
+      totalRec += received;
+
+      rentRows.push([
+        unit.subUnitPartition || unit.unitName,
+        tenant,
+        cType,
+        expected,
+        received,
+        latestReceipt?.receiptDate ? new Date(latestReceipt.receiptDate).toISOString().slice(0, 10) : '—',
+        latestReceipt?.paymentMode || '—',
+        balance,
+        status
+      ]);
+    }
+
+    const expenses = await Expense.find({
+      propertyId: property._id,
+      isReversed: false,
+      $or: [
+        { expenseMonth: month },
+        { expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }
+      ]
+    }).sort({ expenseDate: 1 });
+
+    const expRows = expenses.map(e => [
+      new Date(e.expenseDate).toISOString().slice(0, 10),
+      e.category,
+      e.description,
+      e.vendorOrPayee || '—',
+      e.paymentMode || 'Cash',
+      e.amount
+    ]);
+
+    const totalExpenses = expRows.reduce((sum, e) => sum + Number(e[5] || 0), 0);
+    const netIncome = totalRec - totalExpenses;
+    const pendingRent = Math.max(0, totalExp - totalRec);
+
+    const sheetData = [
+      [`ACCOUNT SUMMARY · ${property.name.toUpperCase()} · ${month}`],
+      [''],
+      ['1. RENT & EARNINGS STATEMENT'],
+      ['Sub-Property (Partition)', 'Tenant Name', 'Contract Type', 'Expected Rent (₹)', 'Received Rent (₹)', 'Paid Date', 'Mode', 'Balance Due (₹)', 'Status'],
+      ...rentRows,
+      ['TOTAL RENT', '', '', totalExp, totalRec, '', '', pendingRent, ''],
+      [''],
+      ['2. PROPERTY EXPENSES STATEMENT'],
+      ['Date', 'Expense Head (Category)', 'Description', 'Payee / Vendor', 'Payment Mode', 'Amount (₹)'],
+      ...expRows,
+      ['TOTAL EXPENSES', '', '', '', '', totalExpenses],
+      [''],
+      ['3. FINANCIAL RECONCILIATION SUMMARY'],
+      ['Total Expected Rent (₹)', '', '', '', '', totalExp],
+      ['Total Rent Received (₹)', '', '', '', '', totalRec],
+      ['Total Property Expenses (₹)', '', '', '', '', totalExpenses],
+      ['Net Operating Income / Cash Flow (₹)', '', '', '', '', netIncome],
+      ['Total Outstanding / Unpaid Rent (₹)', '', '', '', '', pendingRent]
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+    ws['!cols'] = [
+      { wch: 28 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 12 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, `Summary ${month}`);
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const safePropName = property.name.replace(/[^a-zA-Z0-9]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="Account_Summary_${safePropName}_${month}.xlsx"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buffer);
   } catch (error) {

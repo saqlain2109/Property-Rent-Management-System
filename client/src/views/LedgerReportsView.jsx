@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
+import PropertyAccountSummaryReport from './PropertyAccountSummaryReport';
 import MonthlyExcelReportView from './MonthlyExcelReportView';
 import LedgerView from './LedgerView';
 import ReportsView from './ReportsView';
-import { BookOpen, Download, FileSpreadsheet } from 'lucide-react';
+import { Building2, BookOpen, Download, FileSpreadsheet } from 'lucide-react';
 
 const TABS = [
-  { id: 'monthly_statement', label: 'Monthly Statement (Excel Style)', icon: FileSpreadsheet, desc: 'Single report: Rent income first, expenses below, difference, cumulative balance & outstanding dues' },
+  { id: 'property_summary', label: 'Property Account Summary', icon: Building2, desc: 'Property-wise monthly earnings on top, expenses below, net cash flow and balance' },
+  { id: 'monthly_statement', label: 'Portfolio Monthly Statement', icon: FileSpreadsheet, desc: 'All properties unified: Rent income first, expenses below, net difference & outstanding dues' },
   { id: 'ledger', label: 'Account Book', icon: BookOpen, desc: 'Month-by-month income, expenses, and rolling balance ledger' },
   { id: 'export', label: 'Portfolio Workbook', icon: Download, desc: 'Export all properties, units, tenants, receipts, expenses, and ledger into an Excel file' },
 ];
 
 export default function LedgerReportsView() {
-  const [activeTab, setActiveTab] = useState('monthly_statement');
+  const [activeTab, setActiveTab] = useState('property_summary');
 
   const currentTab = TABS.find(t => t.id === activeTab);
 
@@ -45,6 +47,7 @@ export default function LedgerReportsView() {
 
       {/* Tab Content */}
       <div>
+        {activeTab === 'property_summary' && <PropertyAccountSummaryReport />}
         {activeTab === 'monthly_statement' && <MonthlyExcelReportView />}
         {activeTab === 'ledger' && <LedgerView />}
         {activeTab === 'export' && <ReportsView />}

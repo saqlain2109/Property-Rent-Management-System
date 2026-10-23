@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
-import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import {
   FileText, Plus, Search, Calendar, TrendingUp, Edit2, LogOut, History,
@@ -132,6 +132,8 @@ export default function ContractsView() {
     handleResizeStart,
     resetColumnWidths
   } = useResizableColumns('contracts_v2', DEFAULT_CONTRACTS_COLUMN_WIDTHS);
+
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('contracts_v2', 0);
 
   // Controls & Toolbar States (APEX Integration)
   const [search, setSearch] = useState('');
@@ -608,6 +610,8 @@ export default function ContractsView() {
         onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
+        frozenColumnCount={frozenColumnCount}
+        onFrozenColumnCountChange={setFrozenColumnCount}
         filters={activeFilters}
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
         filterSuggestions={filterSuggestions}
@@ -658,10 +662,11 @@ export default function ContractsView() {
               </colgroup>
               <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
                 <tr className="bg-slate-100/95 backdrop-blur-xs text-slate-700 font-bold border-b border-slate-200 select-none">
-                  {visibleColumns.map((colId) => {
+                  {visibleColumns.map((colId, colIndex) => {
                     const def = CONTRACTS_COLUMNS_DEF.find((c) => c.id === colId);
                     if (!def) return null;
                     const width = getContractColumnWidth(colId, columnWidths);
+                    const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                     let alignClass = 'text-left';
                     if (['history', 'createdAt', 'updatedAt', 'status'].includes(colId)) alignClass = 'text-center';
                     if (['monthlyRent', 'annualRent', 'currentRate', 'depositHeld', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
@@ -674,7 +679,7 @@ export default function ContractsView() {
                           setVisibleColumns(cols);
                           try { localStorage.setItem('cols_contracts_v2', JSON.stringify(cols)); } catch(e){}
                         }, 'contracts_v2')}
-                        style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                        style={{ ...frozenStyle, width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
                         className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 whitespace-nowrap overflow-hidden select-none ${alignClass}`}
                       >
                         <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
@@ -719,10 +724,12 @@ export default function ContractsView() {
                       key={c._id}
                       className={`hover:bg-slate-50/70 transition-colors ${isVacated ? 'bg-slate-50/40 opacity-70' : ''}`}
                     >
-                      {visibleColumns.map((colId) => {
+                      {visibleColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, false);
+
                         if (colId === 'assignmentCode') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
                               <span className="font-mono font-bold text-slate-800 text-xs block">
                                 {c.assignmentCode}
                               </span>
@@ -737,7 +744,7 @@ export default function ContractsView() {
 
                         if (colId === 'property') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200">
                               <span className="font-semibold text-slate-800 text-xs block truncate" title={c.unitId?.propertyId?.name}>
                                 {c.unitId?.propertyId?.name || '—'}
                               </span>
@@ -747,7 +754,7 @@ export default function ContractsView() {
 
                         if (colId === 'subUnit') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200">
                               <span className="font-semibold text-teal-700 text-xs block truncate" title={c.unitId?.subUnitPartition || c.unitId?.unitName}>
                                 {c.unitId?.subUnitPartition || c.unitId?.unitName || '—'}
                               </span>
@@ -757,7 +764,7 @@ export default function ContractsView() {
 
                         if (colId === 'tenant') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200">
                               <span className="font-bold text-slate-900 text-xs block truncate">
                                 {c.tenantId?.name || '—'}
                               </span>
@@ -771,7 +778,7 @@ export default function ContractsView() {
                         if (colId === 'contractType') {
                           const isBiz = (c.contractType || 'Rent') === 'Business';
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
                                 isBiz ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-200'
                               }`}>
@@ -784,7 +791,7 @@ export default function ContractsView() {
                         if (colId === 'monthlyRent') {
                           const monthly = c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c));
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
                               {monthly ? formatCurrency(monthly) : '—'}
                             </td>
                           );
@@ -793,7 +800,7 @@ export default function ContractsView() {
                         if (colId === 'annualRent') {
                           const annual = c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0);
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-semibold text-slate-700 font-mono">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-semibold text-slate-700 font-mono">
                               {annual ? formatCurrency(annual) : '—'}
                             </td>
                           );
@@ -801,7 +808,7 @@ export default function ContractsView() {
 
                         if (colId === 'depositHeld') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-medium text-slate-700">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-medium text-slate-700">
                               {c.depositHeld ? formatCurrency(c.depositHeld) : '—'}
                             </td>
                           );
@@ -809,7 +816,7 @@ export default function ContractsView() {
 
                         if (colId === 'startDate') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
                               <div className="flex items-center gap-1.5 text-slate-700 font-medium">
                                 <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                 <span>{formatDate(c.startDate)}</span>
@@ -820,7 +827,7 @@ export default function ContractsView() {
 
                         if (colId === 'endDate') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
                               {c.endDate ? (
                                 <span className="text-slate-700 font-medium">{formatDate(c.endDate)}</span>
                               ) : (
@@ -835,7 +842,7 @@ export default function ContractsView() {
                         if (colId === 'status') {
                           const isActive = c.status === 'Active';
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
                               <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                                 isActive ? 'bg-emerald-100 text-emerald-800 border border-emerald-300/60' : 'bg-slate-100 text-slate-600 border border-slate-200'
                               }`}>
@@ -847,7 +854,7 @@ export default function ContractsView() {
 
                         if (colId === 'notes') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-slate-600 text-xs max-w-xs truncate" title={c.notes}>
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-slate-600 text-xs max-w-xs truncate" title={c.notes}>
                               {c.notes || '—'}
                             </td>
                           );
@@ -855,7 +862,7 @@ export default function ContractsView() {
 
                         if (colId === 'rentType') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
                               <span className="inline-block px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold text-[11px]">
                                 {getContractRentType(c)}
                               </span>
@@ -865,7 +872,7 @@ export default function ContractsView() {
 
                         if (colId === 'currentRate') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900">
                               {formatCurrency(getContractRentAmount(c))}
                               <span className="text-[10px] text-slate-400 font-normal block">
                                 / {getContractRentType(c) === 'Annual Fixed' ? 'year' : 'month'}
@@ -876,7 +883,7 @@ export default function ContractsView() {
 
                         if (colId === 'totalReceived') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-emerald-700">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-semibold text-emerald-700">
                               {formatCurrency(c.totalReceived || 0)}
                             </td>
                           );
@@ -884,7 +891,7 @@ export default function ContractsView() {
 
                         if (colId === 'outstanding') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-bold">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-bold">
                               <span className={c.outstandingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
                                 {formatCurrency(c.outstandingBalance || 0)}
                               </span>
@@ -894,7 +901,7 @@ export default function ContractsView() {
 
                         if (colId === 'history') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap">
                               <button
                                 onClick={() => {
                                   setSelectedContract(c);
@@ -912,7 +919,7 @@ export default function ContractsView() {
 
                         if (colId === 'createdAt' || colId === 'updatedAt') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap text-slate-500 font-medium text-xs">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-center whitespace-nowrap text-slate-500 font-medium text-xs">
                               {formatDate(c[colId])}
                             </td>
                           );
@@ -920,7 +927,7 @@ export default function ContractsView() {
 
                         if (colId === 'actions') {
                           return (
-                            <td key={colId} className="py-3 px-3.5 text-center whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 text-center whitespace-nowrap">
                               <div className="flex items-center justify-center gap-1.5">
                                 <button
                                   onClick={() => {

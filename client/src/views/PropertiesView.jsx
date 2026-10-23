@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import ApexToolbar from '../components/ApexToolbar';
-import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 
 const PROPERTIES_COLUMNS_DEF = [
@@ -42,12 +42,14 @@ const DEFAULT_PROPERTIES_COLUMN_WIDTHS = {
 export default function PropertiesView({ onNavigateToPartitions, initialPropertyFilter = '', onDataChanged }) {
   const [properties, setProperties] = useState([]);
   const [units, setUnits] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [expandedPropertyId, setExpandedPropertyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [propertyTypeFilter, setPropertyTypeFilter] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('properties', 0);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -124,12 +126,14 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [pRes, uRes] = await Promise.all([
+      const [pRes, uRes, cRes] = await Promise.all([
         API.get('/properties'),
-        API.get('/units')
+        API.get('/units'),
+        API.get('/assignments')
       ]);
       if (pRes.data.success) setProperties(pRes.data.data);
       if (uRes.data.success) setUnits(uRes.data.data);
+      if (cRes.data.success) setContracts(cRes.data.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -420,6 +424,8 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
         onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
+        frozenColumnCount={frozenColumnCount}
+        onFrozenColumnCountChange={setFrozenColumnCount}
         filters={activeFilters}
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
         filterSuggestions={filterSuggestions}
@@ -461,10 +467,11 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
             </colgroup>
             <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
               <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200 select-none">
-                {visibleColumns.map(colId => {
+                {visibleColumns.map((colId, colIndex) => {
                   const def = PROPERTIES_COLUMNS_DEF.find(c => c.id === colId);
                   if (!def) return null;
                   const width = columnWidths[colId] || DEFAULT_PROPERTIES_COLUMN_WIDTHS[colId] || 100;
+                  const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                   let alignClass = 'text-left';
                   if (['ownership', 'partitions', 'createdAt', 'updatedAt'].includes(colId)) alignClass = 'text-center';
                   if (['area', 'actions'].includes(colId)) alignClass = 'text-right';
@@ -474,7 +481,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                     <th 
                       key={colId} 
                       {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'properties')}
-                      style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                      style={{ ...frozenStyle, width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
                       className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${alignClass}`}
                     >
                       <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
@@ -523,10 +530,12 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                 paginatedProperties.map((p) => (
                   <React.Fragment key={p._id}>
                     <tr className="hover:bg-emerald-50/30 transition-colors">
-                      {visibleColumns.map(colId => {
+                      {visibleColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, false);
+
                         if (colId === 'displayOrder') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-center font-bold">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-center font-bold">
                               {p.displayOrder && p.displayOrder > 0 ? (
                                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-extrabold text-emerald-700">
                                   {p.displayOrder}
@@ -539,7 +548,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                         }
                         if (colId === 'details') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200">
                               <div className="font-bold text-slate-900 text-sm">{p.name}</div>
                               {p.address && <div className="text-[11px] text-slate-400 truncate max-w-xs">{p.address}</div>}
                             </td>
@@ -547,21 +556,21 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                         }
                         if (colId === 'type') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-700 font-medium">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-slate-700 font-medium">
                               {p.propertyType}
                             </td>
                           );
                         }
                         if (colId === 'area') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
                               {p.totalAreaSqFt ? `${p.totalAreaSqFt.toLocaleString('en-IN')} sq ft` : '—'}
                             </td>
                           );
                         }
                         if (colId === 'ownership') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-center">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-center">
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
                                 (p.ownershipPercentage || 100) === 100
                                   ? 'bg-emerald-100 text-emerald-800'
@@ -575,7 +584,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                         if (colId === 'partitions') {
                           const isExpanded = expandedPropertyId === p._id;
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-center">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-center">
                               <div className="flex items-center justify-center gap-1">
                                 <button
                                   type="button"
@@ -585,7 +594,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                                       ? 'bg-emerald-600 text-white shadow-xs'
                                       : 'bg-slate-100 hover:bg-emerald-50 text-slate-800 hover:text-emerald-700'
                                   }`}
-                                  title="Click to view partitions inline"
+                                  title="Click to view contracts & partitions inline"
                                 >
                                   <Layers className={`w-3.5 h-3.5 ${isExpanded ? 'text-white' : 'text-slate-500'}`} />
                                   <span>{p.unitCount || 0} Units</span>
@@ -615,21 +624,21 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                         }
                         if (colId === 'address') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-600 text-xs">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-slate-600 text-xs">
                               {p.address || '—'}
                             </td>
                           );
                         }
                         if (colId === 'createdAt' || colId === 'updatedAt') {
                           return (
-                            <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
                               {p[colId] ? formatDate(p[colId]) : '—'}
                             </td>
                           );
                         }
                         if (colId === 'actions') {
                           return (
-                            <td key={colId} className="py-3 px-4 text-right">
+                            <td key={colId} style={frozenStyle} className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                                 {onNavigateToPartitions && (
                                   <button
@@ -663,98 +672,220 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                       })}
                     </tr>
 
-                    {/* Inline Expandable Partitions Sub-Table */}
-                    {expandedPropertyId === p._id && (
-                      <tr className="bg-emerald-50/20 border-b-2 border-emerald-300">
-                        <td colSpan={visibleColumns.length} className="p-3 pl-8">
-                          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
-                              <div className="flex items-center gap-2">
-                                <Layers className="w-4 h-4 text-emerald-600" />
-                                <h4 className="font-extrabold text-slate-900 text-xs">
-                                  Partitions in {p.name} ({units.filter(u => (u.propertyId?._id || u.propertyId) === p._id).length} Total)
-                                </h4>
-                                <span className="text-[11px] text-slate-500">
-                                  • {p.occupiedUnits || 0} Occupied, {(p.unitCount || 0) - (p.occupiedUnits || 0)} Vacant
-                                </span>
-                              </div>
-                              {onNavigateToPartitions && (
-                                <button
-                                  type="button"
-                                  onClick={() => onNavigateToPartitions(p._id)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-                                >
-                                  <span>Open in Partitions Master (Filtered)</span>
-                                  <ArrowRight className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
+                    {/* Inline Expandable Contracts & Partitions Sub-Table */}
+                    {expandedPropertyId === p._id && (() => {
+                      const propContracts = contracts.filter(c => (c.unitId?.propertyId?._id || c.unitId?.propertyId) === p._id);
+                      const activeContracts = propContracts.filter(c => c.status === 'Active');
+                      const inactiveContracts = propContracts.filter(c => c.status !== 'Active');
+                      const propUnits = units.filter(u => (u.propertyId?._id || u.propertyId) === p._id);
 
-                            {units.filter(u => (u.propertyId?._id || u.propertyId) === p._id).length === 0 ? (
-                              <p className="text-xs text-slate-400 py-3 text-center">No partitions registered for this property yet.</p>
-                            ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs border-collapse">
-                                  <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[11px]">
-                                    <tr>
-                                      <th className="py-2 px-3">Sub-Unit (Partition)</th>
-                                      <th className="py-2 px-3 text-right">Area (Sq Ft)</th>
-                                      <th className="py-2 px-3">Floor</th>
-                                      <th className="py-2 px-3">Current Tenant</th>
-                                      <th className="py-2 px-3 text-right">Monthly Rent</th>
-                                      <th className="py-2 px-3 text-center">Status</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-100">
-                                    {units
-                                      .filter(u => (u.propertyId?._id || u.propertyId) === p._id)
-                                      .map((u) => (
-                                        <tr key={u._id} className="hover:bg-slate-50">
-                                          <td className="py-2 px-3 font-bold text-slate-800">
-                                            {u.subUnitPartition || u.unitName}
-                                          </td>
-                                          <td className="py-2 px-3 text-right font-mono font-semibold text-slate-700">
-                                            {u.areaSqFt ? `${u.areaSqFt.toLocaleString('en-IN')} sq ft` : '—'}
-                                          </td>
-                                          <td className="py-2 px-3 text-slate-600">
-                                            {u.floor || '—'}
-                                          </td>
-                                          <td className="py-2 px-3">
-                                            {u.currentTenant ? (
-                                              <div>
-                                                <span className="font-semibold text-slate-900">{u.currentTenant.name}</span>
-                                                {u.currentTenant.phone && (
-                                                  <span className="text-slate-400 text-[10px] ml-1">({u.currentTenant.phone})</span>
-                                                )}
-                                              </div>
-                                            ) : (
-                                              <span className="text-slate-400 italic">None (Vacant)</span>
-                                            )}
-                                          </td>
-                                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-800">
-                                            {u.currentRentAgreement?.monthlyRate
-                                              ? formatCurrency(u.currentRentAgreement.monthlyRate)
-                                              : (u.monthlyRentExpected ? formatCurrency(u.monthlyRentExpected) : '—')}
-                                          </td>
-                                          <td className="py-2 px-3 text-center">
-                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                              u.occupancyStatus === 'Occupied'
-                                                ? 'bg-emerald-100 text-emerald-800'
-                                                : 'bg-amber-100 text-amber-800'
-                                            }`}>
-                                              {u.occupancyStatus || 'Vacant'}
-                                            </span>
-                                          </td>
-                                        </tr>
-                                      ))}
-                                  </tbody>
-                                </table>
+                      return (
+                        <tr className="bg-emerald-50/20 border-b-2 border-emerald-300">
+                          <td colSpan={visibleColumns.length} className="p-3 pl-8">
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+                              {/* Header info */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <Layers className="w-4 h-4 text-emerald-600" />
+                                  <h4 className="font-extrabold text-slate-900 text-xs">
+                                    Contracts & Partitions in {p.name}
+                                  </h4>
+                                  <span className="text-[11px] text-slate-500">
+                                    • {activeContracts.length} Active Contracts, {inactiveContracts.length} Inactive, {propUnits.length} Total Partitions
+                                  </span>
+                                </div>
+                                {onNavigateToPartitions && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateToPartitions(p._id)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+                                  >
+                                    <span>Open in Partitions Master (Filtered)</span>
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
+
+                              {/* SECTION 1: ACTIVE CONTRACTS ON TOP */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                  <h5 className="text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                                    Active Contracts ({activeContracts.length})
+                                  </h5>
+                                </div>
+                                {activeContracts.length === 0 ? (
+                                  <p className="text-xs text-slate-400 italic py-1 pl-4">No currently active contracts for this property.</p>
+                                ) : (
+                                  <div className="overflow-x-auto border border-emerald-200/60 rounded-xl">
+                                    <table className="w-full text-left text-xs border-collapse">
+                                      <thead className="bg-emerald-50/80 text-emerald-900 font-bold border-b border-emerald-200/60 text-[11px]">
+                                        <tr>
+                                          <th className="py-2 px-3">Sub-Property / Partition</th>
+                                          <th className="py-2 px-3">Active Tenant</th>
+                                          <th className="py-2 px-3 text-center">Contract Type</th>
+                                          <th className="py-2 px-3 text-right">Monthly Rent (₹)</th>
+                                          <th className="py-2 px-3">Start Date</th>
+                                          <th className="py-2 px-3">End Date</th>
+                                          <th className="py-2 px-3 text-center">Status</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-emerald-100/60 bg-white">
+                                        {activeContracts.map(c => {
+                                          const rent = c.currentAgreement?.monthlyRate || c.currentMonthlyRate || 0;
+                                          const isBiz = (c.contractType || 'Rent') === 'Business';
+                                          return (
+                                            <tr key={c._id} className="hover:bg-emerald-50/30">
+                                              <td className="py-2 px-3 font-bold text-slate-800">
+                                                {c.unitId?.subUnitPartition || c.unitId?.unitName || '—'}
+                                              </td>
+                                              <td className="py-2 px-3 font-semibold text-slate-900">
+                                                {c.tenantId?.name || '—'}
+                                              </td>
+                                              <td className="py-2 px-3 text-center">
+                                                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                                  isBiz ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                                                }`}>
+                                                  {c.contractType || 'Rent'}
+                                                </span>
+                                              </td>
+                                              <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                                                {formatCurrency(rent)}
+                                              </td>
+                                              <td className="py-2 px-3 text-slate-600">
+                                                {c.startDate ? formatDate(c.startDate) : '—'}
+                                              </td>
+                                              <td className="py-2 px-3 text-slate-600">
+                                                {c.endDate ? formatDate(c.endDate) : <span className="text-emerald-700 font-semibold">Ongoing</span>}
+                                              </td>
+                                              <td className="py-2 px-3 text-center">
+                                                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                                  Active
+                                                </span>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* SECTION 2: INACTIVE / ENDED CONTRACTS BELOW */}
+                              {inactiveContracts.length > 0 && (
+                                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                                    <h5 className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                                      Inactive / Past Contracts ({inactiveContracts.length})
+                                    </h5>
+                                  </div>
+                                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                                    <table className="w-full text-left text-xs border-collapse">
+                                      <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 text-[11px]">
+                                        <tr>
+                                          <th className="py-2 px-3">Sub-Property / Partition</th>
+                                          <th className="py-2 px-3">Past Tenant</th>
+                                          <th className="py-2 px-3 text-center">Contract Type</th>
+                                          <th className="py-2 px-3 text-right">Past Rent (₹)</th>
+                                          <th className="py-2 px-3">Period</th>
+                                          <th className="py-2 px-3 text-center">Status</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100 bg-white">
+                                        {inactiveContracts.map(c => {
+                                          const rent = c.currentAgreement?.monthlyRate || c.currentMonthlyRate || 0;
+                                          const isBiz = (c.contractType || 'Rent') === 'Business';
+                                          return (
+                                            <tr key={c._id} className="hover:bg-slate-50 opacity-80">
+                                              <td className="py-2 px-3 font-bold text-slate-700">
+                                                {c.unitId?.subUnitPartition || c.unitId?.unitName || '—'}
+                                              </td>
+                                              <td className="py-2 px-3 text-slate-700 font-medium">
+                                                {c.tenantId?.name || '—'}
+                                              </td>
+                                              <td className="py-2 px-3 text-center">
+                                                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                                  isBiz ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-700 border-slate-200'
+                                                }`}>
+                                                  {c.contractType || 'Rent'}
+                                                </span>
+                                              </td>
+                                              <td className="py-2 px-3 text-right font-mono font-medium text-slate-600">
+                                                {formatCurrency(rent)}
+                                              </td>
+                                              <td className="py-2 px-3 text-slate-500">
+                                                {c.startDate ? formatDate(c.startDate) : '—'} to {c.endDate ? formatDate(c.endDate) : '—'}
+                                              </td>
+                                              <td className="py-2 px-3 text-center">
+                                                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                                  {c.status || 'Ended'}
+                                                </span>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* SECTION 3: PARTITIONS LIST */}
+                              <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <Layers className="w-3.5 h-3.5 text-slate-500" />
+                                  <h5 className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                                    Registered Partitions ({propUnits.length})
+                                  </h5>
+                                </div>
+                                {propUnits.length === 0 ? (
+                                  <p className="text-xs text-slate-400 py-1 pl-4">No partitions registered for this property.</p>
+                                ) : (
+                                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                                    <table className="w-full text-left text-xs border-collapse">
+                                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[11px]">
+                                        <tr>
+                                          <th className="py-2 px-3">Sub-Unit (Partition)</th>
+                                          <th className="py-2 px-3 text-right">Area (Sq Ft)</th>
+                                          <th className="py-2 px-3">Floor</th>
+                                          <th className="py-2 px-3 text-center">Occupancy</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100 bg-white">
+                                        {propUnits.map((u) => (
+                                          <tr key={u._id} className="hover:bg-slate-50">
+                                            <td className="py-2 px-3 font-bold text-slate-800">
+                                              {u.subUnitPartition || u.unitName}
+                                            </td>
+                                            <td className="py-2 px-3 text-right font-mono font-semibold text-slate-700">
+                                              {u.areaSqFt ? `${u.areaSqFt.toLocaleString('en-IN')} sq ft` : '—'}
+                                            </td>
+                                            <td className="py-2 px-3 text-slate-600">
+                                              {u.floor || '—'}
+                                            </td>
+                                            <td className="py-2 px-3 text-center">
+                                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                u.occupancyStatus === 'Occupied'
+                                                  ? 'bg-emerald-100 text-emerald-800'
+                                                  : 'bg-amber-100 text-amber-800'
+                                              }`}>
+                                                {u.occupancyStatus || 'Vacant'}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })()}
                   </React.Fragment>
               )))}
             </tbody>
@@ -940,19 +1071,6 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                             className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
                         </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Expected Monthly Rent (₹) <span className="text-slate-400 font-normal">(optional)</span>
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="e.g. 15000"
-                          value={form.monthlyRentExpected}
-                          onChange={(e) => setForm(f => ({ ...f, monthlyRentExpected: e.target.value }))}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-emerald-700"
-                        />
                       </div>
                     </div>
                   )}

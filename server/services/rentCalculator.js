@@ -150,11 +150,42 @@ function getCurrentMonthYear() {
  * @param {ObjectId} unitId 
  * @param {ObjectId} tenantId 
  * @param {String} upToMonthYear optional target month, defaults to current month
+ * @param {Object} passedAssignment optional specific assignment instance
  */
-async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear) {
+async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passedAssignment = null) {
   const effectiveUpTo = upToMonthYear || getCurrentMonthYear();
   // 1. Get occupancy assignment
-  const assignment = await TenantAssignment.findOne({ unitId, tenantId }).sort({ startDate: -1 });
+  let assignment = passedAssignment;
+  if (!assignment) {
+    if (upToMonthYear) {
+      const [y, m] = upToMonthYear.split('-').map(Number);
+      const totalDays = new Date(y, m, 0).getDate();
+      const monthStart = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+      const monthEnd = new Date(Date.UTC(y, m - 1, totalDays, 23, 59, 59, 999));
+
+      assignment = await TenantAssignment.findOne({
+        unitId,
+        tenantId,
+        $or: [
+          { startDate: null },
+          { startDate: { $lte: monthEnd } }
+        ],
+        $and: [
+          {
+            $or: [
+              { endDate: null },
+              { endDate: { $gte: monthStart } }
+            ]
+          }
+        ]
+      }).sort({ startDate: -1 });
+    }
+
+    if (!assignment) {
+      assignment = await TenantAssignment.findOne({ unitId, tenantId }).sort({ startDate: -1 });
+    }
+  }
+
   if (!assignment) {
     return {
       hasAssignment: false,
