@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import API from '../services/api';
 import { Lock, User, ShieldCheck, KeyRound, ArrowLeft, Mail } from 'lucide-react';
 
-export default function LoginModal({ onLoginSuccess, isSetupMode = false }) {
-  const [isSetup, setIsSetup] = useState(isSetupMode);
+export default function LoginModal({ onLoginSuccess, onSuccess, isSetupMode = false, isInitialSetup = false }) {
+  const handleSuccess = onLoginSuccess || onSuccess || (() => {});
+  const [isSetup, setIsSetup] = useState(isSetupMode || isInitialSetup);
   const [step, setStep] = useState('credentials'); // 'credentials' | '2fa'
 
   // Credentials State - Clean and NOT pre-filled as requested
@@ -32,7 +33,7 @@ export default function LoginModal({ onLoginSuccess, isSetupMode = false }) {
         if (res.data.success) {
           localStorage.setItem('property_rent_token', res.data.token);
           localStorage.setItem('property_rent_user', JSON.stringify(res.data.user));
-          onLoginSuccess(res.data.user);
+          handleSuccess(res.data.user);
         }
       } else {
         const payload = { username: username.trim(), email: username.trim(), password };
@@ -47,11 +48,12 @@ export default function LoginModal({ onLoginSuccess, isSetupMode = false }) {
         } else if (res.data.success) {
           localStorage.setItem('property_rent_token', res.data.token);
           localStorage.setItem('property_rent_user', JSON.stringify(res.data.user));
-          onLoginSuccess(res.data.user);
+          handleSuccess(res.data.user);
         }
       }
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || 'Authentication failed');
+      console.error('Login submit error:', err);
+      setError(err.response?.data?.message || err.response?.data?.errors?.[0]?.msg || err.message || 'Authentication failed');
     } finally {
       setLoading(false);
     }
@@ -71,9 +73,10 @@ export default function LoginModal({ onLoginSuccess, isSetupMode = false }) {
       if (res.data.success) {
         localStorage.setItem('property_rent_token', res.data.token);
         localStorage.setItem('property_rent_user', JSON.stringify(res.data.user));
-        onLoginSuccess(res.data.user);
+        handleSuccess(res.data.user);
       }
     } catch (err) {
+      console.error('2FA verification error:', err);
       setError(err.response?.data?.message || 'Invalid 6-digit code. Please try again.');
     } finally {
       setLoading(false);

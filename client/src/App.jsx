@@ -101,6 +101,8 @@ export default function App() {
           <LoginModal
             isOpen={true}
             isInitialSetup={!isInitialized}
+            isSetupMode={!isInitialized}
+            onLoginSuccess={handleLoginSuccess}
             onSuccess={handleLoginSuccess}
           />
         </div>
