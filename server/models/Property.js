@@ -14,9 +14,14 @@ const propertySchema = new mongoose.Schema({
     trim: true,
   },
   address: {
-    type: String,
-    trim: true,
+    type: mongoose.Schema.Types.Mixed,
     default: '',
+    set: function(v) {
+      if (typeof v === 'object' && v !== null) {
+        return [v.street, v.area, v.city, v.state, v.pincode].filter(Boolean).join(', ') || JSON.stringify(v);
+      }
+      return v || '';
+    }
   },
   city: {
     type: String,

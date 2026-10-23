@@ -82,7 +82,6 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
   const reportsSubItems = [
     { id: 'reports_matrix',    label: 'Property Monthly Matrix', icon: FileSpreadsheet, badge: 'Sheet 1' },
     { id: 'reports_summary',   label: 'Property Account Summary', icon: Building2 },
-    { id: 'reports_statement', label: 'Portfolio Statement', icon: Layers },
     { id: 'reports_ledger',    label: 'Account Book (Ledger)', icon: BookOpen },
     { id: 'reports_export',    label: 'Portfolio Workbook (Excel)', icon: Download },
   ];

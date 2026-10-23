@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropertyMonthlyMatrixReport from './PropertyMonthlyMatrixReport';
 import PropertyAccountSummaryReport from './PropertyAccountSummaryReport';
-import MonthlyExcelReportView from './MonthlyExcelReportView';
 import LedgerView from './LedgerView';
 import ReportsView from './ReportsView';
 import { 
@@ -14,10 +13,10 @@ const REPORT_OPTIONS = [
     id: 'property_matrix', 
     sidebarId: 'reports_matrix',
     label: 'Property Monthly Matrix (Sheet 1)', 
-    shortLabel: 'Monthly Matrix',
+    shortLabel: 'Sheet 1 Master Matrix',
     icon: FileSpreadsheet, 
-    badge: 'Standard Sheet 1',
-    desc: 'Spreadsheet-style full year matrix: Properties & Partitions on left, Months across columns, with Row and Column totals' 
+    badge: 'Master Sheet 1',
+    desc: 'Spreadsheet-style full year matrix: Rent Income, Property & Other Expenses, and Balance Reconciliation' 
   },
   { 
     id: 'property_summary', 
@@ -27,15 +26,6 @@ const REPORT_OPTIONS = [
     icon: Building2, 
     badge: 'Per-Property',
     desc: 'Property-wise monthly earnings on top, expenses below, net cash flow and balance reconciliation' 
-  },
-  { 
-    id: 'monthly_statement', 
-    sidebarId: 'reports_statement',
-    label: 'Portfolio Monthly Statement', 
-    shortLabel: 'Portfolio Statement',
-    icon: Layers, 
-    badge: 'All Properties',
-    desc: 'All properties unified: Rent income first, expenses below, net difference & outstanding dues' 
   },
   { 
     id: 'ledger', 
@@ -194,7 +184,6 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
       <div>
         {activeTab === 'property_matrix' && <PropertyMonthlyMatrixReport />}
         {activeTab === 'property_summary' && <PropertyAccountSummaryReport />}
-        {activeTab === 'monthly_statement' && <MonthlyExcelReportView />}
         {activeTab === 'ledger' && <LedgerView />}
         {activeTab === 'export' && <ReportsView />}
       </div>

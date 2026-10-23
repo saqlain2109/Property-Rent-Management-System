@@ -26,10 +26,18 @@ const DEFAULT_PROPERTY_HEADS = [
 
 const DEFAULT_COMMON_HEADS = [
   'MOM',
-  'Miscellaneous',
+  'Margaret',
+  'Islamic & Zakat',
   'Zakat',
   'Sadka',
-  'Margaret',
+  'Send to dubai',
+  'IT Fees',
+  'Donations',
+  'Miscellaneous',
+  'Miscellaneous exp',
+  'Akbar',
+  'Loan asgar Bhati',
+  'Loan give to Gafoor',
   'Other'
 ];
 
@@ -175,6 +183,14 @@ export default function ExpensesView() {
   const [registerMonthFilter, setRegisterMonthFilter] = useState(() => localStorage.getItem('expenses_reg_month') || '');
   useEffect(() => { localStorage.setItem('expenses_reg_month', registerMonthFilter); }, [registerMonthFilter]);
 
+  // Scope Filter: 'property' (Default: Property-specific maintenance) | 'other' (Other/Company Expenses) | 'all'
+  const [expenseScope, setExpenseScope] = useState(() => {
+    return localStorage.getItem('expenses_scope_filter') || 'property';
+  });
+  useEffect(() => {
+    localStorage.setItem('expenses_scope_filter', expenseScope);
+  }, [expenseScope]);
+
   // APEX Toolbar & Table States for Sheet
   const [sheetFilters, setSheetFilters] = useState([]);
   const [sheetSortConfig, setSheetSortConfig] = useState({ key: null, direction: null });
@@ -285,7 +301,15 @@ export default function ExpensesView() {
       ]);
       if (eRes.data.success) setExpenses(eRes.data.data);
       if (cRes.data.success) setCategories(cRes.data.data);
-      if (pRes.data.success) setProperties(pRes.data.data);
+      if (pRes.data.success) {
+        const allProps = pRes.data.data;
+        setProperties(allProps);
+        const regularProps = allProps.filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common');
+        if (regularProps.length > 0) {
+          setQuickForm(prev => prev.propertyId ? prev : ({ ...prev, propertyId: regularProps[0]._id, category: 'Maintenance' }));
+          setForm(prev => prev.propertyId ? prev : ({ ...prev, propertyId: regularProps[0]._id, category: 'Maintenance' }));
+        }
+      }
       if (uRes.data.success) setUnits(uRes.data.data);
     } catch (err) {
       console.error('Failed to load expenses data:', err);
@@ -322,12 +346,51 @@ export default function ExpensesView() {
 
   // Check if property is General Common (no income, only expenses)
   const isGeneralCommonProperty = (propId) => {
-    if (!propId) return true;
+    if (propId === '__OTHER_EXPENSES__') return true;
+    if (!propId) return false;
     const prop = properties.find(p => String(p._id) === String(propId));
     if (!prop) return false;
     return prop.propertyCode === 'PROP-COMMON' || 
            prop.name?.toLowerCase().includes('general common') || 
            prop.propertyType === 'General / Common';
+  };
+
+  // Helper to determine if an expense is an "Other Expense" (Non-property / Company cost like MOM, Zakat, Misc, Margaret)
+  const isExpenseOther = (expense) => {
+    if (!expense) return false;
+    const propCode = expense.propertyId?.propertyCode || '';
+    const propName = expense.propertyId?.name || '';
+    const propType = expense.propertyId?.propertyType || '';
+    if (propCode === 'PROP-COMMON' || propName.toLowerCase().includes('general common') || propType === 'General / Common') {
+      return true;
+    }
+    const cat = (expense.category || '').toLowerCase();
+    const commonLowerSet = new Set(commonCategories.map(c => c.toLowerCase()));
+    if (commonLowerSet.has(cat)) return true;
+    const knownOther = ['mom', 'margaret', 'zakat', 'sadka', 'islamic', 'send to dubai', 'it fees', 'donations', 'akbar', 'bhati', 'gafoor'];
+    return knownOther.some(k => cat.includes(k));
+  };
+
+  const handleScopeChange = (newScope) => {
+    setExpenseScope(newScope);
+    const regularProps = properties.filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'));
+    const commonProp = properties.find(p => p.propertyCode === 'PROP-COMMON' || p.propertyType === 'General / Common' || p.name?.toLowerCase().includes('general common'));
+    
+    if (newScope === 'other') {
+      setQuickForm(prev => ({
+        ...prev,
+        propertyId: commonProp?._id || '__OTHER_EXPENSES__',
+        unitId: '',
+        category: commonCategories[0] || 'MOM'
+      }));
+    } else if (newScope === 'property' && regularProps.length > 0) {
+      setQuickForm(prev => ({
+        ...prev,
+        propertyId: regularProps[0]._id,
+        unitId: '',
+        category: propertyCategories[0] || 'Maintenance'
+      }));
+    }
   };
 
   const handleQuickPropertyChange = (newPropId) => {
@@ -502,6 +565,10 @@ export default function ExpensesView() {
 
       if (!matchesSearch || !matchesProp || !matchesCat) return false;
 
+      // Expense Scope Filter: 'property' (Default: regular properties only) | 'other' (Other/Company Expenses) | 'all'
+      if (expenseScope === 'property' && isExpenseOther(e)) return false;
+      if (expenseScope === 'other' && !isExpenseOther(e)) return false;
+
       // APEX Filters
       for (const f of sheetFilters) {
         let fieldVal = '';
@@ -519,7 +586,7 @@ export default function ExpensesView() {
 
       return true;
     });
-  }, [monthExpenses, sheetSearch, sheetPropFilter, sheetCatFilter, sheetFilters]);
+  }, [monthExpenses, sheetSearch, sheetPropFilter, sheetCatFilter, sheetFilters, expenseScope]);
 
   // Sorted Month Expenses
   const sortedMonthExpenses = React.useMemo(() => {
@@ -569,9 +636,17 @@ export default function ExpensesView() {
 
     try {
       setQuickSaving(true);
+      const commonProp = properties.find(p => p.propertyCode === 'PROP-COMMON' || p.propertyType === 'General / Common' || p.name?.toLowerCase().includes('general common'));
+      let targetPropId = quickForm.propertyId;
+      let targetUnitId = quickForm.unitId;
+      if (targetPropId === '__OTHER_EXPENSES__' || !targetPropId) {
+        targetPropId = commonProp?._id || null;
+        targetUnitId = null;
+      }
+
       const payload = {
-        propertyId: quickForm.propertyId || null,
-        unitId: quickForm.unitId || null,
+        propertyId: targetPropId,
+        unitId: targetUnitId || null,
         category: quickForm.category || 'Maintenance',
         description: quickForm.description.trim(),
         vendorOrPayee: quickForm.vendorOrPayee.trim(),
@@ -701,10 +776,18 @@ export default function ExpensesView() {
     try {
       setSubmitting(true);
       const categoryName = form.category.trim();
+      const commonProp = properties.find(p => p.propertyCode === 'PROP-COMMON' || p.propertyType === 'General / Common' || p.name?.toLowerCase().includes('general common'));
+      let targetPropId = form.propertyId;
+      let targetUnitId = form.unitId;
+      if (targetPropId === '__OTHER_EXPENSES__' || !targetPropId) {
+        targetPropId = commonProp?._id || null;
+        targetUnitId = null;
+      }
+
       const payload = {
         ...form,
-        propertyId: form.propertyId || null,
-        unitId: form.unitId || null,
+        propertyId: targetPropId,
+        unitId: targetUnitId || null,
         category: categoryName,
         expenseMonth: !entryByDate ? form.expenseMonth : (form.expenseDate ? form.expenseDate.slice(0, 7) : form.expenseMonth),
         expenseDate: entryByDate ? form.expenseDate : `${form.expenseMonth}-01`
@@ -790,6 +873,10 @@ export default function ExpensesView() {
 
       if (!matchesSearch || !matchesCategory || !matchesProp || !matchesMonth) return false;
 
+      // Expense Scope Filter: 'property' (Default: regular properties only) | 'other' (Other/Company Expenses) | 'all'
+      if (expenseScope === 'property' && isExpenseOther(e)) return false;
+      if (expenseScope === 'other' && !isExpenseOther(e)) return false;
+
       // APEX Filters
       for (const f of registerFilters) {
         let fieldVal = '';
@@ -807,7 +894,7 @@ export default function ExpensesView() {
 
       return true;
     });
-  }, [expenses, registerSearch, registerCatFilter, registerPropFilter, registerMonthFilter, registerFilters]);
+  }, [expenses, registerSearch, registerCatFilter, registerPropFilter, registerMonthFilter, registerFilters, expenseScope]);
 
   // Sorted Register
   const sortedRegister = React.useMemo(() => {
@@ -1010,6 +1097,62 @@ export default function ExpensesView() {
             </button>
           </div>
         </div>
+
+        {/* Scope Switcher: Property Expenses (General) vs Other Expenses (MOM, Zakat...) vs All Expenses */}
+        <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Expense Scope:</span>
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => handleScopeChange('property')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  expenseScope === 'property'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Property Expenses (General)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScopeChange('other')}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  expenseScope === 'other'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>★ Other Expenses (MOM, Zakat, Misc, Margaret...)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScopeChange('all')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  expenseScope === 'all'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                <span>All Combined</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-500 font-medium">
+            {expenseScope === 'property' && (
+              <span className="text-emerald-700 font-semibold">Showing Property maintenance, electricity & repairs.</span>
+            )}
+            {expenseScope === 'other' && (
+              <span className="text-purple-700 font-semibold">Showing Other / Company costs (MOM, Zakat, Margaret, Loans, Misc).</span>
+            )}
+            {expenseScope === 'all' && (
+              <span className="text-slate-600 font-semibold">Showing all property and company expenses combined.</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ======================================================== */}
@@ -1043,19 +1186,27 @@ export default function ExpensesView() {
               {/* 1. Property Select */}
               <div className="lg:col-span-3">
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  1. Property
+                  1. Property / Account
                 </label>
                 <select
                   value={quickForm.propertyId}
                   onChange={(e) => handleQuickPropertyChange(e.target.value)}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
-                  <option value="">General Common (All Properties / Misc)</option>
-                  {properties.map(p => (
-                    <option key={p._id} value={p._id}>
-                      {p.name} {p.propertyCode ? `(${p.propertyCode})` : ''}
+                  <optgroup label="Properties (General Property Expenses)">
+                    {properties
+                      .filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'))
+                      .map(p => (
+                        <option key={p._id} value={p._id}>
+                          {p.name} {p.propertyCode ? `(${p.propertyCode})` : ''}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Other / Common Expenses">
+                    <option value="__OTHER_EXPENSES__">
+                      ★ Other Expenses (MOM, Zakat, Misc, Margaret...)
                     </option>
-                  ))}
+                  </optgroup>
                 </select>
               </div>
 
@@ -1904,15 +2055,17 @@ export default function ExpensesView() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <SearchableSelect
-                    label="Property"
-                    placeholder="General Common (All Properties / Misc)"
-                    searchPlaceholder="Search properties..."
+                    label="Property / Account"
+                    placeholder="Select Property or Other Expenses"
+                    searchPlaceholder="Search properties or other expenses..."
                     options={[
-                      { value: '', label: 'General Common (All Properties / Misc)' },
-                      ...properties.map((property) => ({
-                        value: property._id,
-                        label: `${property.name} ${property.propertyCode ? `(${property.propertyCode})` : ''}`
-                      }))
+                      ...properties
+                        .filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'))
+                        .map((property) => ({
+                          value: property._id,
+                          label: `${property.name} ${property.propertyCode ? `(${property.propertyCode})` : ''}`
+                        })),
+                      { value: '__OTHER_EXPENSES__', label: '★ Other Expenses (MOM, Zakat, Misc, Margaret...)' }
                     ]}
                     value={form.propertyId}
                     onChange={(propertyId) => handleModalPropertyChange(propertyId)}
