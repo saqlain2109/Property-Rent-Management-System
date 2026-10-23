@@ -1,13 +1,49 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import ApexToolbar from '../components/ApexToolbar';
+import { 
+  useResizableColumns, 
+  ResizeHandle, 
+  useFrozenColumns, 
+  getFrozenColumnStyle 
+} from '../components/ColumnManager';
+import { 
+  cycleThreeStateSort, 
+  evaluateFilterRule, 
+  sortDataRows 
+} from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
 import { 
-  Tag, Plus, Edit2, Trash2, CheckCircle2, Shield, 
-  Layers, RefreshCw, X, AlertCircle, Building2, HelpCircle
+  Tag, Plus, Edit2, Trash2, CheckCircle2, 
+  RefreshCw, X, AlertCircle, Building2,
+  ArrowUp, ArrowDown, ArrowUpDown
 } from 'lucide-react';
 
-export default function ExpenseHeadsMasterView() {
+const EXPENSE_HEADS_COLUMNS_DEF = [
+  { id: 'index', label: '#', defaultVisible: true },
+  { id: 'name', label: 'Expense Head Name', defaultVisible: true },
+  { id: 'headType', label: 'Head Scope / Classification', defaultVisible: true },
+  { id: 'usage', label: 'Logged Entries', defaultVisible: true },
+  { id: 'totalAmount', label: 'Total Spent (₹)', defaultVisible: true },
+  { id: 'isDefault', label: 'Status', defaultVisible: true },
+  { id: 'description', label: 'Description', defaultVisible: true },
+  { id: 'actions', label: 'Actions', defaultVisible: true },
+];
+
+const DEFAULT_HEADS_COLS = ['index', 'name', 'headType', 'usage', 'totalAmount', 'isDefault', 'actions'];
+
+const DEFAULT_COLUMN_WIDTHS = {
+  index: 55,
+  name: 240,
+  headType: 230,
+  usage: 140,
+  totalAmount: 150,
+  isDefault: 120,
+  description: 220,
+  actions: 110,
+};
+
+export default function ExpenseHeadsMasterView({ onDataChanged }) {
   const [categories, setCategories] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,10 +51,46 @@ export default function ExpenseHeadsMasterView() {
     return localStorage.getItem('expense_heads_active_tab') || 'all'; // 'all' | 'Property' | 'Common'
   });
 
-  // APEX Toolbar & Search States
+  // Save active tab in localStorage
+  useEffect(() => {
+    localStorage.setItem('expense_heads_active_tab', activeTab);
+  }, [activeTab]);
+
+  // APEX Toolbar & Table States
   const [search, setSearch] = useState('');
   const [rowsPerPage, setRowsPerPage] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Column Visibility with persistence
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('cols_expense_heads_master_v1');
+    if (saved) {
+      try {
+        const allowed = EXPENSE_HEADS_COLUMNS_DEF.map(c => c.id);
+        return JSON.parse(saved).filter(c => allowed.includes(c));
+      } catch (e) {}
+    }
+    return DEFAULT_HEADS_COLS;
+  });
+
+  // Column Resizing
+  const {
+    columnWidths,
+    handleResizeStart,
+    resetColumnWidths
+  } = useResizableColumns('expense_heads_master_v1', DEFAULT_COLUMN_WIDTHS);
+
+  // Frozen Columns
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('expense_heads_master_freeze_v1', 0);
+
+  // Sticky Header
+  const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+
+  // Sorting
+  const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+
+  // APEX Interactive Filters
+  const [activeFilters, setActiveFilters] = useState([]);
 
   // Modal State for Add / Edit
   const [showModal, setShowModal] = useState(false);
@@ -36,11 +108,6 @@ export default function ExpenseHeadsMasterView() {
   const [deleteError, setDeleteError] = useState('');
   const [deleting, setDeleting] = useState(false);
 
-  // Save active tab in localStorage
-  useEffect(() => {
-    localStorage.setItem('expense_heads_active_tab', activeTab);
-  }, [activeTab]);
-
   // Fetch Categories and Expenses to compute usage
   const fetchData = async () => {
     try {
@@ -56,6 +123,7 @@ export default function ExpenseHeadsMasterView() {
       if (expRes.data.success) {
         setExpenses(expRes.data.data);
       }
+      onDataChanged?.();
     } catch (err) {
       console.error('Failed to load expense categories:', err);
     } finally {
@@ -82,36 +150,87 @@ export default function ExpenseHeadsMasterView() {
     return map;
   }, [expenses]);
 
-  // Metric counts
+  // Counts
   const propertyHeadsCount = categories.filter(c => c.headType === 'Property').length;
   const commonHeadsCount = categories.filter(c => c.headType === 'Common').length;
-  const totalExpensesLogged = expenses.filter(e => !e.isReversed).length;
 
-  // Filter categories by activeTab and search
+  // Filter suggestions for APEX Filter builder
+  const filterSuggestions = useMemo(() => {
+    return {
+      name: categories.map(c => c.name),
+      headType: ['Property', 'Common'],
+      isDefault: ['System', 'Custom']
+    };
+  }, [categories]);
+
+  // Handle header sorting click
+  const handleHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
+
+  // Filter categories by activeTab, search, and activeFilters
   const filteredCategories = useMemo(() => {
     return categories.filter(cat => {
       if (activeTab === 'Property' && cat.headType !== 'Property') return false;
       if (activeTab === 'Common' && cat.headType !== 'Common') return false;
-      if (search) {
-        const q = search.toLowerCase();
+
+      const usage = usageMap[cat.name] || { count: 0, totalAmount: 0 };
+      const q = search.toLowerCase().trim();
+      if (q) {
         const matchName = cat.name?.toLowerCase().includes(q);
         const matchDesc = cat.description?.toLowerCase().includes(q);
         const matchType = cat.headType?.toLowerCase().includes(q);
-        if (!matchName && !matchDesc && !matchType) return false;
+        const matchUsage = String(usage.count).includes(q);
+        const matchAmount = String(usage.totalAmount).includes(q);
+        if (!matchName && !matchDesc && !matchType && !matchUsage && !matchAmount) return false;
       }
+
+      // APEX Filters
+      for (const f of activeFilters) {
+        let fieldVal = '';
+        if (f.columnId === 'name') fieldVal = cat.name || '';
+        else if (f.columnId === 'headType') fieldVal = cat.headType || 'Property';
+        else if (f.columnId === 'usage') fieldVal = String(usage.count || 0);
+        else if (f.columnId === 'totalAmount') fieldVal = String(usage.totalAmount || 0);
+        else if (f.columnId === 'isDefault') fieldVal = cat.isDefault ? 'System' : 'Custom';
+        else if (f.columnId === 'description') fieldVal = cat.description || '';
+
+        if (!evaluateFilterRule(fieldVal, f.operator, f.value)) return false;
+      }
+
       return true;
     });
-  }, [categories, activeTab, search]);
+  }, [categories, activeTab, search, activeFilters, usageMap]);
+
+  // Sort categories
+  const sortedCategories = useMemo(() => {
+    return sortDataRows(filteredCategories, sortConfig, {
+      index: (_, idx) => idx + 1,
+      name: c => (c.name || '').toLowerCase(),
+      headType: c => (c.headType || '').toLowerCase(),
+      usage: c => (usageMap[c.name]?.count || 0),
+      totalAmount: c => (usageMap[c.name]?.totalAmount || 0),
+      isDefault: c => (c.isDefault ? 1 : 0),
+      description: c => (c.description || '').toLowerCase()
+    });
+  }, [filteredCategories, sortConfig, usageMap]);
 
   // Pagination
-  const paginatedCategories = useMemo(() => {
-    if (rowsPerPage === 'All') return filteredCategories;
-    const size = Number(rowsPerPage);
-    const start = (currentPage - 1) * size;
-    return filteredCategories.slice(start, start + size);
-  }, [filteredCategories, rowsPerPage, currentPage]);
+  const totalItems = sortedCategories.length;
+  const isAllRows = rowsPerPage === 'All';
+  const effectivePageSize = isAllRows ? totalItems || 1 : Number(rowsPerPage);
+  const totalPages = Math.ceil(totalItems / effectivePageSize) || 1;
 
-  const totalPages = rowsPerPage === 'All' ? 1 : Math.ceil(filteredCategories.length / Number(rowsPerPage)) || 1;
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(1);
+  }, [totalPages, currentPage]);
+
+  const paginatedCategories = useMemo(() => {
+    if (isAllRows) return sortedCategories;
+    const startIndex = (currentPage - 1) * effectivePageSize;
+    return sortedCategories.slice(startIndex, startIndex + effectivePageSize);
+  }, [sortedCategories, isAllRows, currentPage, effectivePageSize]);
 
   // Open modal for Create
   const handleOpenCreate = () => {
@@ -198,20 +317,19 @@ export default function ExpenseHeadsMasterView() {
 
   // Export to Excel
   const handleExportExcel = () => {
-    const rows = filteredCategories.map((c, idx) => {
+    const rows = sortedCategories.map((c, idx) => {
       const usage = usageMap[c.name] || { count: 0, totalAmount: 0 };
       return {
         '#': idx + 1,
         'Expense Head Name': c.name,
-        'Head Type': c.headType === 'Common' ? 'Common / Other Expense' : 'Property Expense',
-        'Scope': c.headType === 'Common' 
-          ? 'Visible only for General Common / Other Expenses' 
-          : 'Visible only when a specific Property is selected',
-        'System Protected': c.isDefault ? 'Yes' : 'No',
-        'Times Used in Expenses': usage.count,
-        'Total Amount Spent (₹)': usage.totalAmount,
-        'Description': c.description || '—',
-        'Created Date': c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '—'
+        'Head Scope': c.headType === 'Common' ? 'Common / Other Expense' : 'Property Expense',
+        'Visible In': c.headType === 'Common' 
+          ? 'Other Expenses (MOM, Misc, Zakat...)' 
+          : 'Property / Common Building Maintenance',
+        'System Standard': c.isDefault ? 'Yes' : 'No',
+        'Entries Logged': usage.count,
+        'Total Spent (₹)': usage.totalAmount,
+        'Description': c.description || '—'
       };
     });
 
@@ -221,141 +339,121 @@ export default function ExpenseHeadsMasterView() {
     XLSX.writeFile(wb, `Expense_Heads_Master_${activeTab}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const columnsDef = [
-    { id: 'index', label: '#', defaultVisible: true },
-    { id: 'name', label: 'Expense Head Name', defaultVisible: true },
-    { id: 'headType', label: 'Head Type & Scope', defaultVisible: true },
-    { id: 'usage', label: 'Expenses Logged', defaultVisible: true },
-    { id: 'totalAmount', label: 'Total Spent', defaultVisible: true },
-    { id: 'isDefault', label: 'Status', defaultVisible: true },
-    { id: 'actions', label: 'Actions', defaultVisible: true },
-  ];
+  const getSortIcon = (colId) => {
+    if (sortConfig.key !== colId) return <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />;
+    return sortConfig.direction === 'asc' 
+      ? <ArrowUp className="w-3 h-3 text-emerald-600" /> 
+      : <ArrowDown className="w-3 h-3 text-emerald-600" />;
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Top Header Card */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
-              <Tag className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">Expense Heads Master</h1>
-              <p className="text-xs font-semibold text-slate-500">
-                Manage separated accounting heads for Property maintenance vs. Common / Other expenditures
-              </p>
-            </div>
+    <div className="space-y-4">
+      {/* Top Header Card with Quick Scope Filter & Add Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
+            <Tag className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Expense Heads Master</h2>
+            <p className="text-xs text-slate-500">
+              Manage separated accounting heads for Property maintenance vs. Common / Other expenditures
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Quick Scope Filter & Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {/* Quick Scope Tabs */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+            <button
+              type="button"
+              onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'all'
+                  ? 'bg-white text-emerald-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All ({categories.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setActiveTab('Property'); setCurrentPage(1); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'Property'
+                  ? 'bg-white text-emerald-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+              Property Heads ({propertyHeadsCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setActiveTab('Common'); setCurrentPage(1); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'Common'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Tag className="w-3.5 h-3.5 text-indigo-600" />
+              Common / Other ({commonHeadsCount})
+            </button>
+          </div>
+
+          {/* Refresh List */}
           <button
+            type="button"
             onClick={fetchData}
             disabled={loading}
-            className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shadow-2xs"
+            className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
             title="Refresh list"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
+
+          {/* Add Expense Head */}
           <button
+            type="button"
             onClick={handleOpenCreate}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            Add Expense Head
+            <span>Add Head</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Metric Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Expense Heads</p>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-black text-slate-900">{categories.length}</span>
-            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">All Heads</span>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-2xs bg-emerald-50/20">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Property Expense Heads</p>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-black text-emerald-800">{propertyHeadsCount}</span>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-full">Property-Only</span>
-          </div>
-          <p className="text-[10px] text-emerald-600 mt-1 font-medium">Visible only when a Property is selected</p>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 border border-indigo-100 shadow-2xs bg-indigo-50/20">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">Common / Other Heads</p>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-black text-indigo-900">{commonHeadsCount}</span>
-            <span className="text-xs font-bold text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-full">Common-Only</span>
-          </div>
-          <p className="text-[10px] text-indigo-600 mt-1 font-medium">MOM, Misc, Zakat, Sadka, Margaret, Other</p>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-2xs">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Expenses Logged</p>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-black text-slate-900">{totalExpensesLogged}</span>
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Records</span>
-          </div>
-          <p className="text-[10px] text-slate-500 mt-1 font-medium">Active entries mapped across all heads</p>
-        </div>
-      </div>
-
-      {/* Main Container */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* Navigation Tabs */}
-        <div className="flex flex-wrap items-center gap-2 p-4 border-b border-slate-200 bg-slate-50/50">
-          <button
-            onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'all'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            All Heads ({categories.length})
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('Property'); setCurrentPage(1); }}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'Property'
-                ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/20'
-                : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5" />
-            Property Expense Heads ({propertyHeadsCount})
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('Common'); setCurrentPage(1); }}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'Common'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20'
-                : 'bg-white text-indigo-800 hover:bg-indigo-50 border border-indigo-200'
-            }`}
-          >
-            <Tag className="w-3.5 h-3.5" />
-            Common / Other Expense Heads ({commonHeadsCount})
-          </button>
-        </div>
-
-        {/* APEX Toolbar */}
+      {/* Main Container with APEX Toolbar & Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* Oracle APEX-Style Interactive Toolbar */}
         <div className="p-4 border-b border-slate-100">
           <ApexToolbar
             search={search}
             onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
             rowsPerPage={rowsPerPage}
             onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
-            availableRowsOptions={[10, 25, 50, 'All']}
-            columns={columnsDef}
-            visibleColumns={columnsDef.map(c => c.id)}
+            availableRowsOptions={[10, 25, 50, 100, 'All']}
+            columns={EXPENSE_HEADS_COLUMNS_DEF}
+            defaultColumns={DEFAULT_HEADS_COLS}
+            visibleColumns={visibleColumns}
+            onChangeVisibleColumns={(cols) => {
+              setVisibleColumns(cols);
+              try { localStorage.setItem('cols_expense_heads_master_v1', JSON.stringify(cols)); } catch(e){}
+            }}
+            columnWidths={columnWidths}
+            onResetWidths={resetColumnWidths}
+            sortConfig={sortConfig}
+            onSortChange={setSortConfig}
+            isHeaderSticky={isHeaderSticky}
+            onToggleHeaderSticky={setIsHeaderSticky}
+            frozenColumnCount={frozenColumnCount}
+            onFrozenColumnCountChange={setFrozenColumnCount}
+            filters={activeFilters}
+            onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
+            filterSuggestions={filterSuggestions}
             onExport={handleExportExcel}
             storageKey={`expense_heads_master_${activeTab}`}
           />
@@ -365,27 +463,122 @@ export default function ExpenseHeadsMasterView() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-100/90 text-[11px] font-extrabold text-slate-700 border-b border-slate-200">
-                <th className="py-3 px-4 w-12 text-center">#</th>
-                <th className="py-3 px-4">Expense Head Name</th>
-                <th className="py-3 px-4">Head Scope / Classification</th>
-                <th className="py-3 px-4 text-center">Logged Entries</th>
-                <th className="py-3 px-4 text-right">Total Spent</th>
-                <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+              <tr className="bg-slate-50/90 text-[11px] font-extrabold text-slate-700 border-b border-slate-200">
+                {visibleColumns.includes('index') && (
+                  <th 
+                    style={{ ...getFrozenColumnStyle(0, frozenColumnCount, columnWidths, 'index', visibleColumns), width: `${columnWidths.index || 55}px` }} 
+                    className="py-3 px-3 text-center relative group select-none border-r border-slate-200/60"
+                  >
+                    #
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'index')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('name') && (
+                  <th 
+                    onClick={() => handleHeaderSort('name')}
+                    style={{ ...getFrozenColumnStyle(1, frozenColumnCount, columnWidths, 'name', visibleColumns), width: `${columnWidths.name || 240}px` }} 
+                    className="py-3 px-4 relative group select-none cursor-pointer hover:bg-slate-100 transition-colors border-r border-slate-200/60"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Expense Head Name</span>
+                      {getSortIcon('name')}
+                    </div>
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'name')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('headType') && (
+                  <th 
+                    onClick={() => handleHeaderSort('headType')}
+                    style={{ ...getFrozenColumnStyle(2, frozenColumnCount, columnWidths, 'headType', visibleColumns), width: `${columnWidths.headType || 230}px` }} 
+                    className="py-3 px-4 relative group select-none cursor-pointer hover:bg-slate-100 transition-colors border-r border-slate-200/60"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Head Scope / Classification</span>
+                      {getSortIcon('headType')}
+                    </div>
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'headType')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('usage') && (
+                  <th 
+                    onClick={() => handleHeaderSort('usage')}
+                    style={{ ...getFrozenColumnStyle(3, frozenColumnCount, columnWidths, 'usage', visibleColumns), width: `${columnWidths.usage || 140}px` }} 
+                    className="py-3 px-4 text-center relative group select-none cursor-pointer hover:bg-slate-100 transition-colors border-r border-slate-200/60"
+                  >
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span>Logged Entries</span>
+                      {getSortIcon('usage')}
+                    </div>
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'usage')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('totalAmount') && (
+                  <th 
+                    onClick={() => handleHeaderSort('totalAmount')}
+                    style={{ ...getFrozenColumnStyle(4, frozenColumnCount, columnWidths, 'totalAmount', visibleColumns), width: `${columnWidths.totalAmount || 150}px` }} 
+                    className="py-3 px-4 text-right relative group select-none cursor-pointer hover:bg-slate-100 transition-colors border-r border-slate-200/60"
+                  >
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>Total Spent</span>
+                      {getSortIcon('totalAmount')}
+                    </div>
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'totalAmount')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('isDefault') && (
+                  <th 
+                    onClick={() => handleHeaderSort('isDefault')}
+                    style={{ ...getFrozenColumnStyle(5, frozenColumnCount, columnWidths, 'isDefault', visibleColumns), width: `${columnWidths.isDefault || 120}px` }} 
+                    className="py-3 px-4 text-center relative group select-none cursor-pointer hover:bg-slate-100 transition-colors border-r border-slate-200/60"
+                  >
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span>Status</span>
+                      {getSortIcon('isDefault')}
+                    </div>
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'isDefault')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('description') && (
+                  <th 
+                    onClick={() => handleHeaderSort('description')}
+                    style={{ ...getFrozenColumnStyle(6, frozenColumnCount, columnWidths, 'description', visibleColumns), width: `${columnWidths.description || 220}px` }} 
+                    className="py-3 px-4 relative group select-none cursor-pointer hover:bg-slate-100 transition-colors border-r border-slate-200/60"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Description</span>
+                      {getSortIcon('description')}
+                    </div>
+                    <ResizeHandle onResizeStart={(e) => handleResizeStart(e, 'description')} />
+                  </th>
+                )}
+
+                {visibleColumns.includes('actions') && (
+                  <th 
+                    style={{ width: `${columnWidths.actions || 110}px` }} 
+                    className="py-3 px-4 text-right select-none"
+                  >
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
+            <tbody className="divide-y divide-slate-100 text-xs font-medium">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-400">
+                  <td colSpan={visibleColumns.length || 7} className="text-center py-12 text-slate-400">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto text-emerald-500 mb-2" />
                     Loading expense heads...
                   </td>
                 </tr>
               ) : paginatedCategories.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-400">
+                  <td colSpan={visibleColumns.length || 7} className="text-center py-12 text-slate-400">
                     <Tag className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                     No expense heads found matching criteria.
                   </td>
@@ -398,70 +591,118 @@ export default function ExpenseHeadsMasterView() {
 
                   return (
                     <tr key={cat._id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4 text-center font-bold text-slate-400">{globalIdx}</td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
-                          {cat.name}
-                          {cat.isDefault && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-                              System
+                      {visibleColumns.includes('index') && (
+                        <td 
+                          style={getFrozenColumnStyle(0, frozenColumnCount, columnWidths, 'index', visibleColumns)} 
+                          className="py-3.5 px-3 text-center font-bold text-slate-400 border-r border-slate-100"
+                        >
+                          {globalIdx}
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('name') && (
+                        <td 
+                          style={getFrozenColumnStyle(1, frozenColumnCount, columnWidths, 'name', visibleColumns)} 
+                          className="py-3.5 px-4 border-r border-slate-100"
+                        >
+                          <div className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                            {cat.name}
+                            {cat.isDefault && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                                Standard
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('headType') && (
+                        <td 
+                          style={getFrozenColumnStyle(2, frozenColumnCount, columnWidths, 'headType', visibleColumns)} 
+                          className="py-3.5 px-4 border-r border-slate-100"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] ${
+                              isCommon 
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/60' 
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                            }`}>
+                              {isCommon ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                              {isCommon ? 'Common / Other Expense' : 'Property Expense'}
                             </span>
-                          )}
-                        </div>
-                        {cat.description && (
-                          <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{cat.description}</p>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] ${
-                            isCommon 
-                              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/60' 
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                            {isCommon 
+                              ? 'Visible only for Other Expenses (MOM, Misc, Zakat...)' 
+                              : 'Visible for Properties & Common Property maintenance'}
+                          </p>
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('usage') && (
+                        <td 
+                          style={getFrozenColumnStyle(3, frozenColumnCount, columnWidths, 'usage', visibleColumns)} 
+                          className="py-3.5 px-4 text-center font-bold border-r border-slate-100"
+                        >
+                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs ${
+                            usage.count > 0 ? 'bg-slate-100 text-slate-800' : 'text-slate-400'
                           }`}>
-                            {isCommon ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
-                            {isCommon ? 'Common / Other Expense' : 'Property Expense'}
+                            {usage.count} {usage.count === 1 ? 'entry' : 'entries'}
                           </span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-1 font-medium">
-                          {isCommon 
-                            ? 'Shown ONLY for General Common / Other Expenses' 
-                            : 'Shown ONLY when a Property is selected'}
-                        </p>
-                      </td>
-                      <td className="py-3.5 px-4 text-center font-bold">
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs ${
-                          usage.count > 0 ? 'bg-slate-100 text-slate-800' : 'text-slate-400'
-                        }`}>
-                          {usage.count} {usage.count === 1 ? 'entry' : 'entries'}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-extrabold text-slate-900">
-                        {usage.totalAmount > 0 ? `₹${usage.totalAmount.toLocaleString('en-IN')}` : '₹0'}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
-                          <CheckCircle2 className="w-3 h-3" /> Active
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleOpenEdit(cat)}
-                            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-                            title="Edit head"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => { setDeletingCategory(cat); setDeleteError(''); }}
-                            className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors"
-                            title="Delete head"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('totalAmount') && (
+                        <td 
+                          style={getFrozenColumnStyle(4, frozenColumnCount, columnWidths, 'totalAmount', visibleColumns)} 
+                          className="py-3.5 px-4 text-right font-extrabold text-slate-900 border-r border-slate-100 font-mono"
+                        >
+                          {usage.totalAmount > 0 ? `₹${usage.totalAmount.toLocaleString('en-IN')}` : '₹0'}
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('isDefault') && (
+                        <td 
+                          style={getFrozenColumnStyle(5, frozenColumnCount, columnWidths, 'isDefault', visibleColumns)} 
+                          className="py-3.5 px-4 text-center border-r border-slate-100"
+                        >
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
+                            <CheckCircle2 className="w-3 h-3" /> Active
+                          </span>
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('description') && (
+                        <td 
+                          style={getFrozenColumnStyle(6, frozenColumnCount, columnWidths, 'description', visibleColumns)} 
+                          className="py-3.5 px-4 text-slate-500 border-r border-slate-100 text-[11px]"
+                        >
+                          {cat.description || <span className="text-slate-300 italic">—</span>}
+                        </td>
+                      )}
+
+                      {visibleColumns.includes('actions') && (
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(cat)}
+                              className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer"
+                              title="Edit head"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setDeletingCategory(cat); setDeleteError(''); }}
+                              className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Delete head"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -473,20 +714,22 @@ export default function ExpenseHeadsMasterView() {
         {/* Pagination Footer */}
         {rowsPerPage !== 'All' && totalPages > 1 && (
           <div className="flex items-center justify-between p-4 border-t border-slate-100 text-xs text-slate-500">
-            <span>Showing {paginatedCategories.length} of {filteredCategories.length} heads</span>
+            <span>Showing {paginatedCategories.length} of {sortedCategories.length} heads</span>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40 cursor-pointer"
               >
                 Previous
               </button>
               <span className="font-bold text-slate-700">Page {currentPage} of {totalPages}</span>
               <button
+                type="button"
                 disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40 cursor-pointer"
               >
                 Next
               </button>
@@ -509,8 +752,9 @@ export default function ExpenseHeadsMasterView() {
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -601,14 +845,14 @@ export default function ExpenseHeadsMasterView() {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 shadow-md shadow-emerald-600/20"
+                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 shadow-md shadow-emerald-600/20 cursor-pointer"
                 >
                   {submitting ? 'Saving...' : editingCategory ? 'Save Changes' : 'Create Expense Head'}
                 </button>
@@ -639,15 +883,17 @@ export default function ExpenseHeadsMasterView() {
 
             <div className="flex items-center justify-center gap-3">
               <button
+                type="button"
                 onClick={() => setDeletingCategory(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleConfirmDelete}
                 disabled={deleting}
-                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-md shadow-rose-600/20"
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-md shadow-rose-600/20 cursor-pointer"
               >
                 {deleting ? 'Deleting...' : 'Yes, Delete'}
               </button>

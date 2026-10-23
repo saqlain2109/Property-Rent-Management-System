@@ -6,6 +6,8 @@ import {
 import gsap from 'gsap';
 
 export default function FloatingChatbot() {
+  // Temporarily hidden as requested
+  return null;
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);

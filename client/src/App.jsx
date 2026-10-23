@@ -180,8 +180,8 @@ export default function App() {
         </div>
       </main>
 
-      {/* Intelligent Floating Assistant Bot in Bottom-Left Corner */}
-      <FloatingChatbot />
+      {/* Intelligent Floating Assistant Bot (Temporarily Hidden) */}
+      {/* <FloatingChatbot /> */}
     </div>
   );
 }
