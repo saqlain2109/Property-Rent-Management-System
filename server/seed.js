@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const User = require('./models/User');
 const { syncAll } = require('./scripts/syncAll5Sheets');
+const { importHistorical } = require('./scripts/importHistorical2024_2025');
 
 dotenv.config();
 
@@ -42,6 +43,10 @@ async function runSeed() {
     // 2. Execute full sync of 11 properties, 22 sub-units, 21 contracts, and receipts from the 5 sheets
     console.log('[Seed] Running canonical 5-sheet sync...');
     await syncAll();
+
+    // 3. Import 12-month historical statements (2024-03 to 2025-02) and reconcile ledgers
+    console.log('[Seed] Importing 2024-2025 historical rent & expenses statement...');
+    await importHistorical();
 
     console.log('[Seed] Database initialization and migration completed successfully!');
     process.exit(0);

@@ -54,11 +54,13 @@ async function syncMonthlyLedgers() {
     currentMonthYear
   ]);
   const sortedDistinct = Array.from(allMonthsSet).filter(Boolean).sort();
+  const earliestMonth = sortedDistinct[0];
+  const startMonth = earliestMonth < '2026-01' ? earliestMonth : BASELINE_START_MONTH;
   const maxMonth = sortedDistinct[sortedDistinct.length - 1];
 
-  // 4. Generate continuous sequence of months from BASELINE_START_MONTH to maxMonth
+  // 4. Generate continuous sequence of months from startMonth to maxMonth
   const months = [];
-  let [curY, curM] = BASELINE_START_MONTH.split('-').map(Number);
+  let [curY, curM] = startMonth.split('-').map(Number);
   const [maxY, maxM] = maxMonth.split('-').map(Number);
 
   while (curY < maxY || (curY === maxY && curM <= maxM)) {
@@ -71,10 +73,17 @@ async function syncMonthlyLedgers() {
   }
 
   // 5. Carry forward balances sequentially
-  let runningBalance = BASELINE_OPENING_BALANCE;
+  // Historical baseline for 2024-03 is 5,305,950; Jan 2026 baseline is 5,643,188.74
+  let runningBalance = startMonth === '2024-03' ? 5305950 : BASELINE_OPENING_BALANCE;
   const ledgerReport = [];
 
   for (const m of months) {
+    if (m === '2024-03') {
+      runningBalance = 5305950;
+    } else if (m === '2026-01') {
+      runningBalance = BASELINE_OPENING_BALANCE; // 5,643,188.74
+    }
+
     const inc = receiptMap[m] || 0;
     const exp = expenseMap[m] || 0;
     const net = inc - exp;

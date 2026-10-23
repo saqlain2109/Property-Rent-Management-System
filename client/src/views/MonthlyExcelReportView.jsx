@@ -1,22 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import MonthlyBatchEntryModal from '../components/MonthlyBatchEntryModal';
 import {
   FileSpreadsheet, Download, ChevronLeft, ChevronRight, Calendar,
   TrendingUp, TrendingDown, DollarSign, AlertCircle, CheckCircle2,
-  Building2, Layers, Users, RefreshCw
+  Building2, Layers, Users, RefreshCw, Sparkles
 } from 'lucide-react';
 
-export default function MonthlyExcelReportView() {
-  const getCurrentMonth = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
+const PRESET_MONTHS = [
+  '2024-03', '2024-04', '2024-05', '2024-06',
+  '2024-07', '2024-08', '2024-09', '2024-10',
+  '2024-11', '2024-12', '2025-01', '2025-02',
+  '2025-03', '2026-01', '2026-02', '2026-03'
+];
 
-  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
+export default function MonthlyExcelReportView() {
+  const [selectedMonth, setSelectedMonth] = useState('2024-03');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
 
   const fetchReport = async (month) => {
     try {
@@ -85,6 +89,23 @@ export default function MonthlyExcelReportView() {
 
         {/* Controls: Month Switcher & Excel Download */}
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Quick Month Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+            <Calendar className="w-4 h-4 text-slate-500" />
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              {PRESET_MONTHS.map(m => (
+                <option key={m} value={m}>
+                  {formatMonthYear(m)} ({m})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Stepper Month Picker */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl">
             <button
               onClick={() => changeMonth(-1)}
@@ -97,7 +118,7 @@ export default function MonthlyExcelReportView() {
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-800 px-2.5 py-1 focus:outline-none cursor-pointer"
+              className="bg-transparent text-xs font-bold text-slate-800 px-2 py-1 focus:outline-none cursor-pointer"
             />
             <button
               onClick={() => changeMonth(1)}
@@ -107,6 +128,16 @@ export default function MonthlyExcelReportView() {
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+
+          {/* Enter / Edit Month Data Button */}
+          <button
+            onClick={() => setIsBatchModalOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-teal-600/20 active:scale-95"
+            title="Enter or edit rent and expenses for this month"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Enter / Edit Month Data</span>
+          </button>
 
           <button
             onClick={() => fetchReport(selectedMonth)}
@@ -323,6 +354,14 @@ export default function MonthlyExcelReportView() {
           </div>
         </div>
       )}
+
+      {/* Monthly Batch Data Entry Modal */}
+      <MonthlyBatchEntryModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        initialMonth={selectedMonth}
+        onDataSaved={() => fetchReport(selectedMonth)}
+      />
     </div>
   );
 }

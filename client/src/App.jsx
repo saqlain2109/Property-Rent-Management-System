@@ -11,22 +11,14 @@ import ContractsView from './views/ContractsView';
 import PGView from './views/PGView';
 import PaymentsView from './views/PaymentsView';
 import ExpensesView from './views/ExpensesView';
-import ExpenseHeadsMasterView from './views/ExpenseHeadsMasterView';
 import LedgerReportsView from './views/LedgerReportsView';
+import MonthWiseReportView from './views/MonthWiseReportView';
 import API from './services/api';
 import { Menu, Building2 } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [currentTab, setCurrentTab] = useState(() => {
-    return localStorage.getItem('property_mgmt_active_tab') || 'dashboard';
-  });
-
-  useEffect(() => {
-    if (currentTab) {
-      localStorage.setItem('property_mgmt_active_tab', currentTab);
-    }
-  }, [currentTab]);
+  const [currentTab, setCurrentTab] = useState('dashboard');
   const [isInitialized, setIsInitialized] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -130,7 +122,7 @@ export default function App() {
             </div>
           </div>
           <span className="text-[11px] font-bold text-teal-400 capitalize px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700">
-            {currentTab.replace('_', ' ')}
+            {currentTab.replace(/_/g, ' ')}
           </span>
         </div>
 
@@ -169,19 +161,18 @@ export default function App() {
 
           {currentTab === 'expenses' && <ExpensesView />}
 
-          {currentTab === 'expense_heads' && <ExpenseHeadsMasterView />}
+          {currentTab === 'ledger_reports' && (
+            <LedgerReportsView />
+          )}
 
-          {(currentTab === 'ledger_reports' || currentTab.startsWith('reports_')) && (
-            <LedgerReportsView 
-              activeReportId={currentTab} 
-              onSelectReport={(reportTab) => setCurrentTab(reportTab)}
-            />
+          {(currentTab === 'month_wise_report' || currentTab === 'monthly') && (
+            <MonthWiseReportView />
           )}
         </div>
       </main>
 
-      {/* Intelligent Floating Assistant Bot (Temporarily Hidden) */}
-      {/* <FloatingChatbot /> */}
+      {/* Intelligent Floating Assistant Bot in Bottom-Left Corner */}
+      <FloatingChatbot />
     </div>
   );
 }

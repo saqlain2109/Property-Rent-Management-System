@@ -5,5 +5,6 @@ dist/
 .DS_Store
 *.log
 scratch/
+/data/
 reference_files/docx_extracted/
 reference_files/docx_master_dev/

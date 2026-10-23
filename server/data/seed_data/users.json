@@ -1,0 +1,17 @@
+[
+  {
+    "_id": "6ada066dd7c483f46dca036f",
+    "name": "Administrator",
+    "username": "admin",
+    "email": "admin@propertyrent.com",
+    "phone": "",
+    "password": "$2b$10$jiXhQgglGdsPzuetb9sT3eeiXhs5OAaA1fjU.y56ca.5mTKSZ2hHO",
+    "role": "admin",
+    "isActive": true,
+    "twoFactorEnabled": false,
+    "createdAt": "2026-10-22T12:49:49.289Z",
+    "updatedAt": "2026-10-23T11:21:19.350Z",
+    "__v": 0,
+    "lastLogin": "2026-10-23T11:21:19.349Z"
+  }
+]
