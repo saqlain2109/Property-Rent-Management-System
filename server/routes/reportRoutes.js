@@ -708,13 +708,34 @@ router.get('/export-property-account-summary-excel', protect, async (req, res) =
   }
 });
 
+// Unit code map for Sheet 1 units to MongoDB units
+const MATRIX_UNIT_CODE_MAP = {
+  'Kotak Godaown__a) Tenant No.1   - PG': 'KO-PG',
+  'Kotak Godaown__bisleri': 'KO-SMALL',
+  '65 no godown__a) Tenant 1 : Mahendra Bhai': '65-LARGE',
+  '65 no godown__b) Tenant 2 (Alka Industry)': '65-SMALL',
+  'Baranker room__Uttam': 'BAR-1ST',
+  'Baranker room__Attic-ANJANA ashok salunke': 'BAR-MEZZ',
+  'Garage__Tenant No1.Snip': 'GA-SHOP1',
+  'Garage__DG Cable': 'GA-SHOP2',
+  'Garage__Anand': 'GA-GODOWN',
+  'Garage__2nd Floor House Altaf': 'GA-CHIRA',
+  'Ennas Room__Bengali': 'ENNAS-RM',
+  'Mani mansion__Aswini Derad Monga': 'MANI-RM1',
+  'Goa Flat__a) Flat no 1': 'GOA-FLAT1',
+  'Goa Flat__b) Flat No.2.': 'GOA-FLAT2',
+  'Tonys room__DG/asgar': 'TONY-RM1',
+  'Tonys room__Hajra': 'TONY-RM2',
+  'Buyculla Club__First Floor Amir Kids': 'BY-1ST',
+  'Buyculla Club__Attic Romel': 'BY-MEZZ',
+  'Kandivili__Flat No 2108': 'KAND-2108',
+  'Kandivili__Flat No 2109': 'KAND-2109'
+};
+
 // Helper to generate Master Sheet 1 Report Data (3-Part Statement)
 async function generateSheet1ReportData({ period, year, viewMode = 'received', propertyId, startMonth, endMonth }) {
   let months = [];
   let periodLabel = '';
-  let isSheet1Period = false;
-
-  const sheet1MonthsAll = ['2025-03','2025-04','2025-05','2025-06','2025-07','2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02'];
 
   if (startMonth && endMonth) {
     months = [];
@@ -722,7 +743,7 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     let [ey, em] = endMonth.split('-').map(Number);
     let curDate = new Date(sy, sm - 1, 1);
     const targetDate = new Date(ey, em - 1, 1);
-    while (curDate <= targetDate && months.length < 36) {
+    while (curDate <= targetDate && months.length < 48) {
       const yStr = curDate.getFullYear();
       const mStr = String(curDate.getMonth() + 1).padStart(2, '0');
       months.push(`${yStr}-${mStr}`);
@@ -737,9 +758,6 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     const lastDate = new Date(lastY, lastM - 1, 1);
     periodLabel = `${firstDate.toLocaleString('en-US', { month: 'short' })} ${firstY} – ${lastDate.toLocaleString('en-US', { month: 'short' })} ${lastY}`;
     period = `${startMonth}_${endMonth}`;
-    if (months.every(m => sheet1MonthsAll.includes(m))) {
-      isSheet1Period = true;
-    }
   } else if (period === 'CY2026' || year === 2026) {
     period = 'CY2026';
     periodLabel = 'Calendar Year 2026 (Jan 2026 – Dec 2026)';
@@ -756,7 +774,6 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     period = '2025-03_2026-02';
     periodLabel = 'Master Sheet 1 Year (Mar 2025 – Feb 2026)';
     months = ['2025-03','2025-04','2025-05','2025-06','2025-07','2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02'];
-    isSheet1Period = true;
   }
 
   const monthObjects = months.map((k, i) => {
@@ -772,11 +789,17 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     };
   });
 
+  // Fetch DB units to map unitCode -> ObjectId
+  const dbUnits = await Unit.find().populate('propertyId').lean();
+  const codeToId = {};
+  dbUnits.forEach(u => { if (u.unitCode) codeToId[u.unitCode] = String(u._id); });
+
+  // Fetch PaymentAllocations from MongoDB (excluding reversed receipts)
   const reversedReceipts = (await PaymentReceipt.find({ isReversed: true }).select('_id')).map(r => r._id);
   const dbAllocations = await PaymentAllocation.find({
     receiptId: { $nin: reversedReceipts },
     rentMonthYear: { $in: months }
-  }).populate('unitId').lean();
+  }).lean();
 
   const allocByUnitAndMonth = {};
   for (const a of dbAllocations) {
@@ -785,302 +808,153 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     allocByUnitAndMonth[k] = (allocByUnitAndMonth[k] || 0) + (a.allocatedAmount || 0);
   }
 
+  // Fetch DB Expenses
   const dbExpenses = await Expense.find({
     isReversed: { $ne: true }
   }).populate('propertyId').lean();
 
-  if (isSheet1Period) {
-    let baselineData;
-    try {
-      baselineData = JSON.parse(JSON.stringify(require('../data/sheet1_baseline.json')));
-    } catch (e) {
-      baselineData = null;
-    }
-
-    let rentGroups = baselineData?.rentGroups || [];
-    let expenseGroups = baselineData?.expenseGroups || [];
-    let rentTotals = baselineData?.rentTotals || {};
-    let depositReceived = baselineData?.depositReceived || {};
-    let loanReceived = baselineData?.loanReceived || {};
-    let totalIncome = baselineData?.totalIncome || {};
-    let totalExpenses = baselineData?.totalExpenses || {};
-    let reconciliation = baselineData?.reconciliation || {};
-
-    // Recalculate rent totals
-    months.forEach(m => {
-      let mRent = 0;
-      rentGroups.forEach(grp => {
-        let grpSum = 0;
-        grp.units.forEach(u => {
-          grpSum += (u.months[m] || 0);
-        });
-        grp.propertyTotals = grp.propertyTotals || {};
-        grp.propertyTotals[m] = grpSum;
-        mRent += grpSum;
-      });
-      rentTotals[m] = mRent;
-      depositReceived[m] = depositReceived[m] || 0;
-      loanReceived[m] = loanReceived[m] || 0;
-      totalIncome[m] = mRent + (depositReceived[m] || 0) + (loanReceived[m] || 0);
-
-      let mExp = 0;
-      expenseGroups.forEach(grp => {
-        let grpSum = 0;
-        grp.heads.forEach(h => {
-          grpSum += (h.months[m] || 0);
-        });
-        grp.groupTotals = grp.groupTotals || {};
-        grp.groupTotals[m] = grpSum;
-        mExp += grpSum;
-      });
-      totalExpenses[m] = mExp;
-    });
-
-    rentGroups.forEach(grp => {
-      let gTotal = 0;
-      grp.units.forEach(u => {
-        u.total = months.reduce((s, m) => s + (u.months[m] || 0), 0);
-        gTotal += u.total;
-      });
-      grp.propertyTotal = gTotal;
-    });
-
-    expenseGroups.forEach(grp => {
-      let gTotal = 0;
-      grp.heads.forEach(h => {
-        h.total = months.reduce((s, m) => s + (h.months[m] || 0), 0);
-        gTotal += h.total;
-      });
-      grp.groupTotal = gTotal;
-    });
-
-    const diff = {};
-    const balPrev = {};
-    const minAdj = reconciliation.adjustments || {};
-    const totBal = {};
-
-    let runningBalance = 3843345; // Baseline opening balance for 2025-03 from Sheet 1
-    months.forEach((m) => {
-      const d = totalIncome[m] - totalExpenses[m];
-      diff[m] = d;
-      balPrev[m] = runningBalance;
-      const adj = minAdj[m] || 0;
-      const endBal = runningBalance + d + adj;
-      totBal[m] = endBal;
-      runningBalance = endBal;
-    });
-
-    reconciliation = {
-      difference: diff,
-      balancePreviousMonth: balPrev,
-      adjustments: minAdj,
-      totalBalance: totBal
-    };
-
-    if (propertyId) {
-      const propDoc = await Property.findById(propertyId).lean();
-      if (propDoc) {
-        rentGroups = rentGroups.filter(g => 
-          g.propertyName.toLowerCase().includes(propDoc.name.toLowerCase()) || 
-          propDoc.name.toLowerCase().includes(g.propertyName.toLowerCase())
-        );
-        expenseGroups = expenseGroups.filter(g => 
-          g.groupName.toLowerCase().includes(propDoc.name.toLowerCase()) || 
-          propDoc.name.toLowerCase().includes(g.groupName.toLowerCase())
-        );
-      }
-    }
-
-    return {
-      period,
-      periodLabel,
-      isSheet1Period: true,
-      months: monthObjects,
-      rentPart: {
-        rentGroups,
-        rentTotals,
-        depositReceived,
-        loanReceived,
-        totalIncome
-      },
-      expensePart: {
-        expenseGroups,
-        totalExpenses
-      },
-      reconciliationPart: reconciliation
-    };
+  // Load canonical Sheet 1 structure
+  let baselineData;
+  try {
+    baselineData = JSON.parse(JSON.stringify(require('../data/sheet1_baseline.json')));
+  } catch (e) {
+    baselineData = { rentGroups: [], expenseGroups: [], depositReceived: {}, loanReceived: {}, reconciliation: {} };
   }
 
-  // ELSE: Build dynamically from MongoDB
-  const propQuery = { isDeleted: { $ne: true } };
-  if (propertyId) {
-    propQuery._id = propertyId;
-  } else {
-    propQuery.propertyType = { $ne: 'General / Common' };
-  }
+  let rentGroups = baselineData?.rentGroups || [];
+  let expenseGroups = baselineData?.expenseGroups || [];
+  let depositReceived = baselineData?.depositReceived || {};
+  let loanReceived = baselineData?.loanReceived || {};
 
-  const properties = await Property.find(propQuery).sort({ displayOrder: 1, propertyCode: 1 }).lean();
-  const propertyIds = properties.map(p => p._id);
-  const units = await Unit.find({ propertyId: { $in: propertyIds } }).sort({ unitName: 1 }).lean();
-  const assignments = await TenantAssignment.find({ unitId: { $in: units.map(u => u._id) } }).populate('tenantId').sort({ startDate: -1 }).lean();
-
-  const rentGroups = [];
+  // Part 1: Rent Groups and Units
   const rentTotals = {};
-  const depositReceived = {};
-  const loanReceived = {};
   const totalIncome = {};
   months.forEach(m => {
     rentTotals[m] = 0;
-    depositReceived[m] = 0;
-    loanReceived[m] = 0;
     totalIncome[m] = 0;
   });
 
-  for (let pIdx = 0; pIdx < properties.length; pIdx++) {
-    const prop = properties[pIdx];
-    const pUnits = units.filter(u => String(u.propertyId) === String(prop._id));
-    const unitRows = [];
-    const pTotals = {};
-    months.forEach(m => { pTotals[m] = 0; });
-    let pGrandTotal = 0;
-
-    for (const u of pUnits) {
-      const uAssigns = assignments.filter(a => String(a.unitId) === String(u._id));
-      const activeAssign = uAssigns.find(a => a.status === 'Active') || uAssigns[0];
-      const uMonths = {};
-      let uTotal = 0;
+  for (const grp of rentGroups) {
+    grp.propertyTotals = {};
+    for (const u of grp.units) {
+      u.months = u.months || {};
+      const mapKey = `${grp.propertyName}__${u.label}`;
+      const uCode = MATRIX_UNIT_CODE_MAP[mapKey];
+      const uId = uCode ? codeToId[uCode] : null;
 
       for (const m of months) {
-        let val = 0;
-        if (viewMode === 'expected') {
-          let exp = 0;
-          if (activeAssign) {
-            exp = await getEffectiveRentForMonth(u._id, activeAssign.tenantId?._id, m, activeAssign);
-          }
-          val = exp || u.monthlyRentExpected || 0;
-        } else {
-          val = allocByUnitAndMonth[`${u._id}_${m}`] || 0;
+        if (u.months[m] === undefined || u.months[m] === null) {
+          u.months[m] = uId ? (allocByUnitAndMonth[`${uId}_${m}`] || 0) : 0;
+        } else if (u.months[m] === 0 && uId && allocByUnitAndMonth[`${uId}_${m}`]) {
+          u.months[m] = allocByUnitAndMonth[`${uId}_${m}`];
         }
-        uMonths[m] = val;
-        uTotal += val;
-        pTotals[m] += val;
-        rentTotals[m] += val;
       }
-
-      pGrandTotal += uTotal;
-      unitRows.push({
-        partitionCode: u.unitCode || '',
-        label: `${u.subUnitPartition || u.unitName} (${activeAssign?.tenantId?.name || 'Vacant'})`,
-        unitId: u._id,
-        months: uMonths,
-        total: uTotal
-      });
+      u.total = months.reduce((s, m) => s + (u.months[m] || 0), 0);
     }
 
-    rentGroups.push({
-      order: pIdx + 1,
-      propertyName: prop.name,
-      propertyTotals: pTotals,
-      propertyTotal: pGrandTotal,
-      units: unitRows
-    });
+    for (const m of months) {
+      const gSum = grp.units.reduce((s, u) => s + (u.months[m] || 0), 0);
+      grp.propertyTotals[m] = gSum;
+      rentTotals[m] += gSum;
+    }
+    grp.propertyTotal = months.reduce((s, m) => s + (grp.propertyTotals[m] || 0), 0);
   }
 
-  // Dynamic Expenses Part
-  const expenseGroups = [];
+  months.forEach(m => {
+    totalIncome[m] = rentTotals[m] + (depositReceived[m] || 0) + (loanReceived[m] || 0);
+  });
+
+  // Part 2: Expense Groups and Heads
   const totalExpenses = {};
   months.forEach(m => { totalExpenses[m] = 0; });
 
-  properties.forEach((prop, idx) => {
-    const heads = ['Electricity', 'Maintainance', 'Rent', 'Other expenses'].map(head => {
-      const hMonths = {};
-      let hTotal = 0;
-      months.forEach(m => {
-        const matchingExp = dbExpenses.filter(e => {
-          const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
-          if (expM !== m) return false;
-          if (String(e.propertyId?._id || e.propertyId) !== String(prop._id)) return false;
-          return (e.category || '').toLowerCase().includes(head.toLowerCase());
-        });
-        const sum = matchingExp.reduce((s, e) => s + (e.amount || 0), 0);
-        hMonths[m] = sum;
-        hTotal += sum;
-        totalExpenses[m] += sum;
-      });
-      return { headName: head, months: hMonths, total: hTotal };
-    });
+  for (const grp of expenseGroups) {
+    grp.groupTotals = {};
+    for (const h of grp.heads) {
+      h.months = h.months || {};
+      for (const m of months) {
+        if (h.months[m] === undefined || h.months[m] === null) {
+          const matching = dbExpenses.filter(e => {
+            const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
+            if (expM !== m) return false;
+            const pName = e.propertyId?.name || '';
+            const isCommon = e.propertyId?.propertyType === 'General / Common' || e.propertyId?.propertyCode === 'PROP-COMMON';
+            if (grp.groupName === 'Other Expenses') {
+              return isCommon && (e.category || '').toLowerCase().includes(h.headName.toLowerCase());
+            } else {
+              return pName.toLowerCase().includes(grp.groupName.toLowerCase()) && (e.category || '').toLowerCase().includes(h.headName.toLowerCase());
+            }
+          });
+          h.months[m] = matching.reduce((s, e) => s + (e.amount || 0), 0);
+        }
+      }
+      h.total = months.reduce((s, m) => s + (h.months[m] || 0), 0);
+    }
 
-    const gTotals = {};
-    months.forEach(m => {
-      gTotals[m] = heads.reduce((s, h) => s + (h.months[m] || 0), 0);
-    });
+    for (const m of months) {
+      const gSum = grp.heads.reduce((s, h) => s + (h.months[m] || 0), 0);
+      grp.groupTotals[m] = gSum;
+      totalExpenses[m] += gSum;
+    }
+    grp.groupTotal = months.reduce((s, m) => s + (grp.groupTotals[m] || 0), 0);
+  }
 
-    expenseGroups.push({
-      order: idx + 1,
-      groupName: prop.name,
-      groupTotals: gTotals,
-      groupTotal: heads.reduce((s, h) => s + h.total, 0),
-      heads
-    });
-  });
-
-  const otherHeads = ['IT Fees', 'Donations', 'Miscellaneous exp', 'Margaret', 'Micellaneous Expenses', 'Mom', 'Islamic & Zakat', 'Send to dubai'].map(hName => {
-    const hMonths = {};
-    let hTotal = 0;
-    months.forEach(m => {
-      const matchingExp = dbExpenses.filter(e => {
-        const expM = e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '');
-        if (expM !== m) return false;
-        const propCode = e.propertyId?.propertyCode || '';
-        const propType = e.propertyId?.propertyType || '';
-        const isCommon = propCode === 'PROP-COMMON' || propType === 'General / Common';
-        const catMatch = (e.category || '').toLowerCase().includes(hName.toLowerCase());
-        return isCommon && catMatch;
-      });
-      const sum = matchingExp.reduce((s, e) => s + (e.amount || 0), 0);
-      hMonths[m] = sum;
-      hTotal += sum;
-      totalExpenses[m] += sum;
-    });
-    return { headName: hName, months: hMonths, total: hTotal };
-  });
-
-  const otherTotals = {};
-  months.forEach(m => {
-    otherTotals[m] = otherHeads.reduce((s, h) => s + (h.months[m] || 0), 0);
-  });
-  expenseGroups.push({
-    order: properties.length + 1,
-    groupName: 'Other Expenses',
-    groupTotals: otherTotals,
-    groupTotal: otherHeads.reduce((s, h) => s + h.total, 0),
-    heads: otherHeads
-  });
-
-  months.forEach(m => {
-    totalIncome[m] = rentTotals[m] + depositReceived[m] + loanReceived[m];
-  });
-
+  // Part 3: Balance Reconciliation
   const diff = {};
   const balPrev = {};
-  const minAdj = {};
   const totBal = {};
+  const minAdj = baselineData?.reconciliation?.adjustments || {};
 
-  let rollingBal = 0;
-  months.forEach((m) => {
+  // Compute carried forward balance at months[0]
+  let runningBal = 3843345; // Baseline opening balance at 2025-03 from Sheet 1
+  const baselineMonths = ['2025-03','2025-04','2025-05','2025-06','2025-07','2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02'];
+
+  if (months[0] > '2025-03') {
+    for (const bm of baselineMonths) {
+      if (bm >= months[0]) break;
+      const bInc = baselineData?.totalIncome?.[bm] || 0;
+      const bExp = baselineData?.totalExpenses?.[bm] || 0;
+      const bDiff = bInc - bExp;
+      const bAdj = minAdj[bm] || 0;
+      runningBal = runningBal + bDiff + bAdj;
+    }
+  }
+
+  for (const m of months) {
     const d = totalIncome[m] - totalExpenses[m];
     diff[m] = d;
-    balPrev[m] = rollingBal;
-    minAdj[m] = 0;
-    const endB = rollingBal + d;
-    totBal[m] = endB;
-    rollingBal = endB;
-  });
+    balPrev[m] = runningBal;
+    const endBal = runningBal + d + (minAdj[m] || 0);
+    totBal[m] = endBal;
+    runningBal = endBal;
+  }
+
+  const reconciliation = {
+    difference: diff,
+    balancePreviousMonth: balPrev,
+    adjustments: minAdj,
+    totalBalance: totBal
+  };
+
+  // Optional Property Filter
+  if (propertyId) {
+    const propDoc = await Property.findById(propertyId).lean();
+    if (propDoc) {
+      rentGroups = rentGroups.filter(g => 
+        g.propertyName.toLowerCase().includes(propDoc.name.toLowerCase()) || 
+        propDoc.name.toLowerCase().includes(g.propertyName.toLowerCase())
+      );
+      expenseGroups = expenseGroups.filter(g => 
+        g.groupName.toLowerCase().includes(propDoc.name.toLowerCase()) || 
+        propDoc.name.toLowerCase().includes(g.groupName.toLowerCase())
+      );
+    }
+  }
 
   return {
     period,
     periodLabel,
-    isSheet1Period: false,
+    isSheet1Period: true,
     months: monthObjects,
     rentPart: {
       rentGroups,
@@ -1093,12 +967,7 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
       expenseGroups,
       totalExpenses
     },
-    reconciliationPart: {
-      difference: diff,
-      balancePreviousMonth: balPrev,
-      adjustments: minAdj,
-      totalBalance: totBal
-    }
+    reconciliationPart: reconciliation
   };
 }
 
