@@ -65,10 +65,16 @@ router.get('/categories', protect, async (req, res) => {
     // Auto-seed default heads if empty
     if (categories.length === 0 && !headType) {
       const defaultPropertyHeads = [
-        'Maintenance', 'Electricity Meters', 'Repairs', 'Sweeper', 
-        'Water Charges', 'Property Rent Paid', 'Deposit Refund', 'Renovation', 'Legal & Professional'
+        'Maintenance', 'Electricity & Utilities', 'Repairs & Renovation', 
+        'Sweeper & Cleaning', 'Water Charges', 'Property Rent Paid', 
+        'Deposit Refund', 'Property Tax', 'Other expenses'
       ];
-      const defaultCommonHeads = ['MOM', 'Miscellaneous', 'Zakat', 'Sadka', 'Margaret', 'Other'];
+      const defaultCommonHeads = [
+        'MOM', 'Margaret', 'Islamic & Zakat', 'Zakat', 'Sadka', 
+        'Send to dubai', 'IT Fees', 'Donations', 'Miscellaneous', 
+        'Miscellaneous exp', 'Micellaneous Expenses', 'Akbar', 
+        'Loan asgar Bhati', 'Loan give to Gafoor', 'Other'
+      ];
 
       for (const name of defaultPropertyHeads) {
         await ExpenseCategory.updateOne(

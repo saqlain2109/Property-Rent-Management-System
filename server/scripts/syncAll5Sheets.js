@@ -535,10 +535,16 @@ async function syncAll() {
     console.log(`Successfully imported ${rCount} historical receipts and allocations.`);
 
     // Step 4b: Sync Expense Categories with separate Property and Common heads
-    const defaultCommonHeads = ['MOM', 'Miscellaneous', 'Zakat', 'Sadka', 'Margaret', 'Other'];
+    const defaultCommonHeads = [
+      'MOM', 'Margaret', 'Islamic & Zakat', 'Zakat', 'Sadka', 
+      'Send to dubai', 'IT Fees', 'Donations', 'Miscellaneous', 
+      'Miscellaneous exp', 'Micellaneous Expenses', 'Akbar', 
+      'Loan asgar Bhati', 'Loan give to Gafoor', 'Other'
+    ];
     const defaultPropertyHeads = [
       'Maintenance', 'Electricity & Utilities', 'Repairs & Renovation', 
-      'Sweeper & Cleaning', 'Property Rent Paid', 'Deposit Refund', 'Water Charges', 'Property Tax'
+      'Sweeper & Cleaning', 'Property Rent Paid', 'Deposit Refund', 
+      'Water Charges', 'Property Tax', 'Other expenses'
     ];
     for (const name of defaultCommonHeads) {
       await ExpenseCategory.updateOne(

@@ -299,15 +299,41 @@ export default function ExpensesView() {
         API.get('/properties'),
         API.get('/units'),
       ]);
+      let fetchedCategories = [];
       if (eRes.data.success) setExpenses(eRes.data.data);
-      if (cRes.data.success) setCategories(cRes.data.data);
+      if (cRes.data.success) {
+        fetchedCategories = cRes.data.data;
+        setCategories(fetchedCategories);
+      }
       if (pRes.data.success) {
         const allProps = pRes.data.data;
         setProperties(allProps);
-        const regularProps = allProps.filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common');
-        if (regularProps.length > 0) {
-          setQuickForm(prev => prev.propertyId ? prev : ({ ...prev, propertyId: regularProps[0]._id, category: 'Maintenance' }));
-          setForm(prev => prev.propertyId ? prev : ({ ...prev, propertyId: regularProps[0]._id, category: 'Maintenance' }));
+        const regularProps = allProps.filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'));
+        const commonProp = allProps.find(p => p.propertyCode === 'PROP-COMMON' || p.propertyType === 'General / Common' || p.name?.toLowerCase().includes('general common'));
+
+        const propCats = fetchedCategories.filter(c => c.headType !== 'Common').map(c => c.name);
+        const commCats = fetchedCategories.filter(c => c.headType === 'Common').map(c => c.name);
+
+        const currentScope = localStorage.getItem('expenses_scope_filter') || 'property';
+        if (currentScope === 'other') {
+          const initCat = commCats[0] || 'MOM';
+          setQuickForm(prev => prev.propertyId ? prev : ({
+            ...prev,
+            propertyId: commonProp?._id || '__OTHER_EXPENSES__',
+            category: initCat
+          }));
+        } else if (regularProps.length > 0) {
+          const initCat = propCats[0] || 'Maintenance';
+          setQuickForm(prev => prev.propertyId ? prev : ({
+            ...prev,
+            propertyId: regularProps[0]._id,
+            category: initCat
+          }));
+          setForm(prev => prev.propertyId ? prev : ({
+            ...prev,
+            propertyId: regularProps[0]._id,
+            category: initCat
+          }));
         }
       }
       if (uRes.data.success) setUnits(uRes.data.data);
@@ -322,21 +348,21 @@ export default function ExpensesView() {
     fetchData();
   }, []);
 
-  // Separate Common vs Property Heads
+  // Separate Common vs Property Heads directly from Master
   const commonCategories = React.useMemo(() => {
     const fromApi = categories
       .filter(c => typeof c === 'object' && c.headType === 'Common')
       .map(c => c.name);
-    const set = new Set([...DEFAULT_COMMON_HEADS, ...fromApi]);
-    return Array.from(set);
+    if (fromApi.length > 0) return fromApi;
+    return DEFAULT_COMMON_HEADS;
   }, [categories]);
 
   const propertyCategories = React.useMemo(() => {
     const fromApi = categories
       .filter(c => typeof c === 'object' && c.headType !== 'Common')
       .map(c => c.name);
-    const set = new Set([...DEFAULT_PROPERTY_HEADS, ...fromApi]);
-    return Array.from(set);
+    if (fromApi.length > 0) return fromApi;
+    return DEFAULT_PROPERTY_HEADS;
   }, [categories]);
 
   // Compute merged category names from defaults and DB
@@ -535,14 +561,17 @@ export default function ExpensesView() {
   }, [expenses, selectedMonth]);
 
   const sheetFilterSuggestions = React.useMemo(() => {
+    const scopeCategories = expenseScope === 'property' 
+      ? propertyCategories 
+      : (expenseScope === 'other' ? commonCategories : allCategoryNames);
     return {
       property: extractUniqueValues(monthExpenses, e => e.propertyId?.name || 'General (Common)'),
-      category: extractUniqueValues(monthExpenses, e => e.category || 'Maintenance'),
+      category: scopeCategories.length > 0 ? scopeCategories : extractUniqueValues(monthExpenses, e => e.category || 'Maintenance'),
       description: extractUniqueValues(monthExpenses, e => e.description),
       payee: extractUniqueValues(monthExpenses, e => e.vendorOrPayee),
       paymentMode: ['Cash', 'UPI', 'Bank Transfer', 'Cheque']
     };
-  }, [monthExpenses]);
+  }, [monthExpenses, expenseScope, propertyCategories, commonCategories, allCategoryNames]);
 
   const filteredMonthExpenses = React.useMemo(() => {
     return monthExpenses.filter(e => {
@@ -838,14 +867,17 @@ export default function ExpensesView() {
 
   // Register Filter Suggestions
   const registerFilterSuggestions = React.useMemo(() => {
+    const scopeCategories = expenseScope === 'property' 
+      ? propertyCategories 
+      : (expenseScope === 'other' ? commonCategories : allCategoryNames);
     return {
       property: extractUniqueValues(expenses, e => e.propertyId?.name || 'General'),
-      category: extractUniqueValues(expenses, e => e.category || 'Maintenance'),
+      category: scopeCategories.length > 0 ? scopeCategories : extractUniqueValues(expenses, e => e.category || 'Maintenance'),
       description: extractUniqueValues(expenses, e => e.description),
       payee: extractUniqueValues(expenses, e => e.vendorOrPayee),
       date: extractUniqueValues(expenses, e => e.expenseMonth ? formatMonthYear(e.expenseMonth) : formatDate(e.expenseDate))
     };
-  }, [expenses]);
+  }, [expenses, expenseScope, propertyCategories, commonCategories, allCategoryNames]);
 
   // Full Register Filtered List
   const filteredRegister = React.useMemo(() => {
@@ -952,10 +984,11 @@ export default function ExpensesView() {
     XLSX.utils.book_append_sheet(wb, ws, 'Expenses_Register');
     XLSX.writeFile(wb, `Expenses_Register_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
-  const allCategories = [...new Set([
-    ...CATEGORY_OPTIONS,
-    ...categories.map(c => (typeof c === 'string' ? c : c.name)).filter(Boolean)
-  ])].sort((a, b) => a.localeCompare(b));
+  const allCategories = React.useMemo(() => {
+    const masterNames = categories.map(c => (typeof c === 'string' ? c : c.name)).filter(Boolean);
+    if (masterNames.length > 0) return [...new Set(masterNames)].sort((a, b) => a.localeCompare(b));
+    return [...new Set([...propertyCategories, ...commonCategories])].sort((a, b) => a.localeCompare(b));
+  }, [categories, propertyCategories, commonCategories]);
 
   const availableExpenseMonths = [...new Set(
     expenses.map(e => e.expenseMonth || (e.expenseDate ? e.expenseDate.slice(0, 7) : '')).filter(Boolean)
@@ -1258,13 +1291,23 @@ export default function ExpensesView() {
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
                   {isGeneralCommonProperty(quickForm.propertyId) ? (
-                    commonCategories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))
+                    <>
+                      {!commonCategories.includes(quickForm.category) && quickForm.category && (
+                        <option value={quickForm.category}>{quickForm.category}</option>
+                      )}
+                      {commonCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </>
                   ) : (
-                    propertyCategories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))
+                    <>
+                      {!propertyCategories.includes(quickForm.category) && quickForm.category && (
+                        <option value={quickForm.category}>{quickForm.category}</option>
+                      )}
+                      {propertyCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </>
                   )}
                   <option value="__add_new__" className="font-bold text-emerald-600">+ Add New Head...</option>
                 </select>
@@ -2125,13 +2168,23 @@ export default function ExpensesView() {
                   className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
                 >
                   {isGeneralCommonProperty(form.propertyId) ? (
-                    commonCategories.map((category) => (
-                      <option key={category} value={category}>{category}</option>
-                    ))
+                    <>
+                      {!commonCategories.includes(form.category) && form.category && (
+                        <option value={form.category}>{form.category}</option>
+                      )}
+                      {commonCategories.map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </>
                   ) : (
-                    propertyCategories.map((category) => (
-                      <option key={category} value={category}>{category}</option>
-                    ))
+                    <>
+                      {!propertyCategories.includes(form.category) && form.category && (
+                        <option value={form.category}>{form.category}</option>
+                      )}
+                      {propertyCategories.map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </>
                   )}
                   <option value="__add_new__">+ Add New Head...</option>
                 </select>
