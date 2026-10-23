@@ -106,6 +106,7 @@ npm run seed   # or node seed.js
 This automatically:
 1. Creates the administrator account (`admin` or `admin@propertyrent.com` / `AdminPassword123!`).
 2. Syncs the 11 properties (Order 1 to 11), 22 sub-properties, 21 active contracts, correct rates (Kotak PG: ₹81,050), "Paid Till" status across all units, 31 payment receipts (Jan, Feb, Mar 2026), and monthly financial ledger from the 5 Excel workbooks.
+3. Ingests the 12-month historical statements (2024-03 to 2025-02) for the Month wise Report matrix (153 receipts, 50 expenses, ₹91,41,574 grand total) and reconciles monthly rolling ledgers.
 
 ### 4. Run Automated Backend Tests
 
