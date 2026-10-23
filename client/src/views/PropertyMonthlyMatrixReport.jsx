@@ -8,17 +8,20 @@ import {
   Layers, Wallet, IndianRupee, PieChart, TrendingUp, TrendingDown
 } from 'lucide-react';
 
-const PERIOD_OPTIONS = [
-  { id: '2025-03_2026-02', label: 'Master Sheet 1 Year (Mar 2025 – Feb 2026)', badge: 'Master Sheet 1' },
-  { id: 'CY2026', label: 'Calendar Year 2026 (Jan 2026 – Dec 2026)', badge: 'CY 2026' },
-  { id: 'FY2025-26', label: 'Financial Year 2025–26 (Apr 2025 – Mar 2026)', badge: 'FY 2025-26' },
-  { id: 'CY2025', label: 'Calendar Year 2025 (Jan 2025 – Dec 2025)', badge: 'CY 2025' }
+const PRESET_RANGES = [
+  { id: 'sheet1', label: 'Master Sheet 1 (Mar 2025 – Feb 2026)', start: '2025-03', end: '2026-02' },
+  { id: 'fy2526', label: 'FY 2025–26 (Apr 2025 – Mar 2026)', start: '2025-04', end: '2026-03' },
+  { id: 'cy2026', label: 'CY 2026 (Jan 2026 – Dec 2026)', start: '2026-01', end: '2026-12' },
+  { id: 'cy2025', label: 'CY 2025 (Jan 2025 – Dec 2025)', start: '2025-01', end: '2025-12' }
 ];
 
 export default function PropertyMonthlyMatrixReport() {
-  // Period Selection state with localStorage persistence
-  const [selectedPeriod, setSelectedPeriod] = useState(() => {
-    return localStorage.getItem('matrix_selected_period') || '2025-03_2026-02';
+  // Month Range Selection state with localStorage persistence
+  const [startMonth, setStartMonth] = useState(() => {
+    return localStorage.getItem('matrix_start_month') || '2025-03';
+  });
+  const [endMonth, setEndMonth] = useState(() => {
+    return localStorage.getItem('matrix_end_month') || '2026-02';
   });
 
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState(() => {
@@ -34,33 +37,18 @@ export default function PropertyMonthlyMatrixReport() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
 
-  // Visible Months state (Array of month keys e.g. ['2025-03', ...])
-  const [visibleMonthKeys, setVisibleMonthKeys] = useState(() => {
-    try {
-      const saved = localStorage.getItem('matrix_visible_month_keys');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return null; // Will initialize to all months when reportData loads
-  });
-
-  const [showMonthSelector, setShowMonthSelector] = useState(false);
-
   // Sync state to localStorage
   useEffect(() => {
-    localStorage.setItem('matrix_selected_period', selectedPeriod);
-  }, [selectedPeriod]);
+    localStorage.setItem('matrix_start_month', startMonth);
+  }, [startMonth]);
+
+  useEffect(() => {
+    localStorage.setItem('matrix_end_month', endMonth);
+  }, [endMonth]);
 
   useEffect(() => {
     localStorage.setItem('matrix_prop_filter', selectedPropertyFilter);
   }, [selectedPropertyFilter]);
-
-  useEffect(() => {
-    if (visibleMonthKeys) {
-      try {
-        localStorage.setItem('matrix_visible_month_keys', JSON.stringify(visibleMonthKeys));
-      } catch (e) {}
-    }
-  }, [visibleMonthKeys]);
 
   // Load properties list
   useEffect(() => {
@@ -81,21 +69,13 @@ export default function PropertyMonthlyMatrixReport() {
   const fetchMatrix = async () => {
     try {
       setLoading(true);
-      let url = `/reports/property-monthly-matrix?period=${selectedPeriod}`;
+      let url = `/reports/property-monthly-matrix?startMonth=${startMonth}&endMonth=${endMonth}`;
       if (selectedPropertyFilter) {
         url += `&propertyId=${selectedPropertyFilter}`;
       }
       const res = await API.get(url);
       if (res.data.success) {
         setReportData(res.data);
-        const allKeys = res.data.months.map(m => m.monthKey);
-        // If no visible months or keys don't belong to current period, reset to all
-        setVisibleMonthKeys(prev => {
-          if (!prev || prev.length === 0 || !prev.some(k => allKeys.includes(k))) {
-            return allKeys;
-          }
-          return prev.filter(k => allKeys.includes(k));
-        });
       }
     } catch (err) {
       console.error('Failed to load matrix report:', err);
@@ -106,48 +86,49 @@ export default function PropertyMonthlyMatrixReport() {
 
   useEffect(() => {
     fetchMatrix();
-  }, [selectedPeriod, selectedPropertyFilter]);
+  }, [startMonth, endMonth, selectedPropertyFilter]);
 
-  // Visible Months list
+  // Active Months list directly from report data
   const activeMonths = useMemo(() => {
-    if (!reportData?.months) return [];
-    if (!visibleMonthKeys || visibleMonthKeys.length === 0) return reportData.months;
-    return reportData.months.filter(m => visibleMonthKeys.includes(m.monthKey));
-  }, [reportData, visibleMonthKeys]);
+    return reportData?.months || [];
+  }, [reportData]);
 
-  const toggleMonth = (mKey) => {
-    setVisibleMonthKeys(prev => {
-      if (!prev) return [mKey];
-      if (prev.includes(mKey)) {
-        if (prev.length === 1) return prev; // keep at least 1 month
-        return prev.filter(k => k !== mKey);
-      } else {
-        const allKeys = reportData?.months?.map(m => m.monthKey) || [];
-        const next = [...prev, mKey];
-        return allKeys.filter(k => next.includes(k));
-      }
-    });
-  };
+  // Detect active preset
+  const activePreset = useMemo(() => {
+    return PRESET_RANGES.find(p => p.start === startMonth && p.end === endMonth)?.id || 'custom';
+  }, [startMonth, endMonth]);
 
-  const selectAllMonths = () => {
-    if (reportData?.months) {
-      setVisibleMonthKeys(reportData.months.map(m => m.monthKey));
+  const handleApplyPreset = (presetId) => {
+    const match = PRESET_RANGES.find(p => p.id === presetId);
+    if (match) {
+      setStartMonth(match.start);
+      setEndMonth(match.end);
     }
   };
 
-  const selectQuarter = (qIndex) => {
-    if (!reportData?.months) return;
-    const all = reportData.months;
-    const start = qIndex * 3;
-    const qMonths = all.slice(start, start + 3).map(m => m.monthKey);
-    if (qMonths.length > 0) setVisibleMonthKeys(qMonths);
+  const handleStartMonthChange = (e) => {
+    const val = e.target.value;
+    if (!val) return;
+    setStartMonth(val);
+    if (endMonth && val > endMonth) {
+      setEndMonth(val);
+    }
+  };
+
+  const handleEndMonthChange = (e) => {
+    const val = e.target.value;
+    if (!val) return;
+    if (startMonth && val < startMonth) {
+      setStartMonth(val);
+    }
+    setEndMonth(val);
   };
 
   // Download Excel
   const handleExportExcel = async () => {
     try {
       setDownloading(true);
-      let url = `/reports/export-property-monthly-matrix-excel?period=${selectedPeriod}`;
+      let url = `/reports/export-property-monthly-matrix-excel?startMonth=${startMonth}&endMonth=${endMonth}`;
       if (selectedPropertyFilter) {
         url += `&propertyId=${selectedPropertyFilter}`;
       }
@@ -155,7 +136,7 @@ export default function PropertyMonthlyMatrixReport() {
       const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = window.URL.createObjectURL(blob);
-      link.download = `Master_Monthly_Statement_${selectedPeriod}.xlsx`;
+      link.download = `Master_Monthly_Statement_${startMonth}_to_${endMonth}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -234,119 +215,57 @@ export default function PropertyMonthlyMatrixReport() {
   }, [reportData, activeMonths]);
 
   return (
-    <div className="space-y-6">
-      {/* Top Header Card */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
-              <FileSpreadsheet className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-black text-slate-900 tracking-tight">
-                  Master Monthly Financial Statement
-                </h1>
-                <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                  Sheet 1 Format
-                </span>
-              </div>
-              <p className="text-xs font-semibold text-slate-500 mt-0.5">
-                Full 3-Part Master Matrix: Part 1 Rent Income, Part 2 Actual Expenses, Part 3 Cash Flow & Balance Reconciliation
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Global Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Period Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-2xs">
-            <Calendar className="w-4 h-4 text-emerald-600 ml-2" />
-            <select
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="bg-transparent text-xs font-extrabold text-slate-800 pr-3 py-1.5 focus:outline-none cursor-pointer"
-            >
-              {PERIOD_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Refresh Button */}
-          <button
-            onClick={fetchMatrix}
-            disabled={loading}
-            className="p-2.5 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
-            title="Refresh spreadsheet data"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-
-          {/* Export Full Excel */}
-          <button
-            onClick={handleExportExcel}
-            disabled={downloading || loading}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            {downloading ? 'Exporting...' : 'Export Excel (Sheet 1)'}
-          </button>
-        </div>
-      </div>
-
-      {/* Control Toolbar: Section Filter, Property Filter, Search & Month Checkboxes */}
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-5 space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
+    <div className="space-y-4">
+      {/* Control Toolbar: Section Tabs, Property Filter, Month Range, Search, Refresh, Export Excel */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Left Controls: Section Switcher Tabs, Property Filter & Month Range */}
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* Section Switcher Tabs */}
             <div className="flex items-center p-1 bg-slate-100 rounded-2xl border border-slate-200">
               <button
                 type="button"
                 onClick={() => setActiveSection('all')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                   activeSection === 'all'
                     ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                All 3 Parts (Complete Sheet 1)
+                All 3 Parts
               </button>
               <button
                 type="button"
                 onClick={() => setActiveSection('rent')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                   activeSection === 'rent'
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Part 1: Rent Income
+                Part 1: Rent
               </button>
               <button
                 type="button"
                 onClick={() => setActiveSection('expenses')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                   activeSection === 'expenses'
                     ? 'bg-rose-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Part 2: Actual Expenses
+                Part 2: Expenses
               </button>
               <button
                 type="button"
                 onClick={() => setActiveSection('reconciliation')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                   activeSection === 'reconciliation'
                     ? 'bg-indigo-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Part 3: Balance Reconciliation
+                Part 3: Balance
               </button>
             </div>
 
@@ -355,7 +274,7 @@ export default function PropertyMonthlyMatrixReport() {
               <select
                 value={selectedPropertyFilter}
                 onChange={(e) => setSelectedPropertyFilter(e.target.value)}
-                className="px-3.5 py-2 rounded-2xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                className="px-3 py-2 rounded-2xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
               >
                 <option value="">All 11 Properties</option>
                 {properties.map(p => (
@@ -366,88 +285,79 @@ export default function PropertyMonthlyMatrixReport() {
               </select>
             </div>
 
-            {/* Month Column Selector Toggle */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowMonthSelector(!showMonthSelector)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            {/* Month Range Selector */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-2xl border border-slate-200">
+              <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">From:</span>
+                <input
+                  type="month"
+                  value={startMonth}
+                  onChange={handleStartMonthChange}
+                  className="px-2 py-1 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+                  title="Start Month (YYYY-MM)"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">To:</span>
+                <input
+                  type="month"
+                  value={endMonth}
+                  onChange={handleEndMonthChange}
+                  className="px-2 py-1 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+                  title="End Month (YYYY-MM)"
+                />
+              </div>
+
+              {/* Quick Presets Dropdown */}
+              <select
+                value={activePreset}
+                onChange={(e) => handleApplyPreset(e.target.value)}
+                className="px-2.5 py-1 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors focus:outline-none cursor-pointer shadow-2xs"
+                title="Quick Date Range Presets"
               >
-                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Columns: {activeMonths.length} Months</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showMonthSelector ? 'rotate-180' : ''}`} />
-              </button>
-
-              {/* Month Selection Dropdown */}
-              {showMonthSelector && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShowMonthSelector(false)} />
-                  <div className="absolute left-0 mt-2 w-80 bg-white rounded-3xl shadow-2xl border border-slate-200 p-4 z-40 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
-                      <span className="text-xs font-extrabold text-slate-800">Toggle Visible Months</span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={selectAllMonths}
-                          className="text-[11px] font-bold text-emerald-600 hover:underline cursor-pointer"
-                        >
-                          All
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Quarter Presets */}
-                    <div className="grid grid-cols-4 gap-1 mb-3">
-                      {['Q1', 'Q2', 'Q3', 'Q4'].map((q, idx) => (
-                        <button
-                          key={q}
-                          type="button"
-                          onClick={() => selectQuarter(idx)}
-                          className="py-1 rounded-lg bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-[11px] font-extrabold text-slate-700 transition-colors cursor-pointer text-center"
-                        >
-                          {q}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Month Checkboxes */}
-                    <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-                      {reportData?.months?.map(m => {
-                        const isChecked = visibleMonthKeys?.includes(m.monthKey);
-                        return (
-                          <label
-                            key={m.monthKey}
-                            className={`flex items-center gap-2 p-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                              isChecked ? 'bg-emerald-50 text-emerald-900 border border-emerald-200/60' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleMonth(m.monthKey)}
-                              className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer"
-                            />
-                            <span className="truncate">{m.shortLabel || m.monthName}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </>
-              )}
+                <option value="custom" disabled={activePreset !== 'custom'}>Custom Range</option>
+                {PRESET_RANGES.map(p => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Quick Search */}
-          <div className="relative w-full sm:w-72">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search property, partition, head..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 rounded-2xl text-xs bg-slate-50 border border-slate-200 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-            />
+          {/* Right Controls: Search, Refresh, Export Excel */}
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            {/* Quick Search */}
+            <div className="relative w-44 sm:w-56">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search unit, head..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 rounded-2xl text-xs bg-slate-50 border border-slate-200 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+              />
+            </div>
+
+            {/* Refresh Button */}
+            <button
+              onClick={fetchMatrix}
+              disabled={loading}
+              className="p-2.5 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+              title="Refresh spreadsheet data"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+
+            {/* Export Full Excel (Sheet 1) Button */}
+            <button
+              onClick={handleExportExcel}
+              disabled={downloading || loading}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer whitespace-nowrap"
+            >
+              <Download className="w-4 h-4" />
+              <span>{downloading ? 'Exporting...' : 'Export Excel (Sheet 1)'}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -459,7 +369,7 @@ export default function PropertyMonthlyMatrixReport() {
         {loading ? (
           <div className="py-24 text-center">
             <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin mx-auto mb-3" />
-            <p className="text-sm font-bold text-slate-600">Loading Master Sheet 1 Matrix for {selectedPeriod}...</p>
+            <p className="text-sm font-bold text-slate-600">Loading Master Sheet 1 Matrix ({startMonth} to {endMonth})...</p>
           </div>
         ) : !reportData ? (
           <div className="py-24 text-center text-slate-400 text-sm">

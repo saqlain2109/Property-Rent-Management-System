@@ -709,12 +709,38 @@ router.get('/export-property-account-summary-excel', protect, async (req, res) =
 });
 
 // Helper to generate Master Sheet 1 Report Data (3-Part Statement)
-async function generateSheet1ReportData({ period, year, viewMode = 'received', propertyId }) {
+async function generateSheet1ReportData({ period, year, viewMode = 'received', propertyId, startMonth, endMonth }) {
   let months = [];
   let periodLabel = '';
   let isSheet1Period = false;
 
-  if (period === 'CY2026' || year === 2026) {
+  const sheet1MonthsAll = ['2025-03','2025-04','2025-05','2025-06','2025-07','2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02'];
+
+  if (startMonth && endMonth) {
+    months = [];
+    let [sy, sm] = startMonth.split('-').map(Number);
+    let [ey, em] = endMonth.split('-').map(Number);
+    let curDate = new Date(sy, sm - 1, 1);
+    const targetDate = new Date(ey, em - 1, 1);
+    while (curDate <= targetDate && months.length < 36) {
+      const yStr = curDate.getFullYear();
+      const mStr = String(curDate.getMonth() + 1).padStart(2, '0');
+      months.push(`${yStr}-${mStr}`);
+      curDate.setMonth(curDate.getMonth() + 1);
+    }
+    if (months.length === 0) {
+      months = [startMonth];
+    }
+    const [firstY, firstM] = months[0].split('-').map(Number);
+    const [lastY, lastM] = months[months.length - 1].split('-').map(Number);
+    const firstDate = new Date(firstY, firstM - 1, 1);
+    const lastDate = new Date(lastY, lastM - 1, 1);
+    periodLabel = `${firstDate.toLocaleString('en-US', { month: 'short' })} ${firstY} – ${lastDate.toLocaleString('en-US', { month: 'short' })} ${lastY}`;
+    period = `${startMonth}_${endMonth}`;
+    if (months.every(m => sheet1MonthsAll.includes(m))) {
+      isSheet1Period = true;
+    }
+  } else if (period === 'CY2026' || year === 2026) {
     period = 'CY2026';
     periodLabel = 'Calendar Year 2026 (Jan 2026 – Dec 2026)';
     months = ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'];
@@ -1083,12 +1109,14 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
 // Part 3: Cash Flow & Balance Reconciliation
 router.get('/property-monthly-matrix', protect, async (req, res) => {
   try {
-    const { period, year, viewMode, propertyId } = req.query;
+    const { period, year, viewMode, propertyId, startMonth, endMonth } = req.query;
     const data = await generateSheet1ReportData({
       period,
       year: year ? parseInt(year, 10) : undefined,
       viewMode,
-      propertyId
+      propertyId,
+      startMonth,
+      endMonth
     });
     res.json({ success: true, ...data });
   } catch (error) {
@@ -1101,12 +1129,14 @@ router.get('/property-monthly-matrix', protect, async (req, res) => {
 // Generates Multi-Section Excel Workbook matching Sheet 1 exactly
 router.get('/export-property-monthly-matrix-excel', protect, async (req, res) => {
   try {
-    const { period, year, viewMode, propertyId } = req.query;
+    const { period, year, viewMode, propertyId, startMonth, endMonth } = req.query;
     const data = await generateSheet1ReportData({
       period,
       year: year ? parseInt(year, 10) : undefined,
       viewMode,
-      propertyId
+      propertyId,
+      startMonth,
+      endMonth
     });
 
     const monthKeys = data.months.map(m => m.monthKey);

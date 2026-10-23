@@ -19,15 +19,6 @@ const REPORT_OPTIONS = [
     desc: 'Spreadsheet-style full year matrix: Rent Income, Property & Other Expenses, and Balance Reconciliation' 
   },
   { 
-    id: 'property_summary', 
-    sidebarId: 'reports_summary',
-    label: 'Property Account Summary', 
-    shortLabel: 'Account Summary',
-    icon: Building2, 
-    badge: 'Per-Property',
-    desc: 'Property-wise monthly earnings on top, expenses below, net cash flow and balance reconciliation' 
-  },
-  { 
     id: 'ledger', 
     sidebarId: 'reports_ledger',
     label: 'Account Book (Ledger)', 
