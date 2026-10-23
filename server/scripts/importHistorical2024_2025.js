@@ -16,9 +16,11 @@ const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 
 async function importHistorical() {
   try {
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/property_rent_db';
-    await mongoose.connect(mongoUri);
-    console.log('[Import] Connected to MongoDB.');
+    if (mongoose.connection.readyState !== 1) {
+      const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/property_rent_db';
+      await mongoose.connect(mongoUri);
+      console.log('[Import] Connected to MongoDB.');
+    }
 
     // 1. Ensure 12th property "Other Income & Loans" exists for accounting parity
     let otherProp = await Property.findOne({ propertyCode: 'PROP-OTHER' });

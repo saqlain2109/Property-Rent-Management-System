@@ -13,6 +13,7 @@ const PaymentAllocation = require('../models/PaymentAllocation');
 const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
 const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 const { protect, authorize } = require('../middleware/auth');
+const { importHistorical } = require('../scripts/importHistorical2024_2025');
 
 // @route GET /api/reports/tenant-ledger/:tenantId
 router.get('/tenant-ledger/:tenantId', protect, async (req, res) => {
@@ -478,8 +479,37 @@ router.get('/export-monthly-excel', protect, async (req, res) => {
 
 // @route GET /api/reports/monthly-property-earnings
 // Returns matrix of all properties with monthly earnings as columns, plus row totals and column totals
+// @route POST /api/reports/sync-historical-data
+// Allows manually triggering historical 2024-2025 seed synchronization
+router.post('/sync-historical-data', protect, async (req, res) => {
+  try {
+    console.log('[Reports] Manual trigger: importing 2024-2025 historical statements...');
+    await importHistorical();
+    res.json({ success: true, message: 'Historical 2024-2025 statements successfully synced into database!' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// @route GET /api/reports/monthly-property-earnings
+// Returns matrix of all properties with monthly earnings as columns, plus row totals and column totals
 router.get('/monthly-property-earnings', protect, async (req, res) => {
   try {
+    // Auto-seed historical 2024-2025 data if not present on this server/database
+    const historicalReceiptCount = await PaymentReceipt.countDocuments({
+      receiptDate: {
+        $gte: new Date(Date.UTC(2024, 2, 1)),
+        $lte: new Date(Date.UTC(2025, 2, 0, 23, 59, 59, 999))
+      }
+    });
+    if (historicalReceiptCount === 0) {
+      console.log('[Reports] Auto-importing 12-month historical statements into server database...');
+      try {
+        await importHistorical();
+      } catch (importErr) {
+        console.error('[Reports] Auto-import error:', importErr);
+      }
+    }
     const basis = req.query.basis === 'allocatedMonth' ? 'allocatedMonth' : 'receiptDate';
     const filterYear = req.query.year || 'all';
     const startMonth = req.query.startMonth || req.query.fromMonth || null;
@@ -667,6 +697,19 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
 // Exports the monthly property earnings matrix directly into an Excel (.xlsx) file
 router.get('/export-monthly-property-matrix', protect, async (req, res) => {
   try {
+    const historicalReceiptCount = await PaymentReceipt.countDocuments({
+      receiptDate: {
+        $gte: new Date(Date.UTC(2024, 2, 1)),
+        $lte: new Date(Date.UTC(2025, 2, 0, 23, 59, 59, 999))
+      }
+    });
+    if (historicalReceiptCount === 0) {
+      try {
+        await importHistorical();
+      } catch (e) {
+        console.error('[Export Matrix] Auto-import error:', e);
+      }
+    }
     const basis = req.query.basis === 'allocatedMonth' ? 'allocatedMonth' : 'receiptDate';
     const filterYear = req.query.year || 'all';
     const startMonth = req.query.startMonth || req.query.fromMonth || null;
