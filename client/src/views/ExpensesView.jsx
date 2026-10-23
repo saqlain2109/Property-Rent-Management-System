@@ -109,14 +109,25 @@ const DEFAULT_REGISTER_COLUMN_WIDTHS = {
 };
 
 export default function ExpensesView() {
-  const [activeTab, setActiveTab] = useState('sheet'); // 'sheet' (Excel Grid) | 'register' (Full History)
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('expenses_active_tab') || 'sheet';
+  });
+  useEffect(() => {
+    localStorage.setItem('expenses_active_tab', activeTab);
+  }, [activeTab]);
 
   const getCurrentMonthYear = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   };
 
-  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthYear());
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    return localStorage.getItem('expenses_selected_month') || getCurrentMonthYear();
+  });
+  useEffect(() => {
+    if (selectedMonth) localStorage.setItem('expenses_selected_month', selectedMonth);
+  }, [selectedMonth]);
+
   const [expenses, setExpenses] = useState([]);
   const [categories, setCategories] = useState([]);
   const [properties, setProperties] = useState([]);
@@ -142,15 +153,27 @@ export default function ExpensesView() {
   const [frozenSheetCount, setFrozenSheetCount] = useFrozenColumns('expenses_sheet_freeze_v1', 0);
   const [frozenRegisterCount, setFrozenRegisterCount] = useFrozenColumns('expenses_register_freeze_v1', 0);
 
-  // Filters for Sheet and Register
-  const [sheetSearch, setSheetSearch] = useState('');
-  const [sheetPropFilter, setSheetPropFilter] = useState('');
-  const [sheetCatFilter, setSheetCatFilter] = useState('');
+  // Filters for Sheet and Register with localStorage persistence
+  const [sheetSearch, setSheetSearch] = useState(() => localStorage.getItem('expenses_sheet_search') || '');
+  useEffect(() => { localStorage.setItem('expenses_sheet_search', sheetSearch); }, [sheetSearch]);
 
-  const [registerSearch, setRegisterSearch] = useState('');
-  const [registerPropFilter, setRegisterPropFilter] = useState('');
-  const [registerCatFilter, setRegisterCatFilter] = useState('');
-  const [registerMonthFilter, setRegisterMonthFilter] = useState('');
+  const [sheetPropFilter, setSheetPropFilter] = useState(() => localStorage.getItem('expenses_sheet_prop') || '');
+  useEffect(() => { localStorage.setItem('expenses_sheet_prop', sheetPropFilter); }, [sheetPropFilter]);
+
+  const [sheetCatFilter, setSheetCatFilter] = useState(() => localStorage.getItem('expenses_sheet_cat') || '');
+  useEffect(() => { localStorage.setItem('expenses_sheet_cat', sheetCatFilter); }, [sheetCatFilter]);
+
+  const [registerSearch, setRegisterSearch] = useState(() => localStorage.getItem('expenses_reg_search') || '');
+  useEffect(() => { localStorage.setItem('expenses_reg_search', registerSearch); }, [registerSearch]);
+
+  const [registerPropFilter, setRegisterPropFilter] = useState(() => localStorage.getItem('expenses_reg_prop') || '');
+  useEffect(() => { localStorage.setItem('expenses_reg_prop', registerPropFilter); }, [registerPropFilter]);
+
+  const [registerCatFilter, setRegisterCatFilter] = useState(() => localStorage.getItem('expenses_reg_cat') || '');
+  useEffect(() => { localStorage.setItem('expenses_reg_cat', registerCatFilter); }, [registerCatFilter]);
+
+  const [registerMonthFilter, setRegisterMonthFilter] = useState(() => localStorage.getItem('expenses_reg_month') || '');
+  useEffect(() => { localStorage.setItem('expenses_reg_month', registerMonthFilter); }, [registerMonthFilter]);
 
   // APEX Toolbar & Table States for Sheet
   const [sheetFilters, setSheetFilters] = useState([]);
@@ -1084,31 +1107,13 @@ export default function ExpensesView() {
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
                   {isGeneralCommonProperty(quickForm.propertyId) ? (
-                    <>
-                      <optgroup label="Common Expense Heads (General Common)">
-                        {commonCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Property Expense Heads">
-                        {propertyCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </optgroup>
-                    </>
+                    commonCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))
                   ) : (
-                    <>
-                      <optgroup label="Property Expense Heads">
-                        {propertyCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Common Expense Heads">
-                        {commonCategories.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </optgroup>
-                    </>
+                    propertyCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))
                   )}
                   <option value="__add_new__" className="font-bold text-emerald-600">+ Add New Head...</option>
                 </select>
@@ -1967,31 +1972,13 @@ export default function ExpensesView() {
                   className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
                 >
                   {isGeneralCommonProperty(form.propertyId) ? (
-                    <>
-                      <optgroup label="Common Expense Heads (General Common)">
-                        {commonCategories.map((category) => (
-                          <option key={category} value={category}>{category}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Property Expense Heads">
-                        {propertyCategories.map((category) => (
-                          <option key={category} value={category}>{category}</option>
-                        ))}
-                      </optgroup>
-                    </>
+                    commonCategories.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))
                   ) : (
-                    <>
-                      <optgroup label="Property Expense Heads">
-                        {propertyCategories.map((category) => (
-                          <option key={category} value={category}>{category}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Common Expense Heads">
-                        {commonCategories.map((category) => (
-                          <option key={category} value={category}>{category}</option>
-                        ))}
-                      </optgroup>
-                    </>
+                    propertyCategories.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))
                   )}
                   <option value="__add_new__">+ Add New Head...</option>
                 </select>

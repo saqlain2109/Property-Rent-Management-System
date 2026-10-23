@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
-import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import ApexToolbar from '../components/ApexToolbar';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
@@ -93,7 +93,12 @@ const DEFAULT_RECEIPTS_COLUMN_WIDTHS = {
 };
 
 export default function PaymentsView() {
-  const [activeTab, setActiveTab] = useState('sheet'); // 'sheet' (Excel Grid) | 'receipts'
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('payments_active_tab') || 'sheet';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_active_tab', activeTab);
+  }, [activeTab]);
   
   // Column Management States with localStorage persistence (v5 for clean layout)
   const [visibleSheetColumns, setVisibleSheetColumns] = useState(() => {
@@ -132,14 +137,24 @@ export default function PaymentsView() {
     }
     return RECEIPTS_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
   });
+
+  // Frozen Columns with persistence
+  const [frozenSheetCount, setFrozenSheetCount] = useFrozenColumns('payments_sheet_v5', 0);
+  const [frozenReceiptsCount, setFrozenReceiptsCount] = useFrozenColumns('payments_receipts', 0);
   
   const getCurrentMonthYear = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   };
 
-  // Current Selected Rent Month for the Excel Grid (Defaults dynamically to current month)
-  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthYear());
+  // Current Selected Rent Month for the Excel Grid (Defaults dynamically to current month or saved)
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    return localStorage.getItem('payments_selected_month') || getCurrentMonthYear();
+  });
+  useEffect(() => {
+    if (selectedMonth) localStorage.setItem('payments_selected_month', selectedMonth);
+  }, [selectedMonth]);
+
   const [customMonthInput, setCustomMonthInput] = useState('');
   
   // Data states
@@ -150,19 +165,60 @@ export default function PaymentsView() {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters
-  const [search, setSearch] = useState('');
-  const [selectedPropertyFilter, setSelectedPropertyFilter] = useState('');
+  // Filters with localStorage persistence
+  const [search, setSearch] = useState(() => {
+    return localStorage.getItem('payments_search') || '';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_search', search);
+  }, [search]);
+
+  const [selectedPropertyFilter, setSelectedPropertyFilter] = useState(() => {
+    return localStorage.getItem('payments_prop_filter') || '';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_prop_filter', selectedPropertyFilter);
+  }, [selectedPropertyFilter]);
 
   // Receipts Register Filters
-  const [receiptSearch, setReceiptSearch] = useState('');
-  const [receiptPropertyFilter, setReceiptPropertyFilter] = useState('');
-  const [receiptModeFilter, setReceiptModeFilter] = useState('');
+  const [receiptSearch, setReceiptSearch] = useState(() => {
+    return localStorage.getItem('payments_receipt_search') || '';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_receipt_search', receiptSearch);
+  }, [receiptSearch]);
+
+  const [receiptPropertyFilter, setReceiptPropertyFilter] = useState(() => {
+    return localStorage.getItem('payments_receipt_prop_filter') || '';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_receipt_prop_filter', receiptPropertyFilter);
+  }, [receiptPropertyFilter]);
+
+  const [receiptModeFilter, setReceiptModeFilter] = useState(() => {
+    return localStorage.getItem('payments_receipt_mode_filter') || '';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_receipt_mode_filter', receiptModeFilter);
+  }, [receiptModeFilter]);
+
   const [receiptSelectedMonths, setReceiptSelectedMonths] = useState([]); // array of 'YYYY-MM'
   const [showReceiptMonthPicker, setShowReceiptMonthPicker] = useState(false);
 
   // Sheet Toolbar & Table State
-  const [sheetFilters, setSheetFilters] = useState([]);
+  const [sheetFilters, setSheetFilters] = useState(() => {
+    try {
+      const saved = localStorage.getItem('payments_sheet_filters');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('payments_sheet_filters', JSON.stringify(sheetFilters));
+    } catch (e) {}
+  }, [sheetFilters]);
   const [sheetSortConfig, setSheetSortConfig] = useState({ key: null, direction: null });
   const [isSheetHeaderSticky, setIsSheetHeaderSticky] = useState(true);
   const [sheetRowsPerPage, setSheetRowsPerPage] = useState('All');
@@ -265,7 +321,7 @@ export default function PaymentsView() {
   // free to record payments for any month (overdue or advance)!
   const getNextTargetMonth = (item, activeMonth) => {
     const monthData = item.monthsBreakdown?.find(m => m.monthYear === activeMonth);
-    const expectedRate = monthData ? monthData.expectedRate : (item.unit?.monthlyRentExpected || 22000);
+    const expectedRate = (monthData && monthData.expectedRate > 0) ? monthData.expectedRate : (item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0);
     const paidThisMonth = monthData ? monthData.allocatedAmount : 0;
     const isCurrentPaid = paidThisMonth >= expectedRate && expectedRate > 0;
 
@@ -334,7 +390,7 @@ export default function PaymentsView() {
   // Get all payable months for a tenant (unpaid overdue months + active month if unpaid + upcoming advance months)
   // CRITICAL: NEVER include any month that is ALREADY FULLY PAID!
   const getPayableMonthsList = (item, activeMonth) => {
-    const defaultRate = item.unit?.monthlyRentExpected || 22000;
+    const defaultRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0;
     const list = [];
 
     // 1. Past / overdue unpaid months (only status === 'Unpaid' or 'Partially Paid')
@@ -445,7 +501,7 @@ export default function PaymentsView() {
         totalAmt += pm.dueAmount;
       } else {
         const md = item.monthsBreakdown?.find(b => b.monthYear === m);
-        const defaultRate = item.unit?.monthlyRentExpected || 22000;
+        const defaultRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0;
         totalAmt += md ? (md.outstandingAmount || md.expectedRate || defaultRate) : defaultRate;
       }
     });
@@ -488,7 +544,7 @@ export default function PaymentsView() {
     // Set saving state immediately to lock the button against fast double-clicks
     setSavingRows(prev => ({ ...prev, [rowKey]: true }));
 
-    const monthlyRate = item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 22000;
+    const monthlyRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 0;
 
     // Distribute entered amount across selected months
     let remaining = enteredTotal;
@@ -630,7 +686,7 @@ export default function PaymentsView() {
 
     const tenantId = item.tenant?._id;
     const unitId = item.unit?._id;
-    const monthlyRate = item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 22000;
+    const monthlyRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 0;
 
     setSelectedTenantInfo({
       tenantId,
@@ -689,7 +745,7 @@ export default function PaymentsView() {
       tenantPhone: receipt.tenantId?.phone || '',
       propertyName: receipt.unitId?.propertyId?.name || '',
       partitionName: receipt.unitId?.subUnitPartition || receipt.unitId?.unitName || '',
-      monthlyRate: receipt.unitId?.monthlyRentExpected || 22000
+      monthlyRate: receipt.unitId?.monthlyRentExpected || 0
     });
 
     try {
@@ -735,7 +791,7 @@ export default function PaymentsView() {
   const selectEarliestOnly = () => {
     if (unpaidMonthsList.length === 0) return;
     const earliest = unpaidMonthsList[0];
-    const amt = earliest.outstandingAmount > 0 ? earliest.outstandingAmount : (earliest.expectedRate || selectedTenantInfo?.monthlyRate || 22000);
+    const amt = earliest.outstandingAmount > 0 ? earliest.outstandingAmount : (earliest.expectedRate || selectedTenantInfo?.monthlyRate || 0);
     syncPaymentState({ [earliest.monthYear]: amt }, advanceMonthsList);
   };
 
@@ -743,7 +799,7 @@ export default function PaymentsView() {
   const selectAllUnpaid = () => {
     const fullMap = {};
     unpaidMonthsList.forEach(m => {
-      fullMap[m.monthYear] = m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || selectedTenantInfo?.monthlyRate || 22000);
+      fullMap[m.monthYear] = m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || selectedTenantInfo?.monthlyRate || 0);
     });
     syncPaymentState(fullMap, advanceMonthsList);
   };
@@ -1329,6 +1385,8 @@ export default function PaymentsView() {
             onResetWidths={resetColumnWidths}
             isHeaderSticky={isSheetHeaderSticky}
             onToggleHeaderSticky={setIsSheetHeaderSticky}
+            frozenColumnCount={frozenSheetCount}
+            onFrozenColumnCountChange={setFrozenSheetCount}
             filters={sheetFilters}
             onFiltersChange={(flts) => { setSheetFilters(flts); setSheetCurrentPage(1); }}
             filterSuggestions={sheetFilterSuggestions}
@@ -1378,9 +1436,10 @@ export default function PaymentsView() {
                   </colgroup>
                   <thead className={`bg-slate-100/90 border-b border-slate-200 select-none ${isSheetHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}`}>
                     <tr className="text-[11px] text-slate-700 font-extrabold">
-                      {visibleSheetColumns.map((colId) => {
+                      {visibleSheetColumns.map((colId, colIndex) => {
                         const dragProps = getHeaderDragProps(colId, visibleSheetColumns, setVisibleSheetColumns, 'payments_sheet_v5');
                         const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, true);
                         
                         let label = colId;
                         let align = 'text-left';
@@ -1416,7 +1475,7 @@ export default function PaymentsView() {
                           <th
                             key={colId}
                             {...dragProps}
-                            style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
+                            style={{ ...frozenStyle, width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
                             className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${extraClass}`}
                           >
                             <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
@@ -1457,7 +1516,7 @@ export default function PaymentsView() {
                       const rowKey = getRowKey(item);
                       const draft = getRowDraft(item);
                       const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-                      const expectedRate = monthData ? monthData.expectedRate : (item.unit?.monthlyRentExpected || 22000);
+                      const expectedRate = (monthData && monthData.expectedRate > 0) ? monthData.expectedRate : (item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0);
                       const paidThisMonth = monthData ? monthData.allocatedAmount : 0;
                       const outstandingTotal = item.totalOutstanding || 0;
                       const isFullyPaidThisMonth = paidThisMonth >= expectedRate && expectedRate > 0;
@@ -1469,10 +1528,12 @@ export default function PaymentsView() {
 
                       return (
                         <tr key={item.assignmentId || idx} className="hover:bg-slate-50/80 transition-colors">
-                          {visibleSheetColumns.map((colId) => {
+                          {visibleSheetColumns.map((colId, colIndex) => {
+                            const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+
                             if (colId === 'index') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-mono">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-mono">
                                   {item.property?.displayOrder ? (
                                     <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 font-bold text-slate-700 text-[11px]" title={`Property Order: ${item.property.displayOrder}`}>
                                       {item.property.displayOrder}
@@ -1485,7 +1546,7 @@ export default function PaymentsView() {
                             }
                             if (colId === 'tenant') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100">
                                   <p className="font-bold text-slate-900 text-sm">{item.tenant?.name || 'Unknown'}</p>
                                   <p className="text-slate-400 text-xs mt-0.5">{item.tenant?.phone || '—'}</p>
                                 </td>
@@ -1493,7 +1554,7 @@ export default function PaymentsView() {
                             }
                             if (colId === 'property') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100">
                                   <div className="font-semibold text-slate-800 text-xs">
                                     {item.property?.name || '—'}
                                   </div>
@@ -1502,7 +1563,7 @@ export default function PaymentsView() {
                             }
                             if (colId === 'subUnit') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100">
                                   <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs font-semibold">
                                     <Layers className="w-3 h-3 text-slate-400" />
                                     <span>{item.unit?.subUnitPartition || item.unit?.unitName || 'Partition'}</span>
@@ -1513,14 +1574,14 @@ export default function PaymentsView() {
                             }
                             if (colId === 'monthlyRent') {
                               return (
-                                <td key={colId} className="px-3 py-3.5 border-r border-slate-100 text-right font-semibold text-slate-700 text-xs font-mono">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right font-semibold text-slate-700 text-xs font-mono">
                                   {formatCurrency(expectedRate)}
                                 </td>
                               );
                             }
                             if (colId === 'outstanding') {
                               return (
-                                <td key={colId} className="px-3 py-3.5 border-r border-slate-100 text-right font-extrabold text-xs">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right font-extrabold text-xs">
                                   {outstandingTotal > 0 ? (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-black bg-rose-50 text-rose-700 border border-rose-200 font-mono">
                                       {formatCurrency(outstandingTotal)}
@@ -1535,7 +1596,7 @@ export default function PaymentsView() {
                             }
                             if (colId === 'paidUpTo') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-medium text-slate-600">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-medium text-slate-600">
                                   {item.paidTillMonth && item.paidTillMonth !== 'None' ? (
                                     <span className="text-slate-700 font-semibold">{formatMonthYear(item.paidTillMonth)}</span>
                                   ) : (
@@ -1547,7 +1608,7 @@ export default function PaymentsView() {
                             if (colId === 'paidForMonth') {
                               const selMonths = draft.selectedMonths && draft.selectedMonths.length > 0 ? draft.selectedMonths : [selectedMonth];
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100 relative">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100 relative">
                                   <div className="flex items-center">
                                     <button
                                       type="button"
@@ -1669,7 +1730,7 @@ export default function PaymentsView() {
                             }
                             if (colId === 'amount') {
                               return (
-                                <td key={colId} className="px-3 py-3 border-r border-slate-100">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
                                   <div className="relative flex items-center">
                                     <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
                                     <input
@@ -1690,56 +1751,56 @@ export default function PaymentsView() {
                             }
                             if (colId === 'tenantPhone') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
                                   {item.tenant?.phone || matchedTenant?.phone || '—'}
                                 </td>
                               );
                             }
                             if (colId === 'propertyType') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
                                   {matchedProp?.type || '—'}
                                 </td>
                               );
                             }
                             if (colId === 'subUnitArea') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700">
                                   {matchedUnit?.areaSqFt ? `${matchedUnit.areaSqFt} sq ft` : (item.unit?.areaSqFt ? `${item.unit.areaSqFt} sq ft` : '—')}
                                 </td>
                               );
                             }
                             if (colId === 'floor') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600">
                                   {matchedUnit?.floor || item.unit?.floor || '—'}
                                 </td>
                               );
                             }
                             if (colId === 'deposit') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700">
                                   {matchedTenant?.securityDeposit ? formatCurrency(matchedTenant.securityDeposit) : '—'}
                                 </td>
                               );
                             }
                             if (colId === 'nextUnpaid') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-semibold text-rose-600">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-semibold text-rose-600">
                                   {item.nextUnpaidMonth && item.nextUnpaidMonth !== 'Up to date' ? formatMonthYear(item.nextUnpaidMonth) : 'Up to date'}
                                 </td>
                               );
                             }
                             if (colId === 'totalCollected') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-extrabold text-emerald-700">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-extrabold text-emerald-700">
                                   {formatCurrency(item.totalAllocated || 0)}
                                 </td>
                               );
                             }
                             if (colId === 'createdAt' || colId === 'updatedAt') {
                               return (
-                                <td key={colId} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
+                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
                                   {item[colId] ? formatDate(item[colId]) : '—'}
                                 </td>
                               );
@@ -1747,7 +1808,7 @@ export default function PaymentsView() {
                              if (colId === 'actions') {
                               const hasEnteredAmount = Boolean(draft.amount && Number(draft.amount) > 0);
                               return (
-                                <td key={colId} className="px-3 py-3 text-right">
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 text-right">
                                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                                     {/* Payment Mode Selector */}
                                     <select
@@ -1881,6 +1942,8 @@ export default function PaymentsView() {
             onResetWidths={resetReceiptsWidths}
             isHeaderSticky={isReceiptsHeaderSticky}
             onToggleHeaderSticky={setIsReceiptsHeaderSticky}
+            frozenColumnCount={frozenReceiptsCount}
+            onFrozenColumnCountChange={setFrozenReceiptsCount}
             filters={receiptActiveFilters}
             onFiltersChange={(flts) => { setReceiptActiveFilters(flts); setReceiptCurrentPage(1); }}
             filterSuggestions={receiptFilterSuggestions}
@@ -2054,9 +2117,10 @@ export default function PaymentsView() {
                   isReceiptsHeaderSticky ? 'sticky top-0 z-20 shadow-sm' : ''
                 }`}>
                   <tr>
-                    {visibleReceiptsColumns.map(colId => {
+                    {visibleReceiptsColumns.map((colId, colIndex) => {
                       const dragProps = getHeaderDragProps(colId, visibleReceiptsColumns, setVisibleReceiptsColumns, 'payments_receipts');
                       const width = receiptsWidths[colId] || DEFAULT_RECEIPTS_COLUMN_WIDTHS[colId] || 100;
+                      const frozenStyle = getFrozenColumnStyle(colIndex, frozenReceiptsCount, visibleReceiptsColumns, receiptsWidths, true);
                       let label = colId;
                       let align = 'text-left';
                       if (['totalAmount', 'actions'].includes(colId)) align = 'text-right';
@@ -2088,7 +2152,7 @@ export default function PaymentsView() {
                           key={colId}
                           {...dragProps}
                           onClick={() => isSortable && handleReceiptHeaderSort(colId)}
-                          style={{ minWidth: `${Math.max(width, 105)}px`, width: `${Math.max(width, 105)}px` }}
+                          style={{ ...frozenStyle, minWidth: `${Math.max(width, 105)}px`, width: `${Math.max(width, 105)}px` }}
                           className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
                             isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
                           }`}
@@ -2139,24 +2203,26 @@ export default function PaymentsView() {
                   ) : (
                     paginatedReceipts.map(r => (
                     <tr key={r._id} className="hover:bg-slate-50/70 transition-colors">
-                      {visibleReceiptsColumns.map(colId => {
+                      {visibleReceiptsColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenReceiptsCount, visibleReceiptsColumns, receiptsWidths, false);
+
                         if (colId === 'receiptDate') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-600 text-xs">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-600 text-xs">
                               {formatDate(r.receiptDate)}
                             </td>
                           );
                         }
                         if (colId === 'createdAt' || colId === 'updatedAt') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-600 text-xs whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-600 text-xs whitespace-nowrap">
                               {r[colId] ? formatDate(r[colId]) : '—'}
                             </td>
                           );
                         }
                         if (colId === 'tenant') {
                           return (
-                            <td key={colId} className="px-5 py-4">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4">
                               <p className="font-bold text-slate-800 text-xs">{r.tenantId?.name || '—'}</p>
                               <p className="text-slate-400 text-[11px]">
                                 {r.unitId?.propertyId?.name} • {r.unitId?.subUnitPartition || r.unitId?.unitName || '—'}
@@ -2166,7 +2232,7 @@ export default function PaymentsView() {
                         }
                         if (colId === 'monthsCovered') {
                           return (
-                            <td key={colId} className="px-5 py-4">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4">
                               <span className="inline-flex px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-semibold">
                                 {r.monthsCovered || '—'}
                               </span>
@@ -2175,14 +2241,14 @@ export default function PaymentsView() {
                         }
                         if (colId === 'totalAmount') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-right font-extrabold text-emerald-700 text-xs">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-right font-extrabold text-emerald-700 text-xs">
                               {formatCurrency(r.totalAmount)}
                             </td>
                           );
                         }
                         if (colId === 'paymentMode') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-600 text-xs">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-600 text-xs">
                               <span className="px-2 py-0.5 rounded-full bg-slate-100 font-semibold text-[11px]">
                                 {r.paymentMode || 'Cash'}
                               </span>
@@ -2191,49 +2257,49 @@ export default function PaymentsView() {
                         }
                         if (colId === 'referenceNumber') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-700 text-xs font-mono">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-700 text-xs font-mono">
                               {r.referenceNumber || '—'}
                             </td>
                           );
                         }
                         if (colId === 'bankName') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-700 text-xs">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-700 text-xs">
                               {r.bankName || '—'}
                             </td>
                           );
                         }
                         if (colId === 'comments') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-600 text-xs max-w-xs truncate" title={r.comments}>
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-600 text-xs max-w-xs truncate" title={r.comments}>
                               {r.comments || '—'}
                             </td>
                           );
                         }
                         if (colId === 'tenantPhone') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-600 text-xs">
+                            <td key={colId} style={frozenStyle} className="px-4 py-4 text-slate-600 text-xs">
                               {r.tenantId?.phone || '—'}
                             </td>
                           );
                         }
                         if (colId === 'propertyName') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-800 font-semibold text-xs">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-800 font-semibold text-xs">
                               {r.unitId?.propertyId?.name || '—'}
                             </td>
                           );
                         }
                         if (colId === 'subUnitName') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-slate-700 text-xs">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-700 text-xs">
                               {r.unitId?.subUnitPartition || r.unitId?.unitName || '—'}
                             </td>
                           );
                         }
                         if (colId === 'actions') {
                           return (
-                            <td key={colId} className="px-5 py-4 text-right">
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
                                   onClick={() => openEditReceiptModal(r)}

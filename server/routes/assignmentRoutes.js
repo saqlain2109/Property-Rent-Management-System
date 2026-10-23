@@ -489,6 +489,9 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
         rentAmount !== undefined ? agreement?.rentType || 'Monthly Fixed' : 'Monthly Fixed'
       );
       const numericRent = Number(enteredRent);
+      if (nextStatus === 'Active') {
+        await Unit.findByIdAndUpdate(nextUnitId, { monthlyRentExpected: numericRent });
+      }
       if (!agreement) {
         agreement = await RentAgreement.create({
           assignmentId: assignment._id,
@@ -517,6 +520,9 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
         );
       }
     } else if (agreement) {
+      if (nextStatus === 'Active' && agreement.monthlyRate) {
+        await Unit.findByIdAndUpdate(nextUnitId, { monthlyRentExpected: agreement.monthlyRate });
+      }
       if (firstAgreement && startDate) firstAgreement.effectiveFrom = nextStartDate;
       if (contractType !== undefined) agreement.contractType = contractType === 'Business' ? 'Business' : 'Rent';
       if (terms !== undefined) agreement.terms = terms;

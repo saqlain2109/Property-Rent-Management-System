@@ -11,13 +11,22 @@ import ContractsView from './views/ContractsView';
 import PGView from './views/PGView';
 import PaymentsView from './views/PaymentsView';
 import ExpensesView from './views/ExpensesView';
+import ExpenseHeadsMasterView from './views/ExpenseHeadsMasterView';
 import LedgerReportsView from './views/LedgerReportsView';
 import API from './services/api';
 import { Menu, Building2 } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [currentTab, setCurrentTab] = useState('dashboard');
+  const [currentTab, setCurrentTab] = useState(() => {
+    return localStorage.getItem('property_mgmt_active_tab') || 'dashboard';
+  });
+
+  useEffect(() => {
+    if (currentTab) {
+      localStorage.setItem('property_mgmt_active_tab', currentTab);
+    }
+  }, [currentTab]);
   const [isInitialized, setIsInitialized] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -160,7 +169,14 @@ export default function App() {
 
           {currentTab === 'expenses' && <ExpensesView />}
 
-          {currentTab === 'ledger_reports' && <LedgerReportsView />}
+          {currentTab === 'expense_heads' && <ExpenseHeadsMasterView />}
+
+          {(currentTab === 'ledger_reports' || currentTab.startsWith('reports_')) && (
+            <LedgerReportsView 
+              activeReportId={currentTab} 
+              onSelectReport={(reportTab) => setCurrentTab(reportTab)}
+            />
+          )}
         </div>
       </main>
 

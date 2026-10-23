@@ -2,16 +2,19 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   LayoutDashboard, FolderTree, IndianRupee, Receipt, 
   BookOpen, LogOut, Building2, ChevronDown, ChevronRight,
-  Layers, Users, Home, UserCog, FileText
+  Layers, Users, Home, UserCog, FileText, Tag, FileSpreadsheet, Download
 } from 'lucide-react';
 import gsap from 'gsap';
 import API from '../services/api';
 
 export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onOpenProfile, isOpen, onClose }) {
   const sidebarRef = useRef(null);
-  const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'contracts', 'pg'].includes(currentTab);
+  const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'contracts', 'expense_heads', 'pg'].includes(currentTab);
+  const isReportsTab = ['ledger_reports', 'reports_matrix', 'reports_summary', 'reports_statement', 'reports_ledger', 'reports_export'].includes(currentTab);
+  
   const [mastersExpanded, setMastersExpanded] = useState(true);
-  const [counts, setCounts] = useState({ properties: 0, units: 0, tenants: 0, contracts: 0 });
+  const [reportsExpanded, setReportsExpanded] = useState(true);
+  const [counts, setCounts] = useState({ properties: 0, units: 0, tenants: 0, contracts: 0, expenseHeads: 0 });
 
   useEffect(() => {
     if (sidebarRef.current) {
@@ -29,15 +32,23 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
     }
   }, [isMasterTab]);
 
-  // Fetch counts for properties, partitions, tenants, and contracts
+  // Automatically keep reports expanded when user is inside any report tab
+  useEffect(() => {
+    if (isReportsTab) {
+      setReportsExpanded(true);
+    }
+  }, [isReportsTab]);
+
+  // Fetch counts for properties, partitions, tenants, contracts, and expense heads
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        const [pRes, uRes, tRes, cRes] = await Promise.all([
+        const [pRes, uRes, tRes, cRes, catRes] = await Promise.all([
           API.get('/properties'),
           API.get('/units'),
           API.get('/tenants'),
           API.get('/assignments'),
+          API.get('/expenses/categories'),
         ]);
 
         const allTenants = tRes.data?.data || [];
@@ -50,6 +61,7 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
           units: uRes.data?.data?.length || 0,
           tenants: activeTenants || allTenants.length,
           contracts: activeContracts || allContracts.length,
+          expenseHeads: catRes.data?.data?.length || 0,
         });
       } catch (e) {
         // quiet error
@@ -59,11 +71,20 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
   }, [currentTab]);
 
   const masterSubItems = [
-    { id: 'properties', label: 'Properties', icon: Building2, count: counts.properties },
-    { id: 'partitions', label: 'Partitions (Units)', icon: Layers, count: counts.units },
-    { id: 'tenants',    label: 'Tenants', icon: Users, count: counts.tenants },
-    { id: 'contracts',  label: 'Contracts (Leases)', icon: FileText, count: counts.contracts },
-    { id: 'pg',         label: 'PG Settlements', icon: Home },
+    { id: 'properties',    label: 'Properties', icon: Building2, count: counts.properties },
+    { id: 'partitions',    label: 'Partitions (Units)', icon: Layers, count: counts.units },
+    { id: 'tenants',       label: 'Tenants', icon: Users, count: counts.tenants },
+    { id: 'contracts',     label: 'Contracts (Leases)', icon: FileText, count: counts.contracts },
+    { id: 'expense_heads', label: 'Expense Heads', icon: Tag, count: counts.expenseHeads },
+    { id: 'pg',            label: 'PG Settlements', icon: Home },
+  ];
+
+  const reportsSubItems = [
+    { id: 'reports_matrix',    label: 'Property Monthly Matrix', icon: FileSpreadsheet, badge: 'Sheet 1' },
+    { id: 'reports_summary',   label: 'Property Account Summary', icon: Building2 },
+    { id: 'reports_statement', label: 'Portfolio Statement', icon: Layers },
+    { id: 'reports_ledger',    label: 'Account Book (Ledger)', icon: BookOpen },
+    { id: 'reports_export',    label: 'Portfolio Workbook (Excel)', icon: Download },
   ];
 
   return (
@@ -222,21 +243,75 @@ export default function Sidebar({ currentTab, setCurrentTab, user, onLogout, onO
           </div>
         </button>
 
-        {/* Reports */}
-        <button
-          onClick={() => setCurrentTab('ledger_reports')}
-          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-left transition-all group ${
-            currentTab === 'ledger_reports'
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/25'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
-        >
-          <BookOpen className={`w-4 h-4 shrink-0 ${currentTab === 'ledger_reports' ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'}`} />
-          <div className="min-w-0">
-            <p className="text-xs font-bold truncate">Reports</p>
-            <p className={`text-[10px] leading-tight truncate ${currentTab === 'ledger_reports' ? 'text-emerald-100/70' : 'text-slate-600 group-hover:text-slate-500'}`}>Account Book & Export</p>
-          </div>
-        </button>
+        {/* Reports Accordion Toggle */}
+        <div className="pt-1 pb-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setReportsExpanded(!reportsExpanded);
+              if (!isReportsTab) {
+                setCurrentTab('reports_matrix');
+              }
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-left transition-all group ${
+              isReportsTab
+                ? 'bg-slate-800 text-white font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <BookOpen className={`w-4 h-4 shrink-0 ${isReportsTab ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">Reports</p>
+                <p className={`text-[10px] leading-tight truncate ${isReportsTab ? 'text-emerald-400' : 'text-slate-600 group-hover:text-slate-500'}`}>
+                  Sheet 1 Matrix & Statements
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] bg-slate-700/60 text-slate-300 px-1.5 py-0.5 rounded-full font-medium">
+                5 Views
+              </span>
+              {reportsExpanded ? (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              )}
+            </div>
+          </button>
+
+          {/* Sub-items list (Tree style under Reports) */}
+          {reportsExpanded && (
+            <div className="ml-4 pl-3 border-l-2 border-slate-800 my-1.5 space-y-1">
+              {reportsSubItems.map((sub) => {
+                const isSubActive = currentTab === sub.id || (sub.id === 'reports_matrix' && currentTab === 'ledger_reports');
+                const SubIcon = sub.icon;
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => setCurrentTab(sub.id)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs transition-all ${
+                      isSubActive
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold shadow-md shadow-emerald-600/20'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/60 font-medium'
+                    }`}
+                  >
+                    <SubIcon className={`w-3.5 h-3.5 shrink-0 ${isSubActive ? 'text-white' : 'text-slate-500'}`} />
+                    <span className="truncate flex-1">{sub.label}</span>
+                    {sub.badge && (
+                      <span className={`text-[9px] px-1.5 py-0.2 rounded font-black tracking-tight ${
+                        isSubActive ? 'bg-emerald-700/90 text-emerald-100' : 'bg-slate-800 text-emerald-400'
+                      }`}>
+                        {sub.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </nav>
 
       {/* User Footer */}

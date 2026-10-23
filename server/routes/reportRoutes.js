@@ -708,4 +708,373 @@ router.get('/export-property-account-summary-excel', protect, async (req, res) =
   }
 });
 
+// @route GET /api/reports/property-monthly-matrix
+// Returns full spreadsheet-style matrix (Excel Sheet 1 format):
+// Left: Properties & Partitions, Columns: Months (Jan-Dec), Cells: Rent Expected & Received, Totals
+router.get('/property-monthly-matrix', protect, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const { propertyId } = req.query;
+
+    const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = MONTH_NAMES.map((name, i) => {
+      const monthNum = String(i + 1).padStart(2, '0');
+      const monthKey = `${year}-${monthNum}`;
+      return {
+        index: i,
+        monthKey,
+        monthName: name,
+        monthLabel: `${name} ${year}`,
+        shortLabel: `${name} ${String(year).slice(-2)}`
+      };
+    });
+
+    const propQuery = { isDeleted: { $ne: true } };
+    if (propertyId) {
+      propQuery._id = propertyId;
+    } else {
+      propQuery.propertyType = { $ne: 'General / Common' };
+    }
+
+    const properties = await Property.find(propQuery).sort({ propertyCode: 1, name: 1 }).lean();
+    const propertyIds = properties.map(p => p._id);
+
+    const units = await Unit.find({ propertyId: { $in: propertyIds } }).sort({ unitName: 1, subUnitPartition: 1 }).lean();
+    const unitIds = units.map(u => u._id);
+
+    const reversedReceipts = (await PaymentReceipt.find({ isReversed: true }).select('_id')).map(r => r._id);
+    const monthKeys = months.map(m => m.monthKey);
+
+    const allAllocations = await PaymentAllocation.find({
+      receiptId: { $nin: reversedReceipts },
+      rentMonthYear: { $in: monthKeys },
+      unitId: { $in: unitIds }
+    }).lean();
+
+    const allocMap = {};
+    for (const a of allAllocations) {
+      const k = `${a.unitId}_${a.rentMonthYear}`;
+      allocMap[k] = (allocMap[k] || 0) + (a.allocatedAmount || 0);
+    }
+
+    const allAssignments = await TenantAssignment.find({
+      unitId: { $in: unitIds }
+    }).populate('tenantId').sort({ startDate: -1 }).lean();
+
+    // Column totals across portfolio
+    const columnTotals = {};
+    months.forEach(m => {
+      columnTotals[m.monthKey] = {
+        expected: 0,
+        received: 0,
+        balance: 0
+      };
+    });
+
+    let portfolioTotalExpected = 0;
+    let portfolioTotalReceived = 0;
+    let portfolioTotalBalance = 0;
+
+    const matrixRows = [];
+
+    for (const property of properties) {
+      const propUnits = units.filter(u => String(u.propertyId) === String(property._id));
+      let propTotalExpected = 0;
+      let propTotalReceived = 0;
+      let propTotalBalance = 0;
+
+      const propMonthlyTotals = {};
+      months.forEach(m => {
+        propMonthlyTotals[m.monthKey] = { expected: 0, received: 0, balance: 0 };
+      });
+
+      const unitRows = [];
+
+      for (const unit of propUnits) {
+        const unitAssignments = allAssignments.filter(a => String(a.unitId) === String(unit._id));
+        const activeAssignment = unitAssignments.find(a => a.status === 'Active') || unitAssignments[0];
+
+        let unitTotalExpected = 0;
+        let unitTotalReceived = 0;
+        let unitTotalBalance = 0;
+
+        const monthsData = {};
+
+        for (const m of months) {
+          const [y, mNum] = m.monthKey.split('-').map(Number);
+          const totalDays = new Date(y, mNum, 0).getDate();
+          const monthStart = new Date(Date.UTC(y, mNum - 1, 1, 0, 0, 0));
+          const monthEnd = new Date(Date.UTC(y, mNum - 1, totalDays, 23, 59, 59, 999));
+
+          const matchingAssignment = unitAssignments.find(a => {
+            const sDate = a.startDate ? new Date(a.startDate) : new Date(0);
+            const eDate = a.endDate ? new Date(a.endDate) : null;
+            return sDate <= monthEnd && (!eDate || eDate >= monthStart);
+          }) || activeAssignment;
+
+          let expected = 0;
+          if (matchingAssignment) {
+            expected = await getEffectiveRentForMonth(unit._id, matchingAssignment.tenantId?._id, m.monthKey, matchingAssignment);
+          }
+          if (!expected && matchingAssignment?.rentAmount) {
+            expected = matchingAssignment.rentAmount;
+          }
+          if (!expected && unit.monthlyRentExpected) {
+            expected = unit.monthlyRentExpected;
+          }
+
+          const received = allocMap[`${unit._id}_${m.monthKey}`] || 0;
+          const balance = Math.max(0, expected - received);
+          const status = (received >= expected && expected > 0) ? 'Paid' : (received > 0 ? 'Partial' : (expected === 0 ? 'N/A' : 'Unpaid'));
+
+          monthsData[m.monthKey] = {
+            monthKey: m.monthKey,
+            monthName: m.monthName,
+            expected,
+            received,
+            balance,
+            status,
+            tenantName: matchingAssignment?.tenantId?.name || 'Vacant',
+            contractType: matchingAssignment?.contractType || 'Rent'
+          };
+
+          unitTotalExpected += expected;
+          unitTotalReceived += received;
+          unitTotalBalance += balance;
+
+          propMonthlyTotals[m.monthKey].expected += expected;
+          propMonthlyTotals[m.monthKey].received += received;
+          propMonthlyTotals[m.monthKey].balance += balance;
+
+          columnTotals[m.monthKey].expected += expected;
+          columnTotals[m.monthKey].received += received;
+          columnTotals[m.monthKey].balance += balance;
+        }
+
+        propTotalExpected += unitTotalExpected;
+        propTotalReceived += unitTotalReceived;
+        propTotalBalance += unitTotalBalance;
+
+        unitRows.push({
+          unitId: unit._id,
+          unitName: unit.unitName,
+          subUnitPartition: unit.subUnitPartition || unit.unitName,
+          propertyId: property._id,
+          propertyName: property.name,
+          propertyCode: property.propertyCode,
+          currentTenant: activeAssignment?.tenantId?.name || 'Vacant',
+          tenantPhone: activeAssignment?.tenantId?.phone || '',
+          contractType: activeAssignment?.contractType || 'Rent',
+          depositHeld: activeAssignment?.depositAmount || 0,
+          months: monthsData,
+          totalExpected: unitTotalExpected,
+          totalReceived: unitTotalReceived,
+          totalBalance: unitTotalBalance
+        });
+      }
+
+      portfolioTotalExpected += propTotalExpected;
+      portfolioTotalReceived += propTotalReceived;
+      portfolioTotalBalance += propTotalBalance;
+
+      matrixRows.push({
+        property: {
+          _id: property._id,
+          name: property.name,
+          code: property.propertyCode,
+          type: property.propertyType,
+          totalUnits: propUnits.length
+        },
+        units: unitRows,
+        propertyTotals: {
+          totalExpected: propTotalExpected,
+          totalReceived: propTotalReceived,
+          totalBalance: propTotalBalance,
+          monthlyTotals: propMonthlyTotals
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      year,
+      months,
+      matrix: matrixRows,
+      summary: {
+        totalProperties: properties.length,
+        totalUnits: units.length,
+        portfolioTotalExpected,
+        portfolioTotalReceived,
+        portfolioTotalBalance,
+        columnTotals
+      }
+    });
+  } catch (error) {
+    console.error('Error generating property monthly matrix:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/reports/export-property-monthly-matrix-excel
+// Generates Excel file matching Sheet 1 format with Properties, Months Columns, and Totals
+router.get('/export-property-monthly-matrix-excel', protect, async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const { propertyId, mode = 'received' } = req.query; // mode: 'received' | 'expected' | 'both'
+
+    const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = MONTH_NAMES.map((name, i) => {
+      const monthNum = String(i + 1).padStart(2, '0');
+      return {
+        monthKey: `${year}-${monthNum}`,
+        label: `${name} ${year}`
+      };
+    });
+
+    const propQuery = { isDeleted: { $ne: true } };
+    if (propertyId) {
+      propQuery._id = propertyId;
+    } else {
+      propQuery.propertyType = { $ne: 'General / Common' };
+    }
+
+    const properties = await Property.find(propQuery).sort({ propertyCode: 1, name: 1 }).lean();
+    const propertyIds = properties.map(p => p._id);
+    const units = await Unit.find({ propertyId: { $in: propertyIds } }).sort({ unitName: 1, subUnitPartition: 1 }).lean();
+    const unitIds = units.map(u => u._id);
+
+    const reversedReceipts = (await PaymentReceipt.find({ isReversed: true }).select('_id')).map(r => r._id);
+    const monthKeys = months.map(m => m.monthKey);
+
+    const allAllocations = await PaymentAllocation.find({
+      receiptId: { $nin: reversedReceipts },
+      rentMonthYear: { $in: monthKeys },
+      unitId: { $in: unitIds }
+    }).lean();
+
+    const allocMap = {};
+    for (const a of allAllocations) {
+      const k = `${a.unitId}_${a.rentMonthYear}`;
+      allocMap[k] = (allocMap[k] || 0) + (a.allocatedAmount || 0);
+    }
+
+    const allAssignments = await TenantAssignment.find({
+      unitId: { $in: unitIds }
+    }).populate('tenantId').sort({ startDate: -1 }).lean();
+
+    const headerRow = [
+      'Sr. No.',
+      'Property',
+      'Sub-Property / Partition',
+      'Current Tenant',
+      'Contract Type',
+      ...months.map(m => m.label),
+      `Total ${mode === 'expected' ? 'Expected' : mode === 'received' ? 'Received' : 'Rent'} (₹)`
+    ];
+
+    const dataRows = [];
+    const colSums = new Array(months.length).fill(0);
+    let grandTotalSum = 0;
+    let srNo = 1;
+
+    for (const property of properties) {
+      const propUnits = units.filter(u => String(u.propertyId) === String(property._id));
+      if (propUnits.length === 0) continue;
+
+      for (const unit of propUnits) {
+        const unitAssignments = allAssignments.filter(a => String(a.unitId) === String(unit._id));
+        const activeAssignment = unitAssignments.find(a => a.status === 'Active') || unitAssignments[0];
+
+        const rowValues = [];
+        let unitRowTotal = 0;
+
+        for (let i = 0; i < months.length; i++) {
+          const m = months[i];
+          const [y, mNum] = m.monthKey.split('-').map(Number);
+          const totalDays = new Date(y, mNum, 0).getDate();
+          const monthStart = new Date(Date.UTC(y, mNum - 1, 1, 0, 0, 0));
+          const monthEnd = new Date(Date.UTC(y, mNum - 1, totalDays, 23, 59, 59, 999));
+
+          const matchingAssignment = unitAssignments.find(a => {
+            const sDate = a.startDate ? new Date(a.startDate) : new Date(0);
+            const eDate = a.endDate ? new Date(a.endDate) : null;
+            return sDate <= monthEnd && (!eDate || eDate >= monthStart);
+          }) || activeAssignment;
+
+          let val = 0;
+          if (mode === 'expected') {
+            let exp = 0;
+            if (matchingAssignment) {
+              exp = await getEffectiveRentForMonth(unit._id, matchingAssignment.tenantId?._id, m.monthKey, matchingAssignment);
+            }
+            if (!exp && matchingAssignment?.rentAmount) exp = matchingAssignment.rentAmount;
+            if (!exp && unit.monthlyRentExpected) exp = unit.monthlyRentExpected;
+            val = exp;
+          } else {
+            // mode === 'received'
+            val = allocMap[`${unit._id}_${m.monthKey}`] || 0;
+          }
+
+          rowValues.push(val);
+          unitRowTotal += val;
+          colSums[i] += val;
+        }
+
+        grandTotalSum += unitRowTotal;
+
+        dataRows.push([
+          srNo++,
+          property.name,
+          unit.subUnitPartition || unit.unitName,
+          activeAssignment?.tenantId?.name || 'Vacant',
+          activeAssignment?.contractType || 'Rent',
+          ...rowValues,
+          unitRowTotal
+        ]);
+      }
+    }
+
+    const totalRow = [
+      'TOTAL',
+      '',
+      '',
+      '',
+      '',
+      ...colSums,
+      grandTotalSum
+    ];
+
+    const titleRow = [`PROPERTY MONTHLY RENT MATRIX (${mode.toUpperCase()}) · YEAR ${year}`];
+    const sheetData = [
+      titleRow,
+      [''],
+      headerRow,
+      ...dataRows,
+      totalRow
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+    ws['!cols'] = [
+      { wch: 8 },  // Sr No
+      { wch: 28 }, // Property
+      { wch: 25 }, // Sub Property
+      { wch: 22 }, // Tenant
+      { wch: 14 }, // Contract Type
+      ...months.map(() => ({ wch: 15 })), // Months
+      { wch: 18 }  // Total
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, `Rent Matrix ${year}`);
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename="Property_Monthly_Matrix_${year}_${mode}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error exporting property monthly matrix:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

@@ -4,7 +4,8 @@ const { body, validationResult } = require('express-validator');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const PaymentAllocation = require('../models/PaymentAllocation');
 const TenantAssignment = require('../models/TenantAssignment');
-const { calculateTenantUnitLedger, getCurrentMonthYear } = require('../services/rentCalculator');
+const Unit = require('../models/Unit');
+const { calculateTenantUnitLedger, getEffectiveRentForMonth, getCurrentMonthYear } = require('../services/rentCalculator');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
 const { syncMonthlyLedgers } = require('../utils/ledgerSync');
@@ -52,31 +53,71 @@ router.get('/', protect, async (req, res) => {
 });
 
 // @route GET /api/payments/outstanding-summary
-// Shows paid-till and pending amounts for all active occupancies
+// Shows paid-till and pending amounts for all occupancies effective for the requested targetMonth
 router.get('/outstanding-summary', protect, async (req, res) => {
   try {
     const { upToMonthYear } = req.query;
     const targetMonth = upToMonthYear || getCurrentMonthYear();
 
-    const activeAssignments = await TenantAssignment.find({ status: 'Active' })
-      .populate('tenantId', 'name tenantCode phone')
-      .populate({
-        path: 'unitId',
-        populate: { path: 'propertyId', select: 'name propertyCode displayOrder totalAreaSqFt propertyType address' }
-      });
+    const [year, m] = targetMonth.split('-').map(Number);
+    const totalDays = new Date(year, m, 0).getDate();
+    const monthStart = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+    const monthEnd = new Date(Date.UTC(year, m - 1, totalDays, 23, 59, 59, 999));
+
+    // Get all units excluding inactive ones
+    const allUnits = await Unit.find({ isActive: { $ne: false } })
+      .populate('propertyId', 'name propertyCode displayOrder totalAreaSqFt propertyType address')
+      .sort({ displayOrder: 1, unitCode: 1 });
 
     const summaries = [];
-    for (const assign of activeAssignments) {
-      if (!assign.unitId || !assign.tenantId) continue;
-      const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id, targetMonth);
+    for (const unit of allUnits) {
+      if (!unit.propertyId) continue;
+
+      // 1. Resolve contract active during targetMonth for this unit
+      let assign = await TenantAssignment.findOne({
+        unitId: unit._id,
+        $or: [
+          { startDate: null },
+          { startDate: { $lte: monthEnd } }
+        ],
+        $and: [
+          {
+            $or: [
+              { endDate: null },
+              { endDate: { $gte: monthStart } }
+            ]
+          }
+        ]
+      }).populate('tenantId', 'name tenantCode phone').sort({ startDate: -1 });
+
+      // 2. If no contract active during targetMonth, fall back to current active or latest contract
+      if (!assign) {
+        assign = await TenantAssignment.findOne({ unitId: unit._id, status: 'Active' })
+          .populate('tenantId', 'name tenantCode phone')
+          .sort({ startDate: -1 });
+      }
+      if (!assign) {
+        assign = await TenantAssignment.findOne({ unitId: unit._id })
+          .populate('tenantId', 'name tenantCode phone')
+          .sort({ startDate: -1 });
+      }
+
+      if (!assign || !assign.tenantId) continue;
+
+      const ledger = await calculateTenantUnitLedger(unit._id, assign.tenantId._id, targetMonth, assign);
+      const effectiveRate = await getEffectiveRentForMonth(unit._id, assign.tenantId._id, targetMonth, assign);
+
       summaries.push({
         assignmentId: assign._id,
         assignmentCode: assign.assignmentCode,
+        contractStatus: assign.status,
+        contractType: assign.contractType || 'Rent',
         createdAt: assign.createdAt,
         updatedAt: assign.updatedAt,
         tenant: assign.tenantId,
-        unit: assign.unitId,
-        property: assign.unitId.propertyId,
+        unit: unit,
+        property: unit.propertyId,
+        monthlyRentExpected: effectiveRate || unit.monthlyRentExpected || 0,
         paidTillMonth: ledger.paidTillMonth || 'None',
         nextUnpaidMonth: ledger.nextUnpaidMonth || 'Up to date',
         totalExpected: ledger.totalExpected,

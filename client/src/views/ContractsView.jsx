@@ -135,10 +135,15 @@ export default function ContractsView() {
 
   const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('contracts_v2', 0);
 
-  // Controls & Toolbar States (APEX Integration)
-  const [search, setSearch] = useState('');
-  const [propertyFilter, setPropertyFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('Active');
+  // Controls & Toolbar States (APEX Integration with localStorage persistence)
+  const [search, setSearch] = useState(() => localStorage.getItem('contracts_search') || '');
+  useEffect(() => { localStorage.setItem('contracts_search', search); }, [search]);
+
+  const [propertyFilter, setPropertyFilter] = useState(() => localStorage.getItem('contracts_prop_filter') || '');
+  useEffect(() => { localStorage.setItem('contracts_prop_filter', propertyFilter); }, [propertyFilter]);
+
+  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('contracts_status_filter') || 'Active');
+  useEffect(() => { localStorage.setItem('contracts_status_filter', statusFilter); }, [statusFilter]);
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
