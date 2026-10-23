@@ -319,19 +319,24 @@ export default function ExpensesView() {
           const initCat = commCats[0] || 'MOM';
           setQuickForm(prev => prev.propertyId ? prev : ({
             ...prev,
-            propertyId: commonProp?._id || '__OTHER_EXPENSES__',
-            category: initCat
-          }));
-        } else if (regularProps.length > 0) {
-          const initCat = propCats[0] || 'Maintenance';
-          setQuickForm(prev => prev.propertyId ? prev : ({
-            ...prev,
-            propertyId: regularProps[0]._id,
+            propertyId: '__OTHER_EXPENSES__',
             category: initCat
           }));
           setForm(prev => prev.propertyId ? prev : ({
             ...prev,
-            propertyId: regularProps[0]._id,
+            propertyId: '__OTHER_EXPENSES__',
+            category: initCat
+          }));
+        } else {
+          const initCat = propCats[0] || 'Maintenance';
+          setQuickForm(prev => (prev.propertyId !== undefined && prev.propertyId !== '') ? prev : ({
+            ...prev,
+            propertyId: '', // Default to General / Common Expense
+            category: initCat
+          }));
+          setForm(prev => (prev.propertyId !== undefined && prev.propertyId !== '') ? prev : ({
+            ...prev,
+            propertyId: '',
             category: initCat
           }));
         }
@@ -351,18 +356,20 @@ export default function ExpensesView() {
   // Separate Common vs Property Heads directly from Master
   const commonCategories = React.useMemo(() => {
     const fromApi = categories
-      .filter(c => typeof c === 'object' && c.headType === 'Common')
-      .map(c => c.name);
-    if (fromApi.length > 0) return fromApi;
-    return DEFAULT_COMMON_HEADS;
+      .filter(c => (typeof c === 'object' ? c.headType === 'Common' : false))
+      .map(c => c.name?.trim())
+      .filter(Boolean);
+    const list = fromApi.length > 0 ? fromApi : DEFAULT_COMMON_HEADS;
+    return Array.from(new Set(list));
   }, [categories]);
 
   const propertyCategories = React.useMemo(() => {
     const fromApi = categories
-      .filter(c => typeof c === 'object' && c.headType !== 'Common')
-      .map(c => c.name);
-    if (fromApi.length > 0) return fromApi;
-    return DEFAULT_PROPERTY_HEADS;
+      .filter(c => (typeof c === 'object' ? c.headType !== 'Common' : true))
+      .map(c => (typeof c === 'object' ? c.name?.trim() : String(c).trim()))
+      .filter(Boolean);
+    const list = fromApi.length > 0 ? fromApi : DEFAULT_PROPERTY_HEADS;
+    return Array.from(new Set(list));
   }, [categories]);
 
   // Compute merged category names from defaults and DB
@@ -372,8 +379,8 @@ export default function ExpensesView() {
 
   // Check if property is General Common (no income, only expenses)
   const isGeneralCommonProperty = (propId) => {
-    if (propId === '__OTHER_EXPENSES__') return true;
-    if (!propId) return false;
+    if (propId === '__OTHER_EXPENSES__') return false;
+    if (!propId) return true; // empty string means General / Common Expense
     const prop = properties.find(p => String(p._id) === String(propId));
     if (!prop) return false;
     return prop.propertyCode === 'PROP-COMMON' || 
@@ -384,14 +391,8 @@ export default function ExpensesView() {
   // Helper to determine if an expense is an "Other Expense" (Non-property / Company cost like MOM, Zakat, Misc, Margaret)
   const isExpenseOther = (expense) => {
     if (!expense) return false;
-    const propCode = expense.propertyId?.propertyCode || '';
-    const propName = expense.propertyId?.name || '';
-    const propType = expense.propertyId?.propertyType || '';
-    if (propCode === 'PROP-COMMON' || propName.toLowerCase().includes('general common') || propType === 'General / Common') {
-      return true;
-    }
-    const cat = (expense.category || '').toLowerCase();
-    const commonLowerSet = new Set(commonCategories.map(c => c.toLowerCase()));
+    const cat = (expense.category || '').toLowerCase().trim();
+    const commonLowerSet = new Set(commonCategories.map(c => c.toLowerCase().trim()));
     if (commonLowerSet.has(cat)) return true;
     const knownOther = ['mom', 'margaret', 'zakat', 'sadka', 'islamic', 'send to dubai', 'it fees', 'donations', 'akbar', 'bhati', 'gafoor'];
     return knownOther.some(k => cat.includes(k));
@@ -399,20 +400,17 @@ export default function ExpensesView() {
 
   const handleScopeChange = (newScope) => {
     setExpenseScope(newScope);
-    const regularProps = properties.filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'));
-    const commonProp = properties.find(p => p.propertyCode === 'PROP-COMMON' || p.propertyType === 'General / Common' || p.name?.toLowerCase().includes('general common'));
-    
     if (newScope === 'other') {
       setQuickForm(prev => ({
         ...prev,
-        propertyId: commonProp?._id || '__OTHER_EXPENSES__',
+        propertyId: '__OTHER_EXPENSES__',
         unitId: '',
         category: commonCategories[0] || 'MOM'
       }));
-    } else if (newScope === 'property' && regularProps.length > 0) {
+    } else {
       setQuickForm(prev => ({
         ...prev,
-        propertyId: regularProps[0]._id,
+        propertyId: '', // General / Common Expense
         unitId: '',
         category: propertyCategories[0] || 'Maintenance'
       }));
@@ -420,22 +418,22 @@ export default function ExpensesView() {
   };
 
   const handleQuickPropertyChange = (newPropId) => {
-    const isCommon = isGeneralCommonProperty(newPropId);
+    const isOther = newPropId === '__OTHER_EXPENSES__';
     let nextCat = quickForm.category;
-    if (isCommon && !commonCategories.includes(quickForm.category)) {
+    if (isOther && !commonCategories.includes(quickForm.category)) {
       nextCat = commonCategories[0] || 'MOM';
-    } else if (!isCommon && !propertyCategories.includes(quickForm.category)) {
+    } else if (!isOther && !propertyCategories.includes(quickForm.category)) {
       nextCat = propertyCategories[0] || 'Maintenance';
     }
     setQuickForm(prev => ({ ...prev, propertyId: newPropId, unitId: '', category: nextCat }));
   };
 
   const handleModalPropertyChange = (newPropId) => {
-    const isCommon = isGeneralCommonProperty(newPropId);
+    const isOther = newPropId === '__OTHER_EXPENSES__';
     let nextCat = form.category;
-    if (isCommon && !commonCategories.includes(form.category)) {
+    if (isOther && !commonCategories.includes(form.category)) {
       nextCat = commonCategories[0] || 'MOM';
-    } else if (!isCommon && !propertyCategories.includes(form.category)) {
+    } else if (!isOther && !propertyCategories.includes(form.category)) {
       nextCat = propertyCategories[0] || 'Maintenance';
     }
     setForm(prev => ({ ...prev, propertyId: newPropId, unitId: '', category: nextCat }));
@@ -446,7 +444,7 @@ export default function ExpensesView() {
     const catName = (name || newCategoryName).trim();
     if (!catName) return;
     const activePropId = showModal ? form.propertyId : quickForm.propertyId;
-    const type = explicitType || newCategoryType || (isGeneralCommonProperty(activePropId) ? 'Common' : 'Property');
+    const type = explicitType || newCategoryType || (activePropId === '__OTHER_EXPENSES__' ? 'Common' : 'Property');
     try {
       setCreatingCategory(true);
       const res = await API.post('/expenses/categories', { name: catName, headType: type });
@@ -782,12 +780,13 @@ export default function ExpensesView() {
   const resetForm = () => {
     setEditingExpenseId(null);
     setEntryByDate(false);
+    const isOtherScope = expenseScope === 'other';
     setForm({
       expenseMonth: selectedMonth,
       expenseDate: new Date().toISOString().split('T')[0],
-      propertyId: '',
+      propertyId: isOtherScope ? '__OTHER_EXPENSES__' : '',
       unitId: '',
-      category: 'Maintenance',
+      category: isOtherScope ? (commonCategories[0] || 'MOM') : (propertyCategories[0] || 'Maintenance'),
       amount: '',
       description: '',
       vendorOrPayee: '',
@@ -1219,27 +1218,24 @@ export default function ExpensesView() {
               {/* 1. Property Select */}
               <div className="lg:col-span-3">
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  1. Property / Account
+                  1. Property
                 </label>
                 <select
                   value={quickForm.propertyId}
                   onChange={(e) => handleQuickPropertyChange(e.target.value)}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
-                  <optgroup label="Properties (General Property Expenses)">
-                    {properties
-                      .filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'))
-                      .map(p => (
-                        <option key={p._id} value={p._id}>
-                          {p.name} {p.propertyCode ? `(${p.propertyCode})` : ''}
-                        </option>
-                      ))}
-                  </optgroup>
-                  <optgroup label="Other / Common Expenses">
-                    <option value="__OTHER_EXPENSES__">
-                      ★ Other Expenses (MOM, Zakat, Misc, Margaret...)
-                    </option>
-                  </optgroup>
+                  <option value="">General / Common Expense</option>
+                  {properties
+                    .filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'))
+                    .map(p => (
+                      <option key={p._id} value={p._id}>
+                        {p.name} {p.propertyCode ? `(${p.propertyCode})` : ''}
+                      </option>
+                    ))}
+                  <option value="__OTHER_EXPENSES__">
+                    ★ Other Expenses (MOM, Zakat, Misc, Margaret...)
+                  </option>
                 </select>
               </div>
 
@@ -1250,7 +1246,7 @@ export default function ExpensesView() {
                 </label>
                 <select
                   value={quickForm.unitId}
-                  disabled={!quickForm.propertyId || isGeneralCommonProperty(quickForm.propertyId)}
+                  disabled={!quickForm.propertyId || quickForm.propertyId === '__OTHER_EXPENSES__' || isGeneralCommonProperty(quickForm.propertyId)}
                   onChange={(e) => setQuickForm({ ...quickForm, unitId: e.target.value })}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:text-slate-400 shadow-2xs"
                 >
@@ -1290,7 +1286,7 @@ export default function ExpensesView() {
                   }}
                   className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 >
-                  {isGeneralCommonProperty(quickForm.propertyId) ? (
+                  {quickForm.propertyId === '__OTHER_EXPENSES__' ? (
                     <>
                       {!commonCategories.includes(quickForm.category) && quickForm.category && (
                         <option value={quickForm.category}>{quickForm.category}</option>
@@ -1632,10 +1628,16 @@ export default function ExpensesView() {
                                         const dStr = e.expenseDate ? new Date(e.expenseDate).toISOString().split('T')[0] : '';
                                         const mStr = e.expenseMonth || (dStr ? dStr.slice(0, 7) : selectedMonth);
                                         setEntryByDate(Boolean(dStr && !dStr.endsWith('-01')));
+                                        let propVal = e.propertyId?._id || e.propertyId || '';
+                                        if (isExpenseOther(e)) {
+                                          propVal = '__OTHER_EXPENSES__';
+                                        } else if (isGeneralCommonProperty(propVal)) {
+                                          propVal = '';
+                                        }
                                         setForm({
                                           expenseMonth: mStr,
                                           expenseDate: dStr,
-                                          propertyId: e.propertyId?._id || e.propertyId || '',
+                                          propertyId: propVal,
                                           unitId: e.unitId?._id || e.unitId || '',
                                           category: e.category || 'Maintenance',
                                           amount: String(e.amount),
@@ -1968,10 +1970,16 @@ export default function ExpensesView() {
                                           const dStr = e.expenseDate ? new Date(e.expenseDate).toISOString().split('T')[0] : '';
                                           const mStr = e.expenseMonth || (dStr ? dStr.slice(0, 7) : getCurrentMonthYear());
                                           setEntryByDate(Boolean(dStr && !dStr.endsWith('-01')));
+                                          let propVal = e.propertyId?._id || e.propertyId || '';
+                                          if (isExpenseOther(e)) {
+                                            propVal = '__OTHER_EXPENSES__';
+                                          } else if (isGeneralCommonProperty(propVal)) {
+                                            propVal = '';
+                                          }
                                           setForm({
                                             expenseMonth: mStr,
                                             expenseDate: dStr,
-                                            propertyId: e.propertyId?._id || e.propertyId || '',
+                                            propertyId: propVal,
                                             unitId: e.unitId?._id || e.unitId || '',
                                             category: e.category || 'Maintenance',
                                             amount: String(e.amount),
@@ -2098,10 +2106,11 @@ export default function ExpensesView() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <SearchableSelect
-                    label="Property / Account"
-                    placeholder="Select Property or Other Expenses"
+                    label="Property"
+                    placeholder="General / Common Expense"
                     searchPlaceholder="Search properties or other expenses..."
                     options={[
+                      { value: '', label: 'General / Common Expense' },
                       ...properties
                         .filter(p => p.propertyCode !== 'PROP-COMMON' && p.propertyType !== 'General / Common' && !p.name?.toLowerCase().includes('general common'))
                         .map((property) => ({
@@ -2120,7 +2129,7 @@ export default function ExpensesView() {
                   </label>
                   <select
                     value={form.unitId}
-                    disabled={!form.propertyId || isGeneralCommonProperty(form.propertyId)}
+                    disabled={!form.propertyId || form.propertyId === '__OTHER_EXPENSES__' || isGeneralCommonProperty(form.propertyId)}
                     onChange={(e) => setForm({ ...form, unitId: e.target.value })}
                     className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                   >
@@ -2167,7 +2176,7 @@ export default function ExpensesView() {
                   }}
                   className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
                 >
-                  {isGeneralCommonProperty(form.propertyId) ? (
+                  {form.propertyId === '__OTHER_EXPENSES__' ? (
                     <>
                       {!commonCategories.includes(form.category) && form.category && (
                         <option value={form.category}>{form.category}</option>

@@ -4,7 +4,8 @@ import PropertiesView from './PropertiesView';
 import PartitionsView from './PartitionsView';
 import TenantsView from './TenantsView';
 import PGView from './PGView';
-import { Building2, ChevronDown, ChevronRight, FolderTree, Home, Layers, Users } from 'lucide-react';
+import ExpenseHeadsMasterView from './ExpenseHeadsMasterView';
+import { Building2, ChevronDown, ChevronRight, FolderTree, Home, Layers, Users, Tag } from 'lucide-react';
 
 export default function MasterManagerView() {
   const [activeTab, setActiveTab] = useState('properties');
@@ -14,18 +15,21 @@ export default function MasterManagerView() {
   const [properties, setProperties] = useState([]);
   const [units, setUnits] = useState([]);
   const [tenantCount, setTenantCount] = useState(0);
+  const [expenseHeadsCount, setExpenseHeadsCount] = useState(0);
   const [partitionSearch, setPartitionSearch] = useState('');
 
   const refreshTree = async () => {
     try {
-      const [propertyRes, unitRes, tenantRes] = await Promise.all([
+      const [propertyRes, unitRes, tenantRes, catRes] = await Promise.all([
         API.get('/properties'),
         API.get('/units'),
         API.get('/tenants'),
+        API.get('/expenses/categories'),
       ]);
       if (propertyRes.data.success) setProperties(propertyRes.data.data);
       if (unitRes.data.success) setUnits(unitRes.data.data);
       if (tenantRes.data.success) setTenantCount(tenantRes.data.data.length);
+      if (catRes.data.success) setExpenseHeadsCount(catRes.data.data.length);
     } catch (error) {
       console.error('Could not load master navigation tree:', error);
     }
@@ -134,6 +138,7 @@ export default function MasterManagerView() {
           )}
           {[
             { id: 'tenants', label: 'Tenants', icon: Users, count: tenantCount },
+            { id: 'expense_heads', label: 'Expense Heads', icon: Tag, count: expenseHeadsCount },
             { id: 'pg', label: 'PG Settlements', icon: Home },
           ].map(({ id, label, icon: Icon, count }) => (
             <button
@@ -172,6 +177,7 @@ export default function MasterManagerView() {
           />
         )}
         {activeTab === 'tenants' && <TenantsView onDataChanged={refreshTree} />}
+        {activeTab === 'expense_heads' && <ExpenseHeadsMasterView onDataChanged={refreshTree} />}
         {activeTab === 'pg' && <PGView />}
       </div>
     </div>
