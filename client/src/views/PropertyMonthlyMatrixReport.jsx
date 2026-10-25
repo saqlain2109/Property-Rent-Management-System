@@ -5,8 +5,12 @@ import {
   Building2, Calendar, Download, RefreshCw, Filter, 
   Search, CheckSquare, Square, FileSpreadsheet,
   CheckCircle2, AlertCircle, ArrowUpDown, ChevronDown,
-  Layers, Wallet, IndianRupee, PieChart, TrendingUp, TrendingDown
+  Layers, Wallet, IndianRupee, PieChart, TrendingUp, TrendingDown,
+  ArrowUp, ArrowDown
 } from 'lucide-react';
+import ApexToolbar from '../components/ApexToolbar';
+import { cycleThreeStateSort, evaluateFilterRule } from '../utils/tableUtils';
+import { useFrozenColumns, getFrozenColumnStyle, useResizableColumns, ColumnHeaderCell, useTableAutoWrap } from '../components/ColumnManager';
 
 const PRESET_RANGES = [
   { id: 'sheet1', label: 'Master Sheet 1 (Mar 2025 – Feb 2026)', start: '2025-03', end: '2026-02' },
@@ -36,6 +40,65 @@ export default function PropertyMonthlyMatrixReport() {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+
+  // APEX Toolbar & Global Grid Sort State
+  const [rowsPerPage, setRowsPerPage] = useState('All');
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
+  const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('matrix_sheet1_freeze_v1', 0);
+  const [activeViewId, setActiveViewId] = useState(null);
+  const [matrixFilters, setMatrixFilters] = useState([]);
+
+  const columnsDef = useMemo(() => {
+    const list = [
+      { id: 'order', label: 'Sr.', defaultVisible: true },
+      { id: 'partition', label: 'Partition', defaultVisible: true },
+      { id: 'details', label: 'Property / Tenant / Head', defaultVisible: true },
+    ];
+    if (reportData?.activeMonths) {
+      reportData.activeMonths.forEach(m => {
+        list.push({ id: m.monthKey, label: m.shortLabel || m.monthName, defaultVisible: true });
+      });
+    }
+    list.push({ id: 'total', label: 'Row Total (₹)', defaultVisible: true });
+    list.push({ id: 'subtotal', label: 'Group Subtotal', defaultVisible: true });
+    return list;
+  }, [reportData]);
+
+  const matrixColDefaults = useMemo(() => {
+    const map = {
+      order: 48,
+      partition: 115,
+      details: 230,
+      total: 125,
+      subtotal: 130
+    };
+    if (reportData?.activeMonths) {
+      reportData.activeMonths.forEach(m => {
+        map[m.monthKey] = 110;
+      });
+    }
+    return map;
+  }, [reportData]);
+
+  const {
+    columnWidths,
+    handleResizeStart,
+    resetColumnWidths
+  } = useResizableColumns('property_matrix_report_widths_v2', matrixColDefaults);
+
+  const { autoWrap } = useTableAutoWrap();
+
+  const [visibleColumns, setVisibleColumns] = useState([]);
+  useEffect(() => {
+    if (columnsDef.length > 0 && visibleColumns.length === 0) {
+      setVisibleColumns(columnsDef.map(c => c.id));
+    }
+  }, [columnsDef]);
+
+  const handleSort = (colKey) => {
+    setSortConfig(prev => cycleThreeStateSort(prev, colKey));
+  };
 
   // Sync state to localStorage
   useEffect(() => {
@@ -362,6 +425,44 @@ export default function PropertyMonthlyMatrixReport() {
         </div>
       </div>
 
+      {/* APEX Toolbar for Master Matrix */}
+      <ApexToolbar
+        search={search}
+        onSearchChange={setSearch}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={setRowsPerPage}
+        availableRowsOptions={[10, 25, 50, 100, 'All']}
+        columns={columnsDef}
+        visibleColumns={visibleColumns.length > 0 ? visibleColumns : columnsDef.map(c => c.id)}
+        onChangeVisibleColumns={setVisibleColumns}
+        columnWidths={columnWidths}
+        onResetWidths={resetColumnWidths}
+        filters={matrixFilters}
+        onFiltersChange={setMatrixFilters}
+        sortConfig={sortConfig}
+        onSortChange={setSortConfig}
+        isHeaderSticky={isHeaderSticky}
+        onToggleHeaderSticky={setIsHeaderSticky}
+        frozenColumnCount={frozenColumnCount}
+        onFrozenColumnCountChange={setFrozenColumnCount}
+        activeViewName={activeViewId}
+        onViewChange={setActiveViewId}
+        onExport={handleExportExcel}
+        storageKey="matrix_sheet1_v1"
+        primaryAction={
+          <select
+            value={activeSection}
+            onChange={(e) => setActiveSection(e.target.value)}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
+          >
+            <option value="all">All Sections (Rent & Expenses)</option>
+            <option value="rent">1. Rent Income Only</option>
+            <option value="expenses">2. Property Expenses Only</option>
+            <option value="reconciliation">3. Balance Reconciliation</option>
+          </select>
+        }
+      />
+
       {/* ======================================================== */}
       {/* THE MASTER FINANCIAL SPREADSHEET (SHEET 1) TABLE */}
       {/* ======================================================== */}
@@ -377,33 +478,114 @@ export default function PropertyMonthlyMatrixReport() {
           </div>
         ) : (
           <div className="overflow-x-auto max-h-[75vh]">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-separate border-spacing-0">
               {/* STICKY MAIN TABLE HEADER */}
-              <thead className="sticky top-0 z-20 bg-slate-900 text-white shadow-md">
+              <thead className={isHeaderSticky ? 'sticky top-0 z-20 bg-slate-900 text-white shadow-md' : 'bg-slate-900 text-white'}>
                 <tr>
-                  <th className="px-3 py-3 w-12 text-center font-extrabold uppercase text-[10px] tracking-wider border-r border-slate-800">
-                    Sr.
-                  </th>
-                  <th className="px-3 py-3 w-28 font-extrabold uppercase text-[10px] tracking-wider border-r border-slate-800">
-                    Partition
-                  </th>
-                  <th className="px-4 py-3 min-w-[220px] font-extrabold uppercase text-[10px] tracking-wider border-r border-slate-800">
-                    Property / Tenant / Head
-                  </th>
-                  {activeMonths.map(m => (
-                    <th
+                  <ColumnHeaderCell
+                    colId="order"
+                    label="Sr."
+                    align="center"
+                    width={columnWidths['order']}
+                    minWidth={40}
+                    isSortable={true}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                    isFilterable={false}
+                    onResizeStart={handleResizeStart}
+                    isFrozen={frozenColumnCount > 0}
+                    frozenStyle={{
+                      ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, true),
+                      backgroundColor: '#0f172a'
+                    }}
+                    isHeaderSticky={isHeaderSticky}
+                    theme="dark"
+                  />
+                  <ColumnHeaderCell
+                    colId="partition"
+                    label="Partition"
+                    width={columnWidths['partition']}
+                    minWidth={90}
+                    isSortable={true}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                    isFilterable={false}
+                    onResizeStart={handleResizeStart}
+                    isFrozen={frozenColumnCount > 1}
+                    frozenStyle={{
+                      ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, true),
+                      backgroundColor: '#0f172a'
+                    }}
+                    isHeaderSticky={isHeaderSticky}
+                    theme="dark"
+                  />
+                  <ColumnHeaderCell
+                    colId="details"
+                    label="Property / Tenant / Head"
+                    width={columnWidths['details']}
+                    minWidth={180}
+                    isSortable={true}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                    isFilterable={false}
+                    onResizeStart={handleResizeStart}
+                    isFrozen={frozenColumnCount > 2}
+                    frozenStyle={{
+                      ...getFrozenColumnStyle(2, frozenColumnCount, visibleColumns, columnWidths, true),
+                      backgroundColor: '#0f172a'
+                    }}
+                    isHeaderSticky={isHeaderSticky}
+                    theme="dark"
+                  />
+                  {activeMonths.map((m, mIdx) => (
+                    <ColumnHeaderCell
                       key={m.monthKey}
-                      className="px-3 py-3 min-w-[105px] text-right font-extrabold uppercase text-[10px] tracking-wider border-r border-slate-800"
-                    >
-                      {m.shortLabel || m.monthName}
-                    </th>
+                      colId={m.monthKey}
+                      label={m.shortLabel || m.monthName}
+                      align="right"
+                      width={columnWidths[m.monthKey]}
+                      minWidth={95}
+                      isSortable={true}
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                      isFilterable={false}
+                      onResizeStart={handleResizeStart}
+                      isFrozen={frozenColumnCount > (3 + mIdx)}
+                      frozenStyle={getFrozenColumnStyle(3 + mIdx, frozenColumnCount, visibleColumns, columnWidths, true)}
+                      isHeaderSticky={isHeaderSticky}
+                      theme="dark"
+                    />
                   ))}
-                  <th className="px-3 py-3 min-w-[125px] text-right font-extrabold uppercase text-[10px] tracking-wider border-r border-slate-800 bg-slate-950">
-                    Row Total (₹)
-                  </th>
-                  <th className="px-3 py-3 min-w-[130px] text-right font-extrabold uppercase text-[10px] tracking-wider bg-slate-950">
-                    Group Subtotal
-                  </th>
+                  <ColumnHeaderCell
+                    colId="total"
+                    label="Row Total (₹)"
+                    align="right"
+                    width={columnWidths['total']}
+                    minWidth={115}
+                    isSortable={true}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                    isFilterable={false}
+                    onResizeStart={handleResizeStart}
+                    isHeaderSticky={isHeaderSticky}
+                    theme="dark"
+                    style={{ backgroundColor: '#020617' }}
+                  />
+                  <ColumnHeaderCell
+                    colId="subtotal"
+                    label="Group Subtotal"
+                    align="right"
+                    width={columnWidths['subtotal']}
+                    minWidth={115}
+                    isSortable={true}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                    isFilterable={false}
+                    onResizeStart={handleResizeStart}
+                    isHeaderSticky={isHeaderSticky}
+                    theme="dark"
+                    style={{ backgroundColor: '#020617' }}
+                  />
                 </tr>
               </thead>
 

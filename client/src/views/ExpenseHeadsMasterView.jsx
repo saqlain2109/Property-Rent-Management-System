@@ -22,7 +22,7 @@ import {
 const EXPENSE_HEADS_COLUMNS_DEF = [
   { id: 'index', label: '#', defaultVisible: true },
   { id: 'name', label: 'Expense Head Name', defaultVisible: true },
-  { id: 'headType', label: 'Head Scope / Classification', defaultVisible: true },
+  { id: 'headType', label: 'Expense Head type', defaultVisible: true },
   { id: 'usage', label: 'Logged Entries', defaultVisible: true },
   { id: 'totalAmount', label: 'Total Spent (₹)', defaultVisible: true },
   { id: 'isDefault', label: 'Status', defaultVisible: true },
@@ -48,7 +48,9 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(() => {
-    return localStorage.getItem('expense_heads_active_tab') || 'all'; // 'all' | 'Property' | 'Common'
+    const saved = localStorage.getItem('expense_heads_active_tab');
+    if (saved === 'Common') return 'Other';
+    return saved || 'all'; // 'all' | 'Property' | 'Other'
   });
 
   // Save active tab in localStorage
@@ -58,7 +60,7 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
 
   // APEX Toolbar & Table States
   const [search, setSearch] = useState('');
-  const [rowsPerPage, setRowsPerPage] = useState('All');
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Column Visibility with persistence
@@ -152,13 +154,13 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
 
   // Counts
   const propertyHeadsCount = categories.filter(c => c.headType === 'Property').length;
-  const commonHeadsCount = categories.filter(c => c.headType === 'Common').length;
+  const otherHeadsCount = categories.filter(c => c.headType === 'Other' || c.headType === 'Common').length;
 
   // Filter suggestions for APEX Filter builder
   const filterSuggestions = useMemo(() => {
     return {
       name: categories.map(c => c.name),
-      headType: ['Property', 'Common'],
+      headType: ['Property', 'Other'],
       isDefault: ['System', 'Custom']
     };
   }, [categories]);
@@ -173,7 +175,7 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
   const filteredCategories = useMemo(() => {
     return categories.filter(cat => {
       if (activeTab === 'Property' && cat.headType !== 'Property') return false;
-      if (activeTab === 'Common' && cat.headType !== 'Common') return false;
+      if (activeTab === 'Other' && cat.headType !== 'Other' && cat.headType !== 'Common') return false;
 
       const usage = usageMap[cat.name] || { count: 0, totalAmount: 0 };
       const q = search.toLowerCase().trim();
@@ -237,7 +239,7 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
     setEditingCategory(null);
     setFormData({
       name: '',
-      headType: activeTab === 'Common' ? 'Common' : 'Property',
+      headType: activeTab === 'Other' ? 'Other' : 'Property',
       description: ''
     });
     setFormError('');
@@ -247,9 +249,10 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
   // Open modal for Edit
   const handleOpenEdit = (cat) => {
     setEditingCategory(cat);
+    const normType = (cat.headType === 'Common' ? 'Other' : cat.headType) || 'Property';
     setFormData({
       name: cat.name,
-      headType: cat.headType || 'Property',
+      headType: normType,
       description: cat.description || ''
     });
     setFormError('');
@@ -322,10 +325,10 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
       return {
         '#': idx + 1,
         'Expense Head Name': c.name,
-        'Head Scope': c.headType === 'Common' ? 'Common / Other Expense' : 'Property Expense',
-        'Visible In': c.headType === 'Common' 
+        'Expense Head type': c.headType === 'Other' || c.headType === 'Common' ? 'Other' : 'Property',
+        'Visible In': c.headType === 'Other' || c.headType === 'Common' 
           ? 'Other Expenses (MOM, Misc, Zakat...)' 
-          : 'Property / Common Building Maintenance',
+          : 'Property Expenses',
         'System Standard': c.isDefault ? 'Yes' : 'No',
         'Entries Logged': usage.count,
         'Total Spent (₹)': usage.totalAmount,
@@ -347,18 +350,15 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Top Header Card with Quick Scope Filter & Add Button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
             <Tag className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Expense Heads Master</h2>
-            <p className="text-xs text-slate-500">
-              Manage separated accounting heads for Property maintenance vs. Common / Other expenditures
-            </p>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Expense Heads</h2>
           </div>
         </div>
 
@@ -387,19 +387,19 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
               }`}
             >
               <Building2 className="w-3.5 h-3.5 text-emerald-600" />
-              Property Heads ({propertyHeadsCount})
+              Property ({propertyHeadsCount})
             </button>
             <button
               type="button"
-              onClick={() => { setActiveTab('Common'); setCurrentPage(1); }}
+              onClick={() => { setActiveTab('Other'); setCurrentPage(1); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'Common'
+                activeTab === 'Other'
                   ? 'bg-white text-indigo-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Tag className="w-3.5 h-3.5 text-indigo-600" />
-              Common / Other ({commonHeadsCount})
+              Other ({otherHeadsCount})
             </button>
           </div>
 
@@ -426,11 +426,8 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
         </div>
       </div>
 
-      {/* Main Container with APEX Toolbar & Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* Oracle APEX-Style Interactive Toolbar */}
-        <div className="p-4 border-b border-slate-100">
-          <ApexToolbar
+      {/* Oracle APEX-Style Interactive Toolbar */}
+      <ApexToolbar
             search={search}
             onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
             rowsPerPage={rowsPerPage}
@@ -457,9 +454,9 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
             onExport={handleExportExcel}
             storageKey={`expense_heads_master_${activeTab}`}
           />
-        </div>
 
         {/* Table */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -587,7 +584,7 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
                 paginatedCategories.map((cat, idx) => {
                   const globalIdx = (currentPage - 1) * (rowsPerPage === 'All' ? 0 : Number(rowsPerPage)) + idx + 1;
                   const usage = usageMap[cat.name] || { count: 0, totalAmount: 0 };
-                  const isCommon = cat.headType === 'Common';
+                  const isOther = cat.headType === 'Other' || cat.headType === 'Common';
 
                   return (
                     <tr key={cat._id} className="hover:bg-slate-50/80 transition-colors">
@@ -623,19 +620,14 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
                         >
                           <div className="flex items-center gap-2">
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] ${
-                              isCommon 
+                              isOther 
                                 ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/60' 
                                 : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
                             }`}>
-                              {isCommon ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
-                              {isCommon ? 'Common / Other Expense' : 'Property Expense'}
+                              {isOther ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                              {isOther ? 'Other' : 'Property'}
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-1 font-medium">
-                            {isCommon 
-                              ? 'Visible only for Other Expenses (MOM, Misc, Zakat...)' 
-                              : 'Visible for Properties & Common Property maintenance'}
-                          </p>
                         </td>
                       )}
 
@@ -783,10 +775,10 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
                 />
               </div>
 
-              {/* Head Classification Radio */}
+              {/* Expense Head type Radio */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Classification & Dropdown Scope *
+                  Expense Head type *
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -800,29 +792,23 @@ export default function ExpenseHeadsMasterView({ onDataChanged }) {
                   >
                     <div className="flex items-center gap-1.5 font-extrabold text-xs text-emerald-800">
                       <Building2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Property Head
+                      Property
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">
-                      For maintenance, repairs & property-specific costs.
-                    </p>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, headType: 'Common' })}
+                    onClick={() => setFormData({ ...formData, headType: 'Other' })}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-                      formData.headType === 'Common'
+                      formData.headType === 'Other' || formData.headType === 'Common'
                         ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-500/20'
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-extrabold text-xs text-indigo-800">
                       <Tag className="w-3.5 h-3.5 text-indigo-600" />
-                      Common / Other
+                      Other
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">
-                      For MOM, Misc, Zakat, Sadka, Margaret, Other.
-                    </p>
                   </button>
                 </div>
               </div>

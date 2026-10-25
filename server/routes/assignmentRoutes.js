@@ -17,6 +17,80 @@ const isDateBeforeToday = (date) => {
   return new Date(date).toISOString().slice(0, 10) < new Date().toISOString().slice(0, 10);
 };
 
+const formatYMD = (date) => {
+  if (!date) return '';
+  return new Date(date).toISOString().slice(0, 10);
+};
+
+const formatConflictingDateRange = (startDate, endDate) => {
+  const sStr = startDate ? formatYMD(startDate) : 'Open Start';
+  const eStr = endDate ? formatYMD(endDate) : 'Ongoing';
+  return `${sStr} to ${eStr}`;
+};
+
+const doContractDatesOverlap = (startA, endA, startB, endB) => {
+  const sA = startA ? formatYMD(startA) : '0000-01-01';
+  const eA = endA ? formatYMD(endA) : '9999-12-31';
+  const sB = startB ? formatYMD(startB) : '0000-01-01';
+  const eB = endB ? formatYMD(endB) : '9999-12-31';
+
+  return sA <= eB && eA >= sB;
+};
+
+const findContractOverlap = async (unitId, startDate, endDate, excludeAssignmentId = null) => {
+  const query = {
+    unitId,
+    status: { $nin: ['Terminated', 'Cancelled'] }
+  };
+  if (excludeAssignmentId) {
+    query._id = { $ne: excludeAssignmentId };
+  }
+
+  const existingContracts = await TenantAssignment.find(query)
+    .populate('tenantId', 'name tenantCode')
+    .populate({
+      path: 'unitId',
+      populate: { path: 'propertyId', select: 'name' }
+    });
+
+  for (const existing of existingContracts) {
+    if (doContractDatesOverlap(startDate, endDate, existing.startDate, existing.endDate)) {
+      return existing;
+    }
+  }
+  return null;
+};
+
+const generateContractNo = async (tenantId, startDate, customNo) => {
+  if (customNo && String(customNo).trim()) return String(customNo).trim();
+  const tenant = await Tenant.findById(tenantId);
+  const tenantName = tenant ? tenant.name : 'Tenant';
+  let clean = tenantName.replace(/^(with\s+)/i, '').trim();
+  if (/^snip/i.test(clean)) clean = 'Snip';
+  else if (/^water/i.test(clean)) clean = 'WaterWala';
+  else if (/^dg/i.test(clean)) clean = 'DG';
+  else if (/^pg/i.test(clean)) clean = 'PG';
+  else if (/^delhiery/i.test(clean)) clean = 'Delhiery';
+  else if (/^amir/i.test(clean)) clean = 'Amir';
+  else {
+    let first = clean.split(/[\s\-()]+/)[0];
+    clean = first ? (first.charAt(0).toUpperCase() + first.slice(1)) : 'Tenant';
+  }
+  const yr = startDate ? new Date(startDate).getFullYear() : new Date().getFullYear();
+  const baseKey = `${clean}-${yr}`;
+  const existing = await TenantAssignment.find({
+    contractNo: { $regex: `^${baseKey}(-[0-9]+)?$`, $options: 'i' }
+  }).sort({ createdAt: 1 });
+  if (existing.length === 0) {
+    return baseKey;
+  } else if (existing.length === 1 && !existing[0].contractNo.includes('-' + (existing[0].contractNo.split('-')[2] || ''))) {
+    await TenantAssignment.updateOne({ _id: existing[0]._id }, { $set: { contractNo: `${baseKey}-1` } });
+    return `${baseKey}-2`;
+  } else {
+    return `${baseKey}-${existing.length + 1}`;
+  }
+};
+
 // @route GET /api/assignments
 router.get('/', protect, async (req, res) => {
   try {
@@ -122,7 +196,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
   try {
     const {
       tenantId, unitId, startDate, endDate, depositHeld, contractType = 'Rent',
-      rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes, status
+      rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes, status, contractNo
     } = req.body;
     const finalContractType = contractType === 'Business' ? 'Business' : 'Rent';
     const enteredRent = rentAmount ?? monthlyRate;
@@ -134,25 +208,40 @@ router.post('/', protect, authorize('admin', 'manager'), [
     if (contractStartDate && contractEndDate && new Date(contractEndDate) < new Date(contractStartDate)) {
       return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
     }
-    const contractHasEnded = isDateBeforeToday(contractEndDate);
-    const finalStatus = status || (contractHasEnded ? 'Ended' : 'Active');
 
-    // Strict single-active-contract rule: Only 1 active contract allowed per unit
-    if (finalStatus === 'Active') {
-      const existingActive = await TenantAssignment.findOne({ unitId, status: 'Active' });
-      if (existingActive) {
-        return res.status(409).json({
-          success: false,
-          message: 'This sub-property/unit already has an active contract. Only one active contract is permitted per sub-property.'
-        });
-      }
+    // Validate start and end dates against existing contracts for this sub-property (unitId)
+    const conflictingContract = await findContractOverlap(unitId, contractStartDate, contractEndDate);
+    if (conflictingContract) {
+      const conflictNo = conflictingContract.contractNo || conflictingContract.assignmentCode;
+      const tenantName = conflictingContract.tenantId?.name || 'Unknown Tenant';
+      const dateRangeStr = formatConflictingDateRange(conflictingContract.startDate, conflictingContract.endDate);
+      const conflictStatus = conflictingContract.status || 'Active';
+
+      return res.status(409).json({
+        success: false,
+        message: `A contract already exists within this date range for this sub-property:\n• Contract No: ${conflictNo}\n• Tenant: ${tenantName}\n• Date Range: ${dateRangeStr}\n• Status: ${conflictStatus}`,
+        conflict: {
+          contractNo: conflictNo,
+          tenantName,
+          dateRange: dateRangeStr,
+          startDate: conflictingContract.startDate,
+          endDate: conflictingContract.endDate,
+          status: conflictStatus
+        }
+      });
     }
 
+    const contractHasEnded = isDateBeforeToday(contractEndDate);
+    // If end date is in the past, status is Ended; otherwise keep requested status or default to Active
+    const finalStatus = contractHasEnded ? 'Ended' : (status || 'Active');
+
+    const finalContractNo = await generateContractNo(tenantId, contractStartDate, contractNo);
     const count = await TenantAssignment.countDocuments();
     const assignmentCode = `ASN-${String(count + 1).padStart(4, '0')}`;
 
     const assignment = await TenantAssignment.create({
       assignmentCode,
+      contractNo: finalContractNo,
       tenantId,
       unitId,
       startDate: contractStartDate,
@@ -374,7 +463,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
 
     const {
       startDate, endDate, tenantId, unitId, propertyId, contractType,
-      rentType, rentAmount, monthlyRate, depositHeld, notes, terms, status
+      rentType, rentAmount, monthlyRate, depositHeld, notes, terms, status, contractNo
     } = req.body;
     const nextTenantId = tenantId || assignment.tenantId;
     const nextUnitId = unitId || assignment.unitId;
@@ -419,27 +508,32 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
     }
 
-    const contractHasEnded = isDateBeforeToday(nextEndDate);
-    const nextStatus = status || (
-      endDate !== undefined
-        ? (contractHasEnded ? 'Ended' : 'Active')
-        : assignment.status
-    );
+    // Validate start and end dates against existing contracts for this unit (excluding current assignment)
+    const conflictingContract = await findContractOverlap(nextUnitId, nextStartDate, nextEndDate, assignment._id);
+    if (conflictingContract) {
+      const conflictNo = conflictingContract.contractNo || conflictingContract.assignmentCode;
+      const tenantName = conflictingContract.tenantId?.name || 'Unknown Tenant';
+      const dateRangeStr = formatConflictingDateRange(conflictingContract.startDate, conflictingContract.endDate);
+      const conflictStatus = conflictingContract.status || 'Active';
 
-    // Strict single-active-contract rule: Only 1 active contract allowed per unit
-    if (nextStatus === 'Active') {
-      const otherActiveAssignment = await TenantAssignment.findOne({
-        unitId: nextUnitId,
-        status: 'Active',
-        _id: { $ne: assignment._id }
+      return res.status(409).json({
+        success: false,
+        message: `A contract already exists within this date range for this sub-property:\n• Contract No: ${conflictNo}\n• Tenant: ${tenantName}\n• Date Range: ${dateRangeStr}\n• Status: ${conflictStatus}`,
+        conflict: {
+          contractNo: conflictNo,
+          tenantName,
+          dateRange: dateRangeStr,
+          startDate: conflictingContract.startDate,
+          endDate: conflictingContract.endDate,
+          status: conflictStatus
+        }
       });
-      if (otherActiveAssignment) {
-        return res.status(409).json({
-          success: false,
-          message: 'This sub-property/unit already has another active contract. Only one active contract is permitted per sub-property.'
-        });
-      }
     }
+
+    const contractHasEnded = isDateBeforeToday(nextEndDate);
+    const nextStatus = contractHasEnded
+      ? 'Ended'
+      : (status || (endDate !== undefined ? (contractHasEnded ? 'Ended' : 'Active') : assignment.status));
 
     let agreements = await RentAgreement.find({
       assignmentId: assignment._id
@@ -481,6 +575,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     assignment.unitId = nextUnitId;
     if (contractType !== undefined) assignment.contractType = contractType === 'Business' ? 'Business' : 'Rent';
     if (depositHeld !== undefined) assignment.depositHeld = Number(depositHeld) || 0;
+    if (contractNo !== undefined) assignment.contractNo = String(contractNo).trim();
     if (notes !== undefined) assignment.notes = notes;
     await assignment.save();
 

@@ -3,7 +3,7 @@ import API from '../services/api';
 import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ApexToolbar from '../components/ApexToolbar';
-import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import { Users, DollarSign, Calculator, Plus, CheckCircle2, Edit, RotateCcw, ArrowUpDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 
@@ -50,9 +50,10 @@ export default function PGView() {
   const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
   const [search, setSearch] = useState('');
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('pg_freeze_v1', 0);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Suggestions for APEX filter builder dropdown
@@ -253,18 +254,15 @@ export default function PGView() {
   }, [sortedSettlements, isAllRows, currentPage, effectivePageSize]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Paying Guest (PG) Master & Settlement</h2>
-            <p className="text-xs text-slate-500">
-              Multi-occupant PG gross revenue tracking with operator deductions (Altaf, Anand, Bisleri water)
-            </p>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">PG Settlements</h2>
           </div>
         </div>
 
@@ -286,6 +284,8 @@ export default function PGView() {
         onResetWidths={resetColumnWidths}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
+        frozenColumnCount={frozenColumnCount}
+        onFrozenColumnCountChange={setFrozenColumnCount}
         filters={activeFilters}
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
         filterSuggestions={filterSuggestions}
@@ -334,8 +334,9 @@ export default function PGView() {
             </colgroup>
             <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
               <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200 select-none">
-                {visibleColumns.map((colId) => {
+                {visibleColumns.map((colId, colIndex) => {
                   const width = columnWidths[colId] || DEFAULT_PG_COLUMN_WIDTHS[colId] || 100;
+                  const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                   let align = 'text-left';
                   if (colId === 'month' || colId === 'createdAt' || colId === 'updatedAt') align = 'text-center';
                   if (colId === 'actions') align = 'text-right';
@@ -347,22 +348,22 @@ export default function PGView() {
                     <th
                       key={colId}
                       {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'pg_settlements')}
-                      style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
-                      className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align}`}
+                      style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                      className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group select-none whitespace-normal break-words leading-tight ${align} ${frozenStyle.backgroundColor ? '' : 'bg-slate-100'}`}
                     >
-                      <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                      <div className={`flex items-center gap-1 w-full ${
                         align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'
                       }`}>
                         {colId === 'actions' ? (
-                          <span className="truncate text-xs font-bold text-slate-700">{label}</span>
+                          <span className="text-xs font-bold text-slate-700 break-words leading-tight">{label}</span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => handleHeaderSort(colId)}
-                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors text-left"
                             title={`Sort by ${label} (Click: Descending → Ascending → Clear)`}
                           >
-                            <span className="truncate">{label}</span>
+                            <span className="break-words leading-tight">{label}</span>
                             <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
                               {sortConfig.key === colId ? (
                                 sortConfig.direction === 'desc' ? (
@@ -399,73 +400,74 @@ export default function PGView() {
 
                   return (
                     <tr key={s._id} className="hover:bg-slate-50/50">
-                      {visibleColumns.map((colId) => {
+                      {visibleColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, false);
                         if (colId === 'month') {
                           return (
-                            <td key={colId} className="py-3.5 font-bold text-slate-900 text-xs">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 font-bold text-slate-900 text-xs">
                               {formatMonthYear(s.monthYear)}
                             </td>
                           );
                         }
                         if (colId === 'gross') {
                           return (
-                            <td key={colId} className="py-3.5 font-semibold text-slate-800 text-xs">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 font-semibold text-slate-800 text-xs">
                               {formatCurrency(s.pgGrossCollection)}
                             </td>
                           );
                         }
                         if (colId === 'altaf') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs text-slate-600">
                               {formatCurrency(s.altafShare)}
                             </td>
                           );
                         }
                         if (colId === 'anand') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs text-slate-600">
                               {formatCurrency(s.anandShare)}
                             </td>
                           );
                         }
                         if (colId === 'bisleri') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs text-slate-600">
                               {formatCurrency(s.bisleriWaterShare)}
                             </td>
                           );
                         }
                         if (colId === 'deductions') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs font-semibold text-rose-600">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs font-semibold text-rose-600">
                               {formatCurrency(s.totalOperatorDeductions)}
                             </td>
                           );
                         }
                         if (colId === 'net') {
                           return (
-                            <td key={colId} className="py-3.5 font-bold text-emerald-600 text-xs">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 font-bold text-emerald-600 text-xs">
                               {formatCurrency(s.netReceivedByOwner)}
                             </td>
                           );
                         }
                         if (colId === 'rehan') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs text-slate-600">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs text-slate-600">
                               {s.rehanShare ? formatCurrency(s.rehanShare) : '₹0'}
                             </td>
                           );
                         }
                         if (colId === 'actualBank') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs font-semibold text-slate-800">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs font-semibold text-slate-800">
                               {actualBank != null ? formatCurrency(actualBank) : '—'}
                             </td>
                           );
                         }
                         if (colId === 'difference') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs font-mono">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs font-mono">
                               {variance != null ? (
                                 <span className={variance >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
                                   {variance >= 0 ? '+' : ''}{formatCurrency(variance)}
@@ -478,21 +480,21 @@ export default function PGView() {
                         }
                         if (colId === 'notes') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs text-slate-500 max-w-xs truncate" title={s.notes}>
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs text-slate-500 max-w-xs truncate" title={s.notes}>
                               {s.notes || '—'}
                             </td>
                           );
                         }
                         if (colId === 'createdAt' || colId === 'updatedAt') {
                           return (
-                            <td key={colId} className="py-3.5 text-xs text-slate-600 whitespace-nowrap">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
                               {s[colId] ? formatDate(s[colId]) : '—'}
                             </td>
                           );
                         }
                         if (colId === 'actions') {
                           return (
-                            <td key={colId} className="py-3.5 text-right">
+                            <td key={colId} style={frozenStyle} className="py-3.5 px-3 text-right">
                               <button
                                 onClick={() => openEditSettlement(s)}
                                 title="Edit Settlement"

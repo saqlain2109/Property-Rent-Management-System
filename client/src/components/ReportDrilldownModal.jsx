@@ -1,11 +1,37 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import API from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import {
-  X, Edit3, Save, Calendar, CheckCircle2, AlertCircle,
+  X, Edit3, Save, Calendar, CheckCircle2, AlertCircle, Plus, Trash2,
   FileText, Building2, User, RefreshCw, IndianRupee, Tag,
-  Clock, ArrowUpRight, HelpCircle
+  Clock, ArrowUpRight, HelpCircle, Receipt
 } from 'lucide-react';
+
+const DEFAULT_EXPENSE_HEADS = [
+  'Maintenance',
+  'Electricity & Utilities',
+  'Repairs & Renovation',
+  'Sweeper & Cleaning',
+  'Property Rent Paid',
+  'Deposit Refund',
+  'Water Charges',
+  'Property Tax',
+  'MOM',
+  'Margaret',
+  'Islamic & Zakat',
+  'Zakat',
+  'Sadka',
+  'Send to dubai',
+  'IT Fees',
+  'Donations',
+  'Miscellaneous',
+  'Miscellaneous exp',
+  'Akbar',
+  'Loan asgar Bhati',
+  'Loan give to Gafoor',
+  'Other'
+];
 
 export default function ReportDrilldownModal({
   isOpen,
@@ -16,11 +42,227 @@ export default function ReportDrilldownModal({
 }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
-  const [editingReceiptId, setEditingReceiptId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
+  const [editExpenseForm, setEditExpenseForm] = useState(null);
+  const [categories, setCategories] = useState(DEFAULT_EXPENSE_HEADS);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  const isExpenseTarget = target?.type === 'expense';
+
+  // State for adding new records
+  const [propertiesList, setPropertiesList] = useState([]);
+  const [assignmentsList, setAssignmentsList] = useState([]);
+  const [isAddingNew, setIsAddingNew] = useState(false);
+  const [newExpenseForm, setNewExpenseForm] = useState(null);
+  const [newPaymentForm, setNewPaymentForm] = useState(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      API.get('/properties').then(res => {
+        if (res.data?.success && Array.isArray(res.data.data)) setPropertiesList(res.data.data);
+        else if (Array.isArray(res.data)) setPropertiesList(res.data);
+      }).catch(() => {});
+
+      API.get('/assignments').then(res => {
+        if (res.data?.success && Array.isArray(res.data.data)) setAssignmentsList(res.data.data);
+        else if (Array.isArray(res.data)) setAssignmentsList(res.data);
+      }).catch(() => {});
+    }
+  }, [isOpen]);
+
+  const openAddNewRecord = () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setEditingId(null);
+    setEditForm(null);
+    setEditExpenseForm(null);
+    setIsAddingNew(true);
+
+    const defaultMonth = target.month && target.month !== 'all' ? target.month : new Date().toISOString().slice(0, 7);
+    const defaultDate = `${defaultMonth}-01`;
+
+    if (isExpenseTarget) {
+      const isCommon = target.propertyId === '__COMMON__' || target.propertyId === 'null';
+      const defaultPropId = isCommon ? '' : (target.propertyId || '');
+      setNewExpenseForm({
+        headType: isCommon ? 'Other' : 'Property',
+        propertyId: defaultPropId,
+        category: target.category || categories[0] || 'Repairs & Renovation',
+        amount: '',
+        expenseMonth: defaultMonth,
+        expenseDate: defaultDate,
+        description: target.category ? `${target.category} expense` : '',
+        vendorOrPayee: '',
+        paymentMode: 'Cash',
+        referenceNumber: ''
+      });
+      setNewPaymentForm(null);
+    } else {
+      const propId = target.propertyId || '';
+      const unitId = target.unitId || '';
+      const matchingAssigns = assignmentsList.filter(a => {
+        if (unitId && String(a.unitId?._id || a.unitId) !== String(unitId)) return false;
+        if (propId && String(a.unitId?.propertyId?._id || a.unitId?.propertyId) !== String(propId)) return false;
+        return a.status !== 'Cancelled';
+      });
+
+      const firstAssign = matchingAssigns[0];
+      setNewPaymentForm({
+        propertyId: propId || String(firstAssign?.unitId?.propertyId?._id || firstAssign?.unitId?.propertyId || ''),
+        unitId: unitId || String(firstAssign?.unitId?._id || firstAssign?.unitId || ''),
+        tenantId: String(firstAssign?.tenantId?._id || firstAssign?.tenantId || ''),
+        contractNo: firstAssign?.contractNo || firstAssign?.assignmentCode || '',
+        amount: firstAssign?.unitId?.monthlyRentExpected || firstAssign?.monthlyRentExpected || '',
+        receiptDate: defaultDate,
+        rentMonthYear: defaultMonth,
+        paymentMode: 'Cash',
+        referenceNumber: '',
+        comments: `Rent collection for ${defaultMonth}`
+      });
+      setNewExpenseForm(null);
+    }
+  };
+
+  const handleSaveNewExpense = async (e) => {
+    e.preventDefault();
+    if (!newExpenseForm) return;
+    try {
+      setSaving(true);
+      setErrorMsg('');
+      const amt = Number(newExpenseForm.amount);
+      if (isNaN(amt) || amt <= 0) {
+        setErrorMsg('Please enter a valid expense amount.');
+        setSaving(false);
+        return;
+      }
+      if (newExpenseForm.headType === 'Property' && !newExpenseForm.propertyId) {
+        setErrorMsg('Please select a property for this property expense.');
+        setSaving(false);
+        return;
+      }
+
+      const payload = {
+        propertyId: newExpenseForm.headType === 'Property' ? newExpenseForm.propertyId : null,
+        category: newExpenseForm.category?.trim() || 'Miscellaneous',
+        amount: amt,
+        expenseMonth: newExpenseForm.expenseMonth || (target.month || new Date().toISOString().slice(0, 7)),
+        expenseDate: newExpenseForm.expenseDate ? new Date(newExpenseForm.expenseDate) : new Date(),
+        description: newExpenseForm.description?.trim() || `${newExpenseForm.category} expense`,
+        vendorOrPayee: newExpenseForm.vendorOrPayee?.trim() || '',
+        paymentMode: newExpenseForm.paymentMode || 'Cash',
+        referenceNumber: newExpenseForm.referenceNumber || ''
+      };
+
+      await API.post('/expenses', payload);
+      setSuccessMsg('Expense record created successfully!');
+      setIsAddingNew(false);
+      setNewExpenseForm(null);
+      await fetchDrilldown();
+      if (onRecordUpdated) onRecordUpdated();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || 'Failed to create expense record.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveNewPayment = async (e) => {
+    e.preventDefault();
+    if (!newPaymentForm) return;
+    try {
+      setSaving(true);
+      setErrorMsg('');
+      const amt = Number(newPaymentForm.amount);
+      if (isNaN(amt) || amt <= 0) {
+        setErrorMsg('Please enter a valid payment amount.');
+        setSaving(false);
+        return;
+      }
+      if (!newPaymentForm.tenantId || !newPaymentForm.unitId) {
+        setErrorMsg('Please select a valid tenant & unit for this rent payment.');
+        setSaving(false);
+        return;
+      }
+
+      const m = newPaymentForm.rentMonthYear || target.month || new Date().toISOString().slice(0, 7);
+      const payload = {
+        tenantId: newPaymentForm.tenantId,
+        unitId: newPaymentForm.unitId,
+        contractNo: newPaymentForm.contractNo || '',
+        receiptDate: newPaymentForm.receiptDate || new Date().toISOString().split('T')[0],
+        totalAmount: amt,
+        paymentMode: newPaymentForm.paymentMode || 'Cash',
+        referenceNumber: newPaymentForm.referenceNumber || '',
+        comments: newPaymentForm.comments || `Rent payment for ${m}`,
+        allocations: [{
+          rentMonthYear: m,
+          allocatedAmount: amt,
+          notes: `Rent collection for ${m}`
+        }]
+      };
+
+      const res = await API.post('/payments', payload);
+      if (res.data?.success) {
+        setSuccessMsg('Rent payment recorded successfully!');
+        setIsAddingNew(false);
+        setNewPaymentForm(null);
+        await fetchDrilldown();
+        if (onRecordUpdated) onRecordUpdated();
+      }
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || 'Failed to record rent payment.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteRecord = async (record, isExpense) => {
+    const code = record.receiptNumber || 'this record';
+    const amt = formatCurrency(record.totalAmount || record.receiptTotalAmount || 0);
+    if (!window.confirm(`Are you sure you want to reverse / delete ${code} (${amt})? This will update the report.`)) {
+      return;
+    }
+    try {
+      setSaving(true);
+      setErrorMsg('');
+      if (isExpense) {
+        await API.post(`/expenses/${record.receiptId}/reverse`, {
+          reversalReason: 'Reversed from Month Wise Report Drilldown'
+        });
+      } else {
+        await API.post(`/payments/${record.receiptId}/reverse`, {
+          reversalReason: 'Reversed from Month Wise Report Drilldown'
+        });
+      }
+      setSuccessMsg(`Record ${code} reversed successfully!`);
+      await fetchDrilldown();
+      if (onRecordUpdated) onRecordUpdated();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || 'Failed to reverse record.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Fetch expense categories
+  useEffect(() => {
+    if (isOpen && isExpenseTarget) {
+      API.get('/expenses/categories')
+        .then(res => {
+          if (res.data.success && Array.isArray(res.data.data)) {
+            const catNames = res.data.data.map(c => c.name).filter(Boolean);
+            const merged = Array.from(new Set([...catNames, ...DEFAULT_EXPENSE_HEADS]));
+            setCategories(merged);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load categories:', err);
+        });
+    }
+  }, [isOpen, isExpenseTarget]);
 
   // Fetch drilldown records
   const fetchDrilldown = async () => {
@@ -35,11 +277,16 @@ export default function ReportDrilldownModal({
       if (target.year) params.append('year', target.year);
       if (target.startMonth) params.append('startMonth', target.startMonth);
       if (target.endMonth) params.append('endMonth', target.endMonth);
+      if (target.type) params.append('type', target.type);
+      if (target.category) params.append('category', target.category);
       params.append('basis', basis || 'receiptDate');
 
       const res = await API.get(`/reports/monthly-drilldown?${params.toString()}`);
       if (res.data.success) {
         setData(res.data);
+        if (!res.data.records || res.data.records.length === 0) {
+          openAddNewRecord();
+        }
       }
     } catch (err) {
       console.error('Failed to fetch drilldown data:', err);
@@ -51,8 +298,10 @@ export default function ReportDrilldownModal({
 
   useEffect(() => {
     if (isOpen && target) {
-      setEditingReceiptId(null);
+      setEditingId(null);
       setEditForm(null);
+      setEditExpenseForm(null);
+      setIsAddingNew(false);
       setErrorMsg('');
       setSuccessMsg('');
       fetchDrilldown();
@@ -61,11 +310,12 @@ export default function ReportDrilldownModal({
 
   if (!isOpen || !target) return null;
 
-  // Initialize edit form
-  const startEditing = (record) => {
+  // ---------------- Payment Receipt Edit Handlers ----------------
+  const startEditingReceipt = (record) => {
     setErrorMsg('');
     setSuccessMsg('');
-    setEditingReceiptId(record.receiptId);
+    setEditExpenseForm(null);
+    setEditingId(record.receiptId);
 
     const dateStr = record.receiptDate
       ? new Date(record.receiptDate).toISOString().split('T')[0]
@@ -94,13 +344,6 @@ export default function ReportDrilldownModal({
     });
   };
 
-  const cancelEditing = () => {
-    setEditingReceiptId(null);
-    setEditForm(null);
-    setErrorMsg('');
-  };
-
-  // Adjust allocations when total changes
   const handleTotalAmountChange = (newVal) => {
     const val = Number(newVal);
     setEditForm(prev => {
@@ -141,7 +384,7 @@ export default function ReportDrilldownModal({
     setEditForm(prev => ({ ...prev, allocations: balanced }));
   };
 
-  const handleSaveRecord = async (e) => {
+  const handleSaveReceiptRecord = async (e) => {
     e.preventDefault();
     if (!editForm) return;
 
@@ -170,13 +413,10 @@ export default function ReportDrilldownModal({
       const res = await API.put(`/payments/${editForm.receiptId}`, payload);
       if (res.data.success) {
         setSuccessMsg('Record updated and reconciled successfully!');
-        setEditingReceiptId(null);
+        setEditingId(null);
         setEditForm(null);
 
-        // Refresh drilldown data
         await fetchDrilldown();
-
-        // Notify parent report to update live numbers
         if (onRecordUpdated) {
           onRecordUpdated();
         }
@@ -189,23 +429,105 @@ export default function ReportDrilldownModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+  // ---------------- Expense Edit Handlers ----------------
+  const startEditingExpense = (record) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setEditForm(null);
+    setEditingId(record.receiptId);
+
+    const dateStr = record.receiptDate
+      ? new Date(record.receiptDate).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0];
+
+    setEditExpenseForm({
+      id: record.receiptId,
+      expenseCode: record.receiptNumber,
+      amount: record.totalAmount ?? record.receiptTotalAmount ?? 0,
+      expenseDate: dateStr,
+      category: record.category || 'Maintenance',
+      description: record.description || record.comments || '',
+      vendorOrPayee: record.vendorOrPayee || (record.tenant?.name !== '—' ? record.tenant?.name : ''),
+      paymentMode: record.paymentMode || 'Cash',
+      referenceNumber: record.referenceNumber || ''
+    });
+  };
+
+  const handleSaveExpenseRecord = async (e) => {
+    e.preventDefault();
+    if (!editExpenseForm) return;
+
+    try {
+      setSaving(true);
+      setErrorMsg('');
+      setSuccessMsg('');
+
+      const amt = Number(editExpenseForm.amount);
+      if (isNaN(amt) || amt <= 0) {
+        setErrorMsg('Please enter a valid expense amount greater than 0');
+        setSaving(false);
+        return;
+      }
+
+      const payload = {
+        amount: amt,
+        expenseDate: editExpenseForm.expenseDate,
+        category: editExpenseForm.category,
+        description: editExpenseForm.description || '',
+        vendorOrPayee: editExpenseForm.vendorOrPayee || '',
+        paymentMode: editExpenseForm.paymentMode,
+        referenceNumber: editExpenseForm.referenceNumber || ''
+      };
+
+      const res = await API.put(`/expenses/${editExpenseForm.id}`, payload);
+      if (res.data.success) {
+        setSuccessMsg(`Expense ${editExpenseForm.expenseCode} updated successfully! Report recalculated.`);
+        setEditingId(null);
+        setEditExpenseForm(null);
+
+        await fetchDrilldown();
+        if (onRecordUpdated) {
+          onRecordUpdated();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update expense:', err);
+      setErrorMsg(err.response?.data?.message || err.message || 'Failed to update expense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditForm(null);
+    setEditExpenseForm(null);
+    setErrorMsg('');
+  };
+
+  const modalContent = (
+    <div className="fixed inset-0 z-[99999] overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Modal Header */}
-        <div className="p-5 sm:p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
+        <div className={`p-5 sm:p-6 text-white flex items-center justify-between shrink-0 ${
+          isExpenseTarget ? 'bg-slate-900 border-b border-rose-950/40' : 'bg-slate-900'
+        }`}>
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 rounded-lg bg-teal-500/20 text-teal-300 font-mono text-xs font-bold border border-teal-500/30">
-                Drill-Down
+              <span className={`px-2.5 py-1 rounded-lg font-mono text-xs font-bold border ${
+                isExpenseTarget
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                  : 'bg-teal-500/20 text-teal-300 border-teal-500/30'
+              }`}>
+                {isExpenseTarget ? 'Expense Drill-Down' : 'Rent Drill-Down'}
               </span>
               <h3 className="text-lg font-black tracking-tight text-white">
-                {data?.title || target.title || 'Transaction Audit'}
+                {data?.title || target.title || (isExpenseTarget ? 'Expense Audit' : 'Transaction Audit')}
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              {data?.subtitle || `Click on any transaction below to edit and correct amounts`}
+              {data?.subtitle || `Click 'Edit Record' below to modify any transaction and instantly update the report.`}
             </p>
           </div>
 
@@ -214,7 +536,7 @@ export default function ReportDrilldownModal({
               onClick={fetchDrilldown}
               disabled={loading}
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-              title="Refresh Transactions"
+              title="Refresh Records"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -228,7 +550,7 @@ export default function ReportDrilldownModal({
           </div>
         </div>
 
-        {/* Status / Feedback Banner */}
+        {/* Feedback / Alert Banners */}
         {errorMsg && (
           <div className="mx-6 mt-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -245,46 +567,670 @@ export default function ReportDrilldownModal({
         {/* Modal Summary Bar */}
         <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs shrink-0">
           <div className="flex items-center gap-4 text-slate-600">
-            <span>Transactions: <strong className="text-slate-900">{data?.count ?? '—'}</strong></span>
-            <span>Accounting Basis: <strong className="text-teal-700 capitalize">{basis === 'receiptDate' ? 'Collection Date' : 'Allocated Month'}</strong></span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500">Total Filtered Amount:</span>
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 font-extrabold text-sm">
-              {formatCurrency(data?.totalAmount ?? target.expectedAmount ?? 0)}
+            <span>
+              {isExpenseTarget ? 'Expense Records:' : 'Transactions:'}{' '}
+              <strong className="text-slate-900">{data?.count ?? data?.records?.length ?? '—'}</strong>
             </span>
+            {!isExpenseTarget && (
+              <span>
+                Accounting Basis:{' '}
+                <strong className="text-teal-700 capitalize">
+                  {basis === 'receiptDate' ? 'Collection Date' : 'Allocated Month'}
+                </strong>
+              </span>
+            )}
+            {target.month && (
+              <span>
+                Month: <strong className="text-slate-900 font-bold">{target.month}</strong>
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={openAddNewRecord}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-bold text-xs shadow-sm transition-all cursor-pointer ${
+                isExpenseTarget ? 'bg-rose-600 hover:bg-rose-700' : 'bg-teal-600 hover:bg-teal-700'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{isExpenseTarget ? '+ Add Expense' : '+ Add Payment'}</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500">Total Filtered Amount:</span>
+              <span className={`px-2.5 py-1 rounded-lg font-extrabold text-sm ${
+                isExpenseTarget ? 'bg-rose-100 text-rose-900' : 'bg-emerald-100 text-emerald-900'
+              }`}>
+                {formatCurrency(data?.totalAmount ?? target.expectedAmount ?? 0)}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Modal Scrollable Content */}
+        {/* Scrollable Records Area */}
         <div className="p-6 overflow-y-auto space-y-4 flex-1">
+          {isAddingNew && (
+            <div className="mb-4">
+              {isExpenseTarget ? (
+                /* New Expense Form */
+                <form onSubmit={handleSaveNewExpense} className="p-5 sm:p-6 space-y-4 rounded-2xl border-2 border-rose-400 bg-rose-50/20 shadow-md">
+                  <div className="flex items-center justify-between pb-3 border-b border-rose-200">
+                    <div>
+                      <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">New Expense Record</span>
+                      <h4 className="font-extrabold text-sm text-slate-900">
+                        Add Expense for {target.title || target.month || 'Selected Period'}
+                      </h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingNew(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Form fields */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Expense Head type *</label>
+                      <select
+                        value={newExpenseForm.headType}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewExpenseForm(prev => ({
+                            ...prev,
+                            headType: val,
+                            propertyId: (val === 'Other' || val === 'Common') ? '' : (prev.propertyId || propertiesList[0]?._id || '')
+                          }));
+                        }}
+                        className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      >
+                        <option value="Property">Property</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    {newExpenseForm.headType === 'Property' && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Property *</label>
+                        <select
+                          required
+                          value={newExpenseForm.propertyId}
+                          onChange={(e) => setNewExpenseForm(prev => ({ ...prev, propertyId: e.target.value }))}
+                          className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-xl"
+                        >
+                          <option value="">Select Property...</option>
+                          {propertiesList.map(p => (
+                            <option key={p._id} value={p._id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Category / Head *</label>
+                      <select
+                        required
+                        value={newExpenseForm.category}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, category: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      >
+                        {categories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Amount (₹) *</label>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="₹ Amount"
+                        value={newExpenseForm.amount}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, amount: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-xl font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Expense Date *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newExpenseForm.expenseDate}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, expenseDate: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Accounting Month *</label>
+                      <input
+                        type="month"
+                        required
+                        value={newExpenseForm.expenseMonth}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, expenseMonth: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Payee / Vendor</label>
+                      <input
+                        type="text"
+                        placeholder="Payee or vendor name"
+                        value={newExpenseForm.vendorOrPayee}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, vendorOrPayee: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
+                      <select
+                        value={newExpenseForm.paymentMode}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, paymentMode: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      >
+                        <option value="Cash">Cash</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="Cheque">Cheque</option>
+                        <option value="UPI / GPay">UPI / GPay</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Reference / Cheque No</label>
+                      <input
+                        type="text"
+                        placeholder="Reference number"
+                        value={newExpenseForm.referenceNumber}
+                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, referenceNumber: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Description / Notes</label>
+                    <input
+                      type="text"
+                      placeholder="Expense description or note..."
+                      value={newExpenseForm.description}
+                      onChange={(e) => setNewExpenseForm(prev => ({ ...prev, description: e.target.value }))}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-rose-200">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingNew(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="flex items-center gap-2 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{saving ? 'Saving Expense...' : 'Save Expense Record'}</span>
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* New Rent Payment Form */
+                <form onSubmit={handleSaveNewPayment} className="p-5 sm:p-6 space-y-4 rounded-2xl border-2 border-teal-400 bg-teal-50/20 shadow-md">
+                  <div className="flex items-center justify-between pb-3 border-b border-teal-200">
+                    <div>
+                      <span className="text-xs font-bold text-teal-700 uppercase tracking-wider">Record Rent Payment</span>
+                      <h4 className="font-extrabold text-sm text-slate-900">
+                        Record Collection for {target.title || target.month || 'Selected Period'}
+                      </h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingNew(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Tenant & Sub-property *</label>
+                      <select
+                        required
+                        value={newPaymentForm.tenantId && newPaymentForm.unitId ? `${newPaymentForm.tenantId}_${newPaymentForm.unitId}` : ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (!val) return;
+                          const [tId, uId] = val.split('_');
+                          const assign = assignmentsList.find(a => String(a.tenantId?._id || a.tenantId) === tId && String(a.unitId?._id || a.unitId) === uId);
+                          setNewPaymentForm(prev => ({
+                            ...prev,
+                            tenantId: tId,
+                            unitId: uId,
+                            contractNo: assign?.contractNo || assign?.assignmentCode || '',
+                            amount: assign?.unitId?.monthlyRentExpected || assign?.monthlyRentExpected || prev.amount
+                          }));
+                        }}
+                        className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      >
+                        <option value="">Select Tenant & Unit...</option>
+                        {assignmentsList
+                          .filter(a => {
+                            if (target.propertyId && target.propertyId !== '__COMMON__' && String(a.unitId?.propertyId?._id || a.unitId?.propertyId) !== String(target.propertyId)) {
+                              return false;
+                            }
+                            if (target.unitId && String(a.unitId?._id || a.unitId) !== String(target.unitId)) {
+                              return false;
+                            }
+                            return a.status !== 'Cancelled';
+                          })
+                          .map(a => {
+                            const tId = String(a.tenantId?._id || a.tenantId);
+                            const uId = String(a.unitId?._id || a.unitId);
+                            const tName = a.tenantId?.name || 'Tenant';
+                            const uName = a.unitId?.subUnitPartition || a.unitId?.unitName || 'Partition';
+                            const pName = a.unitId?.propertyId?.name || '';
+                            const cNo = a.contractNo || a.assignmentCode || '';
+                            return (
+                              <option key={a._id} value={`${tId}_${uId}`}>
+                                {tName} — {uName} ({pName}) {cNo ? `[${cNo}]` : ''}
+                              </option>
+                            );
+                          })}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Contract No</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={newPaymentForm.contractNo || 'Auto-matched'}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold text-slate-600 bg-slate-100 border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Amount Paid (₹) *</label>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="₹ Amount"
+                        value={newPaymentForm.amount}
+                        onChange={(e) => setNewPaymentForm(prev => ({ ...prev, amount: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-xl font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Payment / Receipt Date *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newPaymentForm.receiptDate}
+                        onChange={(e) => setNewPaymentForm(prev => ({ ...prev, receiptDate: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Rent Accounting Month *</label>
+                      <input
+                        type="month"
+                        required
+                        value={newPaymentForm.rentMonthYear}
+                        onChange={(e) => setNewPaymentForm(prev => ({ ...prev, rentMonthYear: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
+                      <select
+                        value={newPaymentForm.paymentMode}
+                        onChange={(e) => setNewPaymentForm(prev => ({ ...prev, paymentMode: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl"
+                      >
+                        <option value="Cash">Cash</option>
+                        <option value="Bank Transfer / NEFT / RTGS">Bank Transfer</option>
+                        <option value="Cheque">Cheque</option>
+                        <option value="UPI / GPay">UPI / GPay</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Reference / Cheque No / Notes</label>
+                      <input
+                        type="text"
+                        placeholder="Transaction reference, comments..."
+                        value={newPaymentForm.comments}
+                        onChange={(e) => setNewPaymentForm(prev => ({ ...prev, comments: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-teal-200">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingNew(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="flex items-center gap-2 px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{saving ? 'Recording Payment...' : 'Record Payment Receipt'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="py-16 text-center">
-              <RefreshCw className="w-8 h-8 text-teal-600 animate-spin mx-auto mb-3" />
-              <p className="text-xs font-semibold text-slate-500">Loading underlying transaction records...</p>
+              <RefreshCw className={`w-8 h-8 animate-spin mx-auto mb-3 ${isExpenseTarget ? 'text-rose-600' : 'text-teal-600'}`} />
+              <p className="text-xs font-semibold text-slate-500">
+                Loading underlying {isExpenseTarget ? 'expense' : 'transaction'} records...
+              </p>
             </div>
-          ) : !data || data.records.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 space-y-2">
+          ) : !data || !data.records || data.records.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 space-y-4">
               <FileText className="w-10 h-10 text-slate-300 mx-auto" />
-              <p className="text-sm font-semibold text-slate-600">No payment records found for this cell.</p>
-              <p className="text-xs text-slate-400">There are no recorded receipts or allocations matching this criteria.</p>
+              <div>
+                <p className="text-sm font-bold text-slate-700">
+                  {isExpenseTarget ? 'No expense records found for this cell.' : 'No payment records found for this cell.'}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  You can directly add or record transactions for this cell right here.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openAddNewRecord}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white font-bold text-xs shadow-md transition-all cursor-pointer ${
+                  isExpenseTarget ? 'bg-rose-600 hover:bg-rose-700' : 'bg-teal-600 hover:bg-teal-700'
+                }`}
+              >
+                <Plus className="w-4 h-4" />
+                <span>{isExpenseTarget ? 'Add Expense for this Cell' : 'Record Payment for this Cell'}</span>
+              </button>
             </div>
           ) : (
             <div className="space-y-4">
               {data.records.map((rec, idx) => {
-                const isEditing = editingReceiptId === rec.receiptId;
+                const isThisRecordEditing = editingId === rec.receiptId;
+                const isExpense = rec.isExpense || isExpenseTarget;
 
+                // ---------------- 1. EXPENSE RECORD VIEW & EDIT ----------------
+                if (isExpense) {
+                  return (
+                    <div
+                      key={rec.receiptId || idx}
+                      className={`rounded-2xl border transition-all ${
+                        isThisRecordEditing
+                          ? 'border-rose-500 bg-rose-50/20 shadow-md ring-2 ring-rose-500/20'
+                          : 'border-slate-200 bg-white hover:border-slate-300 shadow-xs'
+                      }`}
+                    >
+                      {!isThisRecordEditing ? (
+                        /* Expense View Card */
+                        <div className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div className="space-y-1.5 flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-slate-900 px-2.5 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-800">
+                                {rec.receiptNumber}
+                              </span>
+                              <span className="text-xs text-slate-500 flex items-center gap-1">
+                                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                {formatDate(rec.receiptDate)}
+                              </span>
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
+                                {rec.paymentMode}
+                              </span>
+                              {rec.category && (
+                                <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold border border-rose-200">
+                                  {rec.category}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs">
+                              {rec.vendorOrPayee && rec.vendorOrPayee !== '—' && (
+                                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                                  <User className="w-3.5 h-3.5 text-slate-400" />
+                                  Payee: {rec.vendorOrPayee}
+                                </span>
+                              )}
+                              <span className="text-slate-500 flex items-center gap-1">
+                                <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                                {rec.property?.name || 'Common / Other'}
+                              </span>
+                              {rec.referenceNumber && (
+                                <span className="text-slate-400">
+                                  Ref: <strong className="text-slate-600">{rec.referenceNumber}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            {rec.description && (
+                              <p className="text-xs text-slate-600 italic pt-1 truncate">
+                                &ldquo;{rec.description}&rdquo;
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Expense Amount & Edit Button */}
+                          <div className="flex items-center justify-between md:flex-col md:items-end gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
+                            <div className="text-left md:text-right">
+                              <span className="text-xs text-slate-400 block font-medium">Expense Amount</span>
+                              <span className="text-lg font-black text-rose-700">
+                                {formatCurrency(rec.totalAmount || rec.receiptTotalAmount || 0)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => startEditingExpense(rec)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-700 text-xs font-semibold transition-all shadow-2xs group cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+                                <span>Edit Record</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRecord(rec, true)}
+                                className="p-1.5 rounded-xl border border-slate-200 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                title="Reverse / Remove Expense"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Inline Expense Edit Form */
+                        <form onSubmit={handleSaveExpenseRecord} className="p-5 sm:p-6 space-y-4">
+                          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                            <div>
+                              <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">Editing Expense Record</span>
+                              <h4 className="font-extrabold text-sm text-slate-900 font-mono">
+                                {editExpenseForm.expenseCode} &bull; {rec.property?.name || 'Common / Other'}
+                              </h4>
+                            </div>
+                            <span className="text-xs px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 font-bold border border-rose-200">
+                              Direct Correction
+                            </span>
+                          </div>
+
+                          {/* Row 1: Amount, Date, Category */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Expense Amount (₹) *
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">₹</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  required
+                                  value={editExpenseForm.amount}
+                                  onChange={(e) => setEditExpenseForm(prev => ({ ...prev, amount: e.target.value }))}
+                                  className="w-full pl-7 pr-3 py-2 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Expense Date *
+                              </label>
+                              <input
+                                type="date"
+                                required
+                                value={editExpenseForm.expenseDate}
+                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, expenseDate: e.target.value }))}
+                                className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Expense Head (Category) *
+                              </label>
+                              <select
+                                required
+                                value={editExpenseForm.category}
+                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, category: e.target.value }))}
+                                className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 cursor-pointer"
+                              >
+                                {categories.map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                                {!categories.includes(editExpenseForm.category) && (
+                                  <option value={editExpenseForm.category}>{editExpenseForm.category}</option>
+                                )}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Row 2: Payee, Mode, Reference */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Payee / Vendor
+                              </label>
+                              <input
+                                type="text"
+                                value={editExpenseForm.vendorOrPayee}
+                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, vendorOrPayee: e.target.value }))}
+                                placeholder="Vendor, payee or recipient name"
+                                className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Payment Mode
+                              </label>
+                              <select
+                                value={editExpenseForm.paymentMode}
+                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, paymentMode: e.target.value }))}
+                                className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 cursor-pointer"
+                              >
+                                <option value="Cash">Cash</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="Cheque">Cheque</option>
+                                <option value="UPI / GPay">UPI / GPay</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Bill / Reference / Cheque No
+                              </label>
+                              <input
+                                type="text"
+                                value={editExpenseForm.referenceNumber}
+                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, referenceNumber: e.target.value }))}
+                                placeholder="Optional reference"
+                                className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Row 3: Description / Reason */}
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Description / Reason for Expense
+                            </label>
+                            <input
+                              type="text"
+                              value={editExpenseForm.description}
+                              onChange={(e) => setEditExpenseForm(prev => ({ ...prev, description: e.target.value }))}
+                              placeholder="Enter expense details or description..."
+                              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                            />
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                            <button
+                              type="button"
+                              onClick={cancelEditing}
+                              disabled={saving}
+                              className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={saving}
+                              className="flex items-center gap-2 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm shadow-rose-600/25 disabled:opacity-50 cursor-pointer"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              <span>{saving ? 'Saving & Reconciling...' : 'Save & Update Report'}</span>
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  );
+                }
+
+                // ---------------- 2. PAYMENT RECEIPT VIEW & EDIT (EARNINGS) ----------------
                 return (
                   <div
                     key={rec.receiptId || idx}
                     className={`rounded-2xl border transition-all ${
-                      isEditing
+                      isThisRecordEditing
                         ? 'border-teal-500 bg-teal-50/20 shadow-md ring-2 ring-teal-500/20'
                         : 'border-slate-200 bg-white hover:border-slate-300 shadow-xs'
                     }`}
                   >
-                    {/* View Card */}
-                    {!isEditing ? (
+                    {!isThisRecordEditing ? (
+                      /* Receipt View Card */
                       <div className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="space-y-1.5 flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
@@ -317,7 +1263,6 @@ export default function ReportDrilldownModal({
                             </p>
                           )}
 
-                          {/* Allocation tags if multi-month */}
                           {rec.allocations && rec.allocations.length > 0 && (
                             <div className="flex flex-wrap items-center gap-1.5 pt-2">
                               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Allocations:</span>
@@ -340,27 +1285,37 @@ export default function ReportDrilldownModal({
                         {/* Amount & Edit Action */}
                         <div className="flex items-center justify-between md:flex-col md:items-end gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
                           <div className="text-left md:text-right">
-                            <span className="text-xs text-slate-400 block">
+                            <span className="text-xs text-slate-400 block font-medium">
                               {basis === 'allocatedMonth' ? 'Allocated Amount' : 'Receipt Amount'}
                             </span>
-                            <span className="text-lg font-black text-slate-900 text-emerald-700">
+                            <span className="text-lg font-black text-emerald-700">
                               {formatCurrency(basis === 'allocatedMonth' ? (rec.allocatedAmount || rec.receiptTotalAmount) : rec.receiptTotalAmount)}
                             </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => startEditing(rec)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-700 text-xs font-semibold transition-all shadow-2xs group"
-                          >
-                            <Edit3 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
-                            <span>Edit Record</span>
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => startEditingReceipt(rec)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-700 text-xs font-semibold transition-all shadow-2xs group cursor-pointer"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+                              <span>Edit Record</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRecord(rec, false)}
+                              className="p-1.5 rounded-xl border border-slate-200 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Reverse / Cancel Payment Receipt"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      /* Inline Edit Form */
-                      <form onSubmit={handleSaveRecord} className="p-5 sm:p-6 space-y-4">
+                      /* Inline Receipt Edit Form */
+                      <form onSubmit={handleSaveReceiptRecord} className="p-5 sm:p-6 space-y-4">
                         <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                           <div>
                             <span className="text-xs font-bold text-teal-700 uppercase tracking-wider">Correcting Record</span>
@@ -431,7 +1386,7 @@ export default function ReportDrilldownModal({
                               <button
                                 type="button"
                                 onClick={autoBalanceAllocations}
-                                className="text-[11px] font-semibold text-teal-600 hover:text-teal-800"
+                                className="text-[11px] font-semibold text-teal-600 hover:text-teal-800 cursor-pointer"
                               >
                                 Auto-Split Evenly
                               </button>
@@ -480,14 +1435,14 @@ export default function ReportDrilldownModal({
                             type="button"
                             onClick={cancelEditing}
                             disabled={saving}
-                            className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition-colors"
+                            className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
                           >
                             Cancel
                           </button>
                           <button
                             type="submit"
                             disabled={saving}
-                            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm shadow-teal-600/25 disabled:opacity-50"
+                            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm shadow-teal-600/25 disabled:opacity-50 cursor-pointer"
                           >
                             <Save className="w-3.5 h-3.5" />
                             <span>{saving ? 'Saving & Reconciling...' : 'Save & Update Report'}</span>
@@ -504,10 +1459,10 @@ export default function ReportDrilldownModal({
 
         {/* Modal Footer */}
         <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">
-          <span>Clicking &ldquo;Save & Update Report&rdquo; immediately updates the database, ledger, and refreshes the matrix.</span>
+          <span>Clicking &ldquo;Save & Update Report&rdquo; immediately saves to the database and recalculates the matrix numbers in real time.</span>
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition-colors"
+            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition-colors cursor-pointer"
           >
             Done
           </button>
@@ -515,4 +1470,6 @@ export default function ReportDrilldownModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

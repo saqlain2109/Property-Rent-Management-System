@@ -7,6 +7,11 @@ const assignmentSchema = new mongoose.Schema({
     unique: true,
     trim: true,
   },
+  contractNo: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',

@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
 import MonthlyBatchEntryModal from '../components/MonthlyBatchEntryModal';
 import {
   FileSpreadsheet, Download, ChevronLeft, ChevronRight, Calendar,
   TrendingUp, TrendingDown, DollarSign, AlertCircle, CheckCircle2,
-  Building2, Layers, Users, RefreshCw, Sparkles
+  Building2, Layers, Users, RefreshCw, Sparkles, Filter, X
 } from 'lucide-react';
+import { useResizableColumns, ColumnHeaderCell, useTableAutoWrap } from '../components/ColumnManager';
+import { cycleThreeStateSort } from '../utils/tableUtils';
 
 const PRESET_MONTHS = [
   '2024-03', '2024-04', '2024-05', '2024-06',
@@ -21,6 +23,71 @@ export default function MonthlyExcelReportView() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+
+  // Resizable columns
+  const rentColDefaults = useMemo(() => ({ tenant: 200, property: 200, unit: 160, amount: 140 }), []);
+  const expColDefaults = useMemo(() => ({ category: 180, description: 240, property: 200, amount: 140 }), []);
+
+  const {
+    columnWidths: rentWidths,
+    handleResizeStart: handleRentResizeStart,
+    resetColumnWidths: resetRentWidths
+  } = useResizableColumns('monthly_excel_rent_widths_v2', rentColDefaults);
+
+  const {
+    columnWidths: expWidths,
+    handleResizeStart: handleExpResizeStart,
+    resetColumnWidths: resetExpWidths
+  } = useResizableColumns('monthly_excel_exp_widths_v2', expColDefaults);
+
+  const { autoWrap } = useTableAutoWrap();
+
+  // Rent Sort & Filters
+  const [rentSort, setRentSort] = useState({ key: null, direction: null });
+  const [rentFilters, setRentFilters] = useState({});
+
+  // Exp Sort & Filters
+  const [expSort, setExpSort] = useState({ key: null, direction: null });
+  const [expFilters, setExpFilters] = useState({});
+
+  const handleRentSort = (colId) => setRentSort(prev => cycleThreeStateSort(prev, colId));
+  const handleExpSort = (colId) => setExpSort(prev => cycleThreeStateSort(prev, colId));
+
+  const filteredRentEntries = useMemo(() => {
+    if (!data?.rentEntries) return [];
+    let list = [...data.rentEntries];
+    for (const [col, val] of Object.entries(rentFilters)) {
+      if (!val) continue;
+      const q = (typeof val === 'object' ? val.value : String(val)).toLowerCase();
+      list = list.filter(r => String(r[col] || '').toLowerCase().includes(q));
+    }
+    if (rentSort.key && rentSort.direction) {
+      const mult = rentSort.direction === 'asc' ? 1 : -1;
+      list.sort((a, b) => {
+        if (rentSort.key === 'amount') return mult * ((a.amount || 0) - (b.amount || 0));
+        return mult * String(a[rentSort.key] || '').localeCompare(String(b[rentSort.key] || ''));
+      });
+    }
+    return list;
+  }, [data, rentFilters, rentSort]);
+
+  const filteredExpenseEntries = useMemo(() => {
+    if (!data?.expenseEntries) return [];
+    let list = [...data.expenseEntries];
+    for (const [col, val] of Object.entries(expFilters)) {
+      if (!val) continue;
+      const q = (typeof val === 'object' ? val.value : String(val)).toLowerCase();
+      list = list.filter(e => String(e[col] || '').toLowerCase().includes(q));
+    }
+    if (expSort.key && expSort.direction) {
+      const mult = expSort.direction === 'asc' ? 1 : -1;
+      list.sort((a, b) => {
+        if (expSort.key === 'amount') return mult * ((a.amount || 0) - (b.amount || 0));
+        return mult * String(a[expSort.key] || '').localeCompare(String(b[expSort.key] || ''));
+      });
+    }
+    return list;
+  }, [data, expFilters, expSort]);
 
   const fetchReport = async (month) => {
     try {
@@ -80,9 +147,6 @@ export default function MonthlyExcelReportView() {
               <h3 className="font-extrabold text-slate-900 text-lg">
                 Monthly Statement · {formatMonthYear(selectedMonth)}
               </h3>
-              <p className="text-xs text-slate-500">
-                Single unified statement: Rent income first, expenses below, net difference & cumulative balance
-              </p>
             </div>
           </div>
         </div>
@@ -191,19 +255,102 @@ export default function MonthlyExcelReportView() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
                     <tr>
-                      <th className="py-3 px-4">Tenant</th>
-                      <th className="py-3 px-4">Property</th>
-                      <th className="py-3 px-4">Unit / Partition</th>
-                      <th className="py-3 px-4 text-right">Amount (₹)</th>
+                      <ColumnHeaderCell
+                        colId="tenant"
+                        label="Tenant"
+                        width={rentWidths['tenant']}
+                        minWidth={120}
+                        sortConfig={rentSort}
+                        onSort={handleRentSort}
+                        activeFilter={rentFilters['tenant']}
+                        onApplyFilter={(c, v) => setRentFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setRentFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleRentResizeStart}
+                        theme="light"
+                      />
+                      <ColumnHeaderCell
+                        colId="property"
+                        label="Property"
+                        width={rentWidths['property']}
+                        minWidth={120}
+                        sortConfig={rentSort}
+                        onSort={handleRentSort}
+                        activeFilter={rentFilters['property']}
+                        onApplyFilter={(c, v) => setRentFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setRentFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleRentResizeStart}
+                        theme="light"
+                      />
+                      <ColumnHeaderCell
+                        colId="unit"
+                        label="Unit / Partition"
+                        width={rentWidths['unit']}
+                        minWidth={120}
+                        sortConfig={rentSort}
+                        onSort={handleRentSort}
+                        activeFilter={rentFilters['unit']}
+                        onApplyFilter={(c, v) => setRentFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setRentFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleRentResizeStart}
+                        theme="light"
+                      />
+                      <ColumnHeaderCell
+                        colId="amount"
+                        label="Amount (₹)"
+                        align="right"
+                        width={rentWidths['amount']}
+                        minWidth={100}
+                        sortConfig={rentSort}
+                        onSort={handleRentSort}
+                        activeFilter={rentFilters['amount']}
+                        onApplyFilter={(c, v) => setRentFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setRentFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleRentResizeStart}
+                        theme="light"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {data.rentEntries.map((r, idx) => (
+                    {filteredRentEntries.map((r, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4 font-bold text-slate-900">{r.tenant}</td>
-                        <td className="py-3 px-4 text-slate-700 font-medium">{r.property}</td>
-                        <td className="py-3 px-4 text-slate-500">{r.unit}</td>
-                        <td className="py-3 px-4 text-right font-mono font-bold text-emerald-700 text-sm">
+                        <td
+                          style={{
+                            width: `${rentWidths['tenant'] || 200}px`,
+                            minWidth: `${rentWidths['tenant'] || 200}px`,
+                            maxWidth: `${rentWidths['tenant'] || 200}px`
+                          }}
+                          className={`py-2 px-3 font-bold text-slate-900 ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}
+                        >
+                          {r.tenant}
+                        </td>
+                        <td
+                          style={{
+                            width: `${rentWidths['property'] || 200}px`,
+                            minWidth: `${rentWidths['property'] || 200}px`,
+                            maxWidth: `${rentWidths['property'] || 200}px`
+                          }}
+                          className={`py-2 px-3 text-slate-700 font-medium ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}
+                        >
+                          {r.property}
+                        </td>
+                        <td
+                          style={{
+                            width: `${rentWidths['unit'] || 160}px`,
+                            minWidth: `${rentWidths['unit'] || 160}px`,
+                            maxWidth: `${rentWidths['unit'] || 160}px`
+                          }}
+                          className={`py-2 px-3 text-slate-500 ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}
+                        >
+                          {r.unit}
+                        </td>
+                        <td
+                          style={{
+                            width: `${rentWidths['amount'] || 140}px`,
+                            minWidth: `${rentWidths['amount'] || 140}px`,
+                            maxWidth: `${rentWidths['amount'] || 140}px`
+                          }}
+                          className="py-2 px-3 text-right font-mono font-bold text-emerald-700 text-sm"
+                        >
                           {formatCurrency(r.amount)}
                         </td>
                       </tr>
@@ -211,11 +358,11 @@ export default function MonthlyExcelReportView() {
                   </tbody>
                   <tfoot className="bg-emerald-50/60 border-t-2 border-emerald-200 font-bold">
                     <tr>
-                      <td colSpan={3} className="py-3.5 px-4 text-emerald-950 font-extrabold text-sm uppercase">
-                        Total Rent Income
+                      <td colSpan={3} className="py-3 px-3 text-emerald-950 font-extrabold text-sm uppercase">
+                        Total Rent Income ({filteredRentEntries.length} entries)
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-base font-black text-emerald-700">
-                        {formatCurrency(data.totalRentIncome || 0)}
+                      <td className="py-3 px-3 text-right font-mono text-base font-black text-emerald-700">
+                        {formatCurrency(filteredRentEntries.reduce((s, r) => s + (r.amount || 0), 0))}
                       </td>
                     </tr>
                   </tfoot>
@@ -247,28 +394,107 @@ export default function MonthlyExcelReportView() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
                     <tr>
-                      <th className="py-3 px-4">Category</th>
-                      <th className="py-3 px-4">Description / Payee</th>
-                      <th className="py-3 px-4">Property</th>
-                      <th className="py-3 px-4 text-right">Amount (₹)</th>
+                      <ColumnHeaderCell
+                        colId="category"
+                        label="Category"
+                        width={expWidths['category']}
+                        minWidth={120}
+                        sortConfig={expSort}
+                        onSort={handleExpSort}
+                        activeFilter={expFilters['category']}
+                        onApplyFilter={(c, v) => setExpFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setExpFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleExpResizeStart}
+                        theme="light"
+                      />
+                      <ColumnHeaderCell
+                        colId="description"
+                        label="Description / Payee"
+                        width={expWidths['description']}
+                        minWidth={160}
+                        sortConfig={expSort}
+                        onSort={handleExpSort}
+                        activeFilter={expFilters['description']}
+                        onApplyFilter={(c, v) => setExpFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setExpFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleExpResizeStart}
+                        theme="light"
+                      />
+                      <ColumnHeaderCell
+                        colId="property"
+                        label="Property"
+                        width={expWidths['property']}
+                        minWidth={120}
+                        sortConfig={expSort}
+                        onSort={handleExpSort}
+                        activeFilter={expFilters['property']}
+                        onApplyFilter={(c, v) => setExpFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setExpFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleExpResizeStart}
+                        theme="light"
+                      />
+                      <ColumnHeaderCell
+                        colId="amount"
+                        label="Amount (₹)"
+                        align="right"
+                        width={expWidths['amount']}
+                        minWidth={100}
+                        sortConfig={expSort}
+                        onSort={handleExpSort}
+                        activeFilter={expFilters['amount']}
+                        onApplyFilter={(c, v) => setExpFilters(p => ({ ...p, [c]: v }))}
+                        onClearFilter={(c) => setExpFilters(p => { const n = { ...p }; delete n[c]; return n; })}
+                        onResizeStart={handleExpResizeStart}
+                        theme="light"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {data.expenseEntries.map((e, idx) => (
+                    {filteredExpenseEntries.map((e, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700">
+                        <td
+                          style={{
+                            width: `${expWidths['category'] || 180}px`,
+                            minWidth: `${expWidths['category'] || 180}px`,
+                            maxWidth: `${expWidths['category'] || 180}px`
+                          }}
+                          className="py-2 px-3"
+                        >
+                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 ${autoWrap ? 'whitespace-normal break-words' : 'truncate'}`}>
                             {e.category}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-slate-800">
+                        <td
+                          style={{
+                            width: `${expWidths['description'] || 240}px`,
+                            minWidth: `${expWidths['description'] || 240}px`,
+                            maxWidth: `${expWidths['description'] || 240}px`
+                          }}
+                          className={`py-2 px-3 text-slate-800 ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}
+                        >
                           <span className="font-medium">{e.description}</span>
                           {e.payee && (
                             <span className="text-slate-400 text-[11px] block">{e.payee}</span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-slate-600 font-medium">{e.property}</td>
-                        <td className="py-3 px-4 text-right font-mono font-bold text-rose-600 text-sm">
+                        <td
+                          style={{
+                            width: `${expWidths['property'] || 200}px`,
+                            minWidth: `${expWidths['property'] || 200}px`,
+                            maxWidth: `${expWidths['property'] || 200}px`
+                          }}
+                          className={`py-2 px-3 text-slate-600 font-medium ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}
+                        >
+                          {e.property}
+                        </td>
+                        <td
+                          style={{
+                            width: `${expWidths['amount'] || 140}px`,
+                            minWidth: `${expWidths['amount'] || 140}px`,
+                            maxWidth: `${expWidths['amount'] || 140}px`
+                          }}
+                          className="py-2 px-3 text-right font-mono font-bold text-rose-600 text-sm"
+                        >
                           {formatCurrency(e.amount)}
                         </td>
                       </tr>
@@ -276,11 +502,11 @@ export default function MonthlyExcelReportView() {
                   </tbody>
                   <tfoot className="bg-rose-50/60 border-t-2 border-rose-200 font-bold">
                     <tr>
-                      <td colSpan={3} className="py-3.5 px-4 text-rose-950 font-extrabold text-sm uppercase">
-                        Total Expenses
+                      <td colSpan={3} className="py-3 px-3 text-rose-950 font-extrabold text-sm uppercase">
+                        Total Expenses ({filteredExpenseEntries.length} entries)
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-base font-black text-rose-700">
-                        {formatCurrency(data.totalExpenses || 0)}
+                      <td className="py-3 px-3 text-right font-mono text-base font-black text-rose-700">
+                        {formatCurrency(filteredExpenseEntries.reduce((s, e) => s + (e.amount || 0), 0))}
                       </td>
                     </tr>
                   </tfoot>

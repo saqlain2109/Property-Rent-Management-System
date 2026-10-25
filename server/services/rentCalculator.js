@@ -234,10 +234,10 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passed
     receiptId: { $nin: reversedReceipts }
   });
 
-  // Also include any future months allocated beyond endMonthStr
+  // Always include any month for which a real payment allocation exists
   const allocatedMonths = allocations.map(a => a.rentMonthYear);
   for (const am of allocatedMonths) {
-    if (!months.includes(am) && am >= startMonthStr) {
+    if (!months.includes(am)) {
       months.push(am);
     }
   }
@@ -292,13 +292,14 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passed
     monthsBreakdown.push({
       monthYear: m,
       expectedRate,
-      allocatedAmount: isHistoricallySettled ? (allocated || expectedRate) : allocated,
-      outstandingAmount: pending,
+      allocatedAmount: allocated,
+      actualAllocated: allocated,
+      outstandingAmount: isHistoricallySettled ? 0 : pending,
       advanceAmount: advance,
       cumulativeExpected: totalExpected,
       cumulativeAllocated: totalAllocated,
       cumulativeOutstanding: totalOutstanding,
-      status: isHistoricallySettled ? 'Fully Paid' : status,
+      status: isHistoricallySettled ? (allocated >= expectedRate && expectedRate > 0 ? 'Fully Paid' : 'Settled') : status,
       isHistorical: isHistoricallySettled
     });
   }

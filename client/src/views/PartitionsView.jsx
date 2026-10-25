@@ -5,7 +5,7 @@ import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
 import { Layers, Plus, Search, Download, Edit, Trash2, RotateCcw, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 
 const PARTITIONS_COLUMNS_DEF = [
@@ -48,9 +48,10 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
   const [occupancyFilter, setOccupancyFilter] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('partitions_freeze_v1', 0);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Suggestions for APEX filter builder dropdown
@@ -330,18 +331,15 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
   }, [sortedUnits, isAllRows, currentPage, effectivePageSize]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
             <Layers className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Property-Unit (Partitions) Master</h2>
-            <p className="text-xs text-slate-500">
-              Dedicated master for sub-units and partitions with individual area (sq ft) and occupancy status
-            </p>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Partitions (Units)</h2>
           </div>
         </div>
 
@@ -394,6 +392,8 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
         onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
+        frozenColumnCount={frozenColumnCount}
+        onFrozenColumnCountChange={setFrozenColumnCount}
         filters={activeFilters}
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
         filterSuggestions={filterSuggestions}
@@ -435,10 +435,11 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
             </colgroup>
             <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
               <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200 select-none">
-                {visibleColumns.map(colId => {
+                {visibleColumns.map((colId, colIndex) => {
                   const def = PARTITIONS_COLUMNS_DEF.find(c => c.id === colId);
                   if (!def) return null;
                   const width = columnWidths[colId] || DEFAULT_PARTITIONS_COLUMN_WIDTHS[colId] || 100;
+                  const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                   let alignClass = 'text-left';
                   if (['status', 'createdAt', 'updatedAt'].includes(colId)) alignClass = 'text-center';
                   if (['area', 'rent', 'actions'].includes(colId)) alignClass = 'text-right';
@@ -448,22 +449,22 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
                     <th 
                       key={colId} 
                       {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'partitions')}
-                      style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
-                      className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${alignClass}`}
+                      style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                      className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group select-none whitespace-normal break-words leading-tight ${alignClass} ${frozenStyle.backgroundColor ? '' : 'bg-slate-100'}`}
                     >
-                      <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                      <div className={`flex items-center gap-1 w-full ${
                         alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'
                       }`}>
                         {colId === 'actions' ? (
-                          <span className="truncate text-xs font-bold text-slate-700">{def.label}</span>
+                          <span className="text-xs font-bold text-slate-700 break-words leading-tight">{def.label}</span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => handleHeaderSort(colId)}
-                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors text-left"
                             title={`Sort by ${def.label} (Click: Descending → Ascending → Clear)`}
                           >
-                            <span className="truncate">{def.label}</span>
+                            <span className="break-words leading-tight">{def.label}</span>
                             <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
                               {sortConfig.key === colId ? (
                                 sortConfig.direction === 'desc' ? (
@@ -496,17 +497,18 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
               ) : (
                 paginatedUnits.map((u) => (
                   <tr key={u._id} className="hover:bg-emerald-50/30 transition-colors">
-                    {visibleColumns.map(colId => {
+                    {visibleColumns.map((colId, colIndex) => {
+                      const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, false);
                       if (colId === 'property') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 font-semibold text-slate-900">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 font-semibold text-slate-900">
                             {u.propertyId?.name || '—'}
                           </td>
                         );
                       }
                       if (colId === 'partition') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200">
                             <span className="font-bold text-slate-900 text-xs block">
                               {u.subUnitPartition || u.unitName}
                             </span>
@@ -520,21 +522,21 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
                       }
                       if (colId === 'area') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
                             {u.areaSqFt ? `${u.areaSqFt.toLocaleString('en-IN')} sq ft` : '—'}
                           </td>
                         );
                       }
                       if (colId === 'floor') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-600">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-slate-600">
                             {u.floor || u.unitType || '—'}
                           </td>
                         );
                       }
                       if (colId === 'status') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 text-center">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-center">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${
                               u.occupancyStatus === 'Occupied'
                                 ? 'bg-amber-100 text-amber-800'
@@ -547,7 +549,7 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
                       }
                       if (colId === 'tenant') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200">
                             {u.currentTenant ? (
                               <div>
                                 <span className="font-bold text-slate-800 block">{u.currentTenant.name}</span>
@@ -560,28 +562,28 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
                       }
                       if (colId === 'rent') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
                             {u.currentRentAgreement ? formatCurrency(u.currentRentAgreement.monthlyRate) : (u.monthlyRentExpected ? formatCurrency(u.monthlyRentExpected) : '—')}
                           </td>
                         );
                       }
                       if (colId === 'notes') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-500 text-xs truncate max-w-xs">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-slate-500 text-xs truncate max-w-xs">
                             {u.notes || '—'}
                           </td>
                         );
                       }
                       if (colId === 'createdAt' || colId === 'updatedAt') {
                         return (
-                          <td key={colId} className="py-3 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
                             {formatDate(u[colId]) || '—'}
                           </td>
                         );
                       }
                       if (colId === 'actions') {
                         return (
-                          <td key={colId} className="py-3 px-4 text-right">
+                          <td key={colId} style={frozenStyle} className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                               <button
                                 onClick={() => openEdit(u)}

@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
-import { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import { Users, Plus, Search, Download, TrendingUp, Edit, Trash2, LogOut, RotateCcw, FileText, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -60,9 +60,10 @@ export default function TenantsView({ onDataChanged }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('tenants_freeze_v1', 0);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Suggestions for APEX filter builder dropdown
@@ -433,18 +434,15 @@ export default function TenantsView({ onDataChanged }) {
   }, [sortedTenants, isAllRows, currentPage, effectivePageSize]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Tenant Master</h2>
-            <p className="text-xs text-slate-500">
-              Excel-style grid with property & vacant sub-unit selection, dates, rent, deposit, terms, and notes
-            </p>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Tenants</h2>
           </div>
         </div>
 
@@ -507,6 +505,8 @@ export default function TenantsView({ onDataChanged }) {
         onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
+        frozenColumnCount={frozenColumnCount}
+        onFrozenColumnCountChange={setFrozenColumnCount}
         filters={activeFilters}
         onFiltersChange={(flts) => { setActiveFilters(flts); setCurrentPage(1); }}
         filterSuggestions={filterSuggestions}
@@ -548,10 +548,11 @@ export default function TenantsView({ onDataChanged }) {
             </colgroup>
             <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
               <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200 select-none">
-                {visibleColumns.map(colId => {
+                {visibleColumns.map((colId, colIndex) => {
                   const def = TENANTS_COLUMNS_DEF.find(c => c.id === colId);
                   if (!def) return null;
                   const width = columnWidths[colId] || DEFAULT_TENANTS_COLUMN_WIDTHS[colId] || 100;
+                  const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                   let alignClass = 'text-left';
                   if (colId === 'status' || colId === 'rentType' || colId === 'createdAt' || colId === 'updatedAt') alignClass = 'text-center';
                   if (['monthlyRate', 'deposit'].includes(colId)) alignClass = 'text-right';
@@ -561,14 +562,14 @@ export default function TenantsView({ onDataChanged }) {
                     <th 
                       key={colId} 
                       {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'tenants_v2')}
-                      style={{ width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
-                      className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${alignClass}`}
+                      style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                      className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group select-none whitespace-normal break-words leading-tight ${alignClass} ${frozenStyle.backgroundColor ? '' : 'bg-slate-100'}`}
                     >
-                      <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                      <div className={`flex items-center gap-1 w-full ${
                         alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'
                       }`}>
                         {colId === 'actions' ? (
-                          <span className="truncate text-xs font-bold text-slate-700">{def.label}</span>
+                          <span className="text-xs font-bold text-slate-700 break-words leading-tight">{def.label}</span>
                         ) : (
                           <button
                             type="button"
@@ -609,10 +610,11 @@ export default function TenantsView({ onDataChanged }) {
               ) : (
                 paginatedTenants.map((t) => (
                   <tr key={t._id} className="hover:bg-emerald-50/30 transition-colors">
-                    {visibleColumns.map(colId => {
+                    {visibleColumns.map((colId, colIndex) => {
+                      const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, false);
                       if (colId === 'tenant') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200">
                             <span className="font-bold text-slate-900 text-xs block">{t.name}</span>
                             <span className="text-[11px] text-slate-500">{t.phone || 'No phone number'}</span>
                           </td>
@@ -620,7 +622,7 @@ export default function TenantsView({ onDataChanged }) {
                       }
                       if (colId === 'property') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200">
                             {t.activeUnit ? (
                               <div>
                                 <span className="font-bold text-slate-800 text-xs block">
@@ -636,21 +638,21 @@ export default function TenantsView({ onDataChanged }) {
                       }
                       if (colId === 'startDate') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 font-mono text-slate-700">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 font-mono text-slate-700">
                             {t.activeAssignment ? formatDate(t.activeAssignment.startDate) : '—'}
                           </td>
                         );
                       }
                       if (colId === 'endDate') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 font-mono text-slate-700">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 font-mono text-slate-700">
                             {t.activeAssignment?.endDate ? formatDate(t.activeAssignment.endDate) : <span className="text-slate-400 italic">Blank</span>}
                           </td>
                         );
                       }
                       if (colId === 'monthlyRate') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-900">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 text-right font-mono font-bold text-slate-900">
                             {t.currentRentAgreement
                               ? formatCurrency(t.currentRentAgreement.rentType === 'Annual Fixed'
                                 ? t.currentRentAgreement.annualRate || t.currentRentAgreement.monthlyRate * 12
@@ -661,35 +663,35 @@ export default function TenantsView({ onDataChanged }) {
                       }
                       if (colId === 'rentType') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-center text-slate-700">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 text-center text-slate-700">
                             {t.currentRentAgreement?.rentType === 'Annual Fixed' ? 'Annual' : t.currentRentAgreement ? 'Monthly' : '—'}
                           </td>
                         );
                       }
                       if (colId === 'createdAt' || colId === 'updatedAt') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 text-slate-600 whitespace-nowrap">
                             {t[colId] ? formatDate(t[colId]) : '—'}
                           </td>
                         );
                       }
                       if (colId === 'deposit') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-right font-mono text-slate-700">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 text-right font-mono text-slate-700">
                             {t.activeAssignment?.depositHeld ? formatCurrency(t.activeAssignment.depositHeld) : '—'}
                           </td>
                         );
                       }
                       if (colId === 'termsNotes') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-slate-600 max-w-xs truncate">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 text-slate-600 max-w-xs truncate">
                             {t.currentRentAgreement?.terms || t.notes || '—'}
                           </td>
                         );
                       }
                       if (colId === 'status') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 text-center">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 text-center">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
                               t.activeAssignment
                                 ? 'bg-emerald-100 text-emerald-800'
@@ -702,14 +704,14 @@ export default function TenantsView({ onDataChanged }) {
                       }
                       if (colId === 'phone') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 border-r border-slate-200 font-mono text-slate-700 text-xs">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 border-r border-slate-200 font-mono text-slate-700 text-xs">
                             {t.phone || '—'}
                           </td>
                         );
                       }
                       if (colId === 'actions') {
                         return (
-                          <td key={colId} className="py-3.5 px-4 text-right">
+                          <td key={colId} style={frozenStyle} className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                               {t.activeAssignment && (
                                 <>

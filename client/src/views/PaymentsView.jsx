@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import API from '../services/api';
 import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
@@ -10,7 +11,7 @@ import {
   RotateCcw, CheckCircle2, Eye, Sparkles, Clock, X,
   Edit2, Filter, Layers, ListFilter, Trash2,
   Calendar, ChevronLeft, ChevronRight, Download, Check,
-  IndianRupee, ArrowRight, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown
+  IndianRupee, ArrowRight, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Building2
 } from 'lucide-react';
 
 const RENT_SHEET_COLUMNS_DEF = [
@@ -18,11 +19,12 @@ const RENT_SHEET_COLUMNS_DEF = [
   { id: 'tenant', label: 'Tenant Details', defaultVisible: true },
   { id: 'property', label: 'Property', defaultVisible: true },
   { id: 'subUnit', label: 'Sub-Unit', defaultVisible: true },
+  { id: 'contractNo', label: 'Contract No', defaultVisible: true },
   { id: 'monthlyRent', label: 'Monthly Rent', defaultVisible: true },
   { id: 'outstanding', label: 'Outstanding due', defaultVisible: true },
   { id: 'paidUpTo', label: 'Paid Up To', defaultVisible: true },
   { id: 'paidForMonth', label: 'Paid for Month', defaultVisible: true },
-  { id: 'amount', label: 'Amount', defaultVisible: true },
+  { id: 'amount', label: 'Amount Paid', defaultVisible: true },
   { id: 'actions', label: 'Actions', defaultVisible: true },
   { id: 'tenantPhone', label: 'Tenant Phone', defaultVisible: false },
   { id: 'propertyType', label: 'Property Type', defaultVisible: false },
@@ -39,7 +41,7 @@ const RECEIPTS_COLUMNS_DEF = [
   { id: 'receiptDate', label: 'Date', defaultVisible: true },
   { id: 'tenant', label: 'Tenant & Sub-Unit', defaultVisible: true },
   { id: 'monthsCovered', label: 'Rent Month(s)', defaultVisible: true },
-  { id: 'totalAmount', label: 'Amount Paid', defaultVisible: true },
+  { id: 'totalAmount', label: 'Total Amount Paid', defaultVisible: true },
   { id: 'paymentMode', label: 'Mode', defaultVisible: true },
   { id: 'referenceNumber', label: 'Ref / Cheque / UTR #', defaultVisible: false },
   { id: 'bankName', label: 'Bank Name', defaultVisible: false },
@@ -58,6 +60,7 @@ const DEFAULT_SHEET_COLUMN_WIDTHS = {
   tenant: 165,
   property: 130,
   subUnit: 120,
+  contractNo: 125,
   monthlyRent: 110,
   outstanding: 125,
   paidUpTo: 105,
@@ -79,7 +82,7 @@ const DEFAULT_RECEIPTS_COLUMN_WIDTHS = {
   receiptDate: 100,
   tenant: 180,
   monthsCovered: 140,
-  totalAmount: 110,
+  totalAmount: 135,
   paymentMode: 90,
   actions: 105,
   referenceNumber: 120,
@@ -163,7 +166,29 @@ export default function PaymentsView() {
   const [tenants, setTenants] = useState([]);
   const [units, setUnits] = useState([]);
   const [properties, setProperties] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [monthExpenses, setMonthExpenses] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [prevMonthBalance, setPrevMonthBalance] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Expense Modal and Expansion State
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [expenseForm, setExpenseForm] = useState({
+    headType: 'Property',
+    propertyId: '',
+    category: '',
+    amount: '',
+    expenseMonth: '',
+    expenseDate: '',
+    description: '',
+    vendorOrPayee: '',
+    paymentMode: 'Cash'
+  });
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [expandedPropertyExpenses, setExpandedPropertyExpenses] = useState({});
+  const [expandedCommonExpenses, setExpandedCommonExpenses] = useState({});
 
   // Filters with localStorage persistence
   const [search, setSearch] = useState(() => {
@@ -179,6 +204,13 @@ export default function PaymentsView() {
   useEffect(() => {
     localStorage.setItem('payments_prop_filter', selectedPropertyFilter);
   }, [selectedPropertyFilter]);
+
+  const [selectedTenantFilter, setSelectedTenantFilter] = useState(() => {
+    return localStorage.getItem('payments_tenant_filter') || '';
+  });
+  useEffect(() => {
+    localStorage.setItem('payments_tenant_filter', selectedTenantFilter);
+  }, [selectedTenantFilter]);
 
   // Receipts Register Filters
   const [receiptSearch, setReceiptSearch] = useState(() => {
@@ -221,7 +253,7 @@ export default function PaymentsView() {
   }, [sheetFilters]);
   const [sheetSortConfig, setSheetSortConfig] = useState({ key: null, direction: null });
   const [isSheetHeaderSticky, setIsSheetHeaderSticky] = useState(true);
-  const [sheetRowsPerPage, setSheetRowsPerPage] = useState('All');
+  const [sheetRowsPerPage, setSheetRowsPerPage] = useState(25);
   const [sheetCurrentPage, setSheetCurrentPage] = useState(1);
   const [sheetActiveViewId, setSheetActiveViewId] = useState(null);
 
@@ -298,6 +330,16 @@ export default function PaymentsView() {
   const [savingRows, setSavingRows] = useState({});
   const [savedFeedback, setSavedFeedback] = useState({});
   const [openMonthPickerRow, setOpenMonthPickerRow] = useState(null);
+
+  // Clear drafts when selected month changes so default calculations or blanks apply fresh
+  useEffect(() => {
+    setRowDrafts({});
+  }, [selectedMonth]);
+
+  // Inline edit state for monthly rent rate
+  const [editingRentUnitId, setEditingRentUnitId] = useState(null);
+  const [editingRentValue, setEditingRentValue] = useState('');
+  const [savingRentUnitId, setSavingRentUnitId] = useState(null);
 
   const getRowKey = (item) => item.assignmentId || `${item.tenant?._id}_${item.unit?._id}`;
 
@@ -445,40 +487,63 @@ export default function PaymentsView() {
   const getRowDraft = (item) => {
     const rowKey = getRowKey(item);
     if (rowDrafts[rowKey]) {
-      const currentDraft = rowDrafts[rowKey];
-      // Ensure existing draft does not target an already paid month
-      const payable = getPayableMonthsList(item, selectedMonth);
-      const payableSet = new Set(payable.map(p => p.monthYear));
-      const validMonths = (currentDraft.selectedMonths || []).filter(m => payableSet.has(m));
-      if (validMonths.length > 0 && validMonths.length === (currentDraft.selectedMonths || []).length) {
-        return currentDraft;
-      }
-      if (validMonths.length > 0) {
-        return {
-          ...currentDraft,
-          selectedMonths: validMonths
-        };
-      }
+      return rowDrafts[rowKey];
     }
 
-    const targetInfo = getNextTargetMonth(item, selectedMonth);
+    const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
+    const paidThisMonth = monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : 0;
+
+    // Amount Paid displays the actual collected amount for this month; if 0, leave blank for clean editing
+    const defaultAmount = paidThisMonth > 0 ? paidThisMonth : '';
 
     return {
-      amount: targetInfo.amount,
-      selectedMonths: [targetInfo.targetMonth],
+      amount: defaultAmount,
+      selectedMonths: [selectedMonth],
       paymentMode: 'Cash',
       referenceNumber: ''
     };
   };
 
-  const updateRowDraft = (rowKey, patch) => {
-    setRowDrafts(prev => ({
-      ...prev,
-      [rowKey]: {
-        ...(prev[rowKey] || {}),
-        ...patch
+  const updateRowDraft = (rowKey, patch, item) => {
+    setRowDrafts(prev => {
+      const current = prev[rowKey] || (item ? getRowDraft(item) : {
+        amount: '',
+        selectedMonths: [selectedMonth],
+        paymentMode: 'Cash',
+        referenceNumber: ''
+      });
+      return {
+        ...prev,
+        [rowKey]: {
+          ...current,
+          ...patch
+        }
+      };
+    });
+  };
+
+  const handleSaveRentRate = async (unitId) => {
+    if (!unitId) return;
+    const rateNum = Number(editingRentValue);
+    if (isNaN(rateNum) || rateNum < 0) {
+      alert('Please enter a valid monthly rent amount.');
+      return;
+    }
+    try {
+      setSavingRentUnitId(unitId);
+      const res = await API.put(`/units/${unitId}`, {
+        monthlyRentExpected: rateNum,
+        monthlyRate: rateNum
+      });
+      if (res.data.success) {
+        setEditingRentUnitId(null);
+        await fetchData(selectedMonth);
       }
-    }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update monthly rent rate.');
+    } finally {
+      setSavingRentUnitId(null);
+    }
   };
 
   const handleToggleMonthForRow = (item, monthStr) => {
@@ -515,30 +580,52 @@ export default function PaymentsView() {
 
   const handleDirectSaveRow = async (item) => {
     const rowKey = getRowKey(item);
-    // Prevent double submissions immediately
     if (savingRows[rowKey]) return;
 
     const draft = getRowDraft(item);
-    const enteredTotal = Number(draft.amount);
+    const enteredRaw = draft.amount;
+    const enteredTotal = Number(enteredRaw);
+
+    const months = draft.selectedMonths && draft.selectedMonths.length > 0 ? draft.selectedMonths : [selectedMonth];
+    const isSingleMonthActive = months.length === 1 && months[0] === selectedMonth;
+    const targetMonthForCheck = months[0] || selectedMonth;
+
+    // Check if an existing payment receipt already exists for this unit covering target month
+    const existingReceipt = receipts.find(r => 
+      !r.isReversed &&
+      (r.unitId?._id === item.unit?._id || r.unitId === item.unit?._id) &&
+      r.allocations?.some(a => a.rentMonthYear === targetMonthForCheck)
+    );
+
+    // If entered amount is 0 or empty and an existing receipt exists, offer to remove it
+    if ((enteredRaw === '' || isNaN(enteredTotal) || enteredTotal <= 0) && existingReceipt) {
+      const confirmDelete = window.confirm(
+        `Amount is set to 0. Do you want to remove the existing payment receipt of ₹${Number(existingReceipt.totalAmount).toLocaleString('en-IN')} for ${formatMonthYear(targetMonthForCheck)}?`
+      );
+      if (!confirmDelete) return;
+
+      try {
+        setSavingRows(prev => ({ ...prev, [rowKey]: true }));
+        await API.delete(`/payments/${existingReceipt._id}/permanent`);
+        setSavedFeedback(prev => ({ ...prev, [rowKey]: true }));
+        setTimeout(() => setSavedFeedback(prev => ({ ...prev, [rowKey]: false })), 2500);
+        setRowDrafts(prev => {
+          const copy = { ...prev };
+          delete copy[rowKey];
+          return copy;
+        });
+        await fetchData(selectedMonth);
+      } catch (err) {
+        alert(err.response?.data?.message || 'Error removing payment');
+      } finally {
+        setSavingRows(prev => ({ ...prev, [rowKey]: false }));
+      }
+      return;
+    }
 
     if (!enteredTotal || enteredTotal <= 0) {
       alert('Please enter a valid amount greater than 0.');
       return;
-    }
-
-    const months = draft.selectedMonths && draft.selectedMonths.length > 0 ? draft.selectedMonths : [selectedMonth];
-
-    // Check if any selected month is already fully paid
-    const alreadyPaidMonths = months.filter(m => {
-      const md = item.monthsBreakdown?.find(b => b.monthYear === m);
-      return md && md.allocatedAmount >= md.expectedRate && md.expectedRate > 0;
-    });
-
-    if (alreadyPaidMonths.length > 0) {
-      const confirmExtra = window.confirm(
-        `Rent for ${alreadyPaidMonths.map(formatMonthYear).join(', ')} is ALREADY fully paid.\n\nDo you really want to record an ADDITIONAL payment of ₹${enteredTotal.toLocaleString('en-IN')}?`
-      );
-      if (!confirmExtra) return;
     }
 
     // Set saving state immediately to lock the button against fast double-clicks
@@ -546,7 +633,6 @@ export default function PaymentsView() {
 
     const monthlyRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 0;
 
-    // Distribute entered amount across selected months
     let remaining = enteredTotal;
     const allocations = months.map((m, idx) => {
       let allocated = 0;
@@ -563,37 +649,54 @@ export default function PaymentsView() {
       };
     });
 
-    const payload = {
-      tenantId: item.tenant?._id,
-      unitId: item.unit?._id,
-      receiptDate: new Date().toISOString().split('T')[0],
-      totalAmount: enteredTotal,
-      paymentMode: draft.paymentMode || 'Cash',
-      referenceNumber: draft.referenceNumber || '',
-      bankName: '',
-      comments: `Direct collection for ${months.map(formatMonthYear).join(', ')}`,
-      allocations
-    };
+    const matchingContracts = getMatchingContractsForRow(item, selectedMonth);
+    const resolvedContractNo = draft.contractNo || item.contractNo || matchingContracts[0]?.contractNo || '';
+
+    const currentMY = getCurrentMonthYear();
+    const receiptDate = selectedMonth === currentMY 
+      ? new Date().toISOString().split('T')[0] 
+      : `${selectedMonth}-15`;
 
     try {
-      const res = await API.post('/payments', payload);
-      if (res.data.success) {
-        setSavedFeedback(prev => ({ ...prev, [rowKey]: true }));
-        setTimeout(() => {
-          setSavedFeedback(prev => ({ ...prev, [rowKey]: false }));
-        }, 2500);
-
-        // Clear draft to reset row to fresh state
-        setRowDrafts(prev => {
-          const copy = { ...prev };
-          delete copy[rowKey];
-          return copy;
+      if (existingReceipt && isSingleMonthActive) {
+        // UPDATE existing receipt directly
+        await API.put(`/payments/${existingReceipt._id}`, {
+          totalAmount: enteredTotal,
+          paymentMode: draft.paymentMode || existingReceipt.paymentMode || 'Cash',
+          referenceNumber: draft.referenceNumber !== undefined ? draft.referenceNumber : (existingReceipt.referenceNumber || ''),
+          contractNo: resolvedContractNo,
+          allocations
         });
-        setOpenMonthPickerRow(null);
-
-        // Refresh data
-        await fetchData(selectedMonth);
+      } else {
+        // CREATE new receipt
+        const payload = {
+          tenantId: item.tenant?._id,
+          unitId: item.unit?._id,
+          contractNo: resolvedContractNo,
+          receiptDate,
+          totalAmount: enteredTotal,
+          paymentMode: draft.paymentMode || 'Cash',
+          referenceNumber: draft.referenceNumber || '',
+          bankName: '',
+          comments: `Direct collection for ${months.map(formatMonthYear).join(', ')}`,
+          allocations
+        };
+        await API.post('/payments', payload);
       }
+
+      setSavedFeedback(prev => ({ ...prev, [rowKey]: true }));
+      setTimeout(() => setSavedFeedback(prev => ({ ...prev, [rowKey]: false })), 2500);
+
+      // Clear draft to reset row to fresh state
+      setRowDrafts(prev => {
+        const copy = { ...prev };
+        delete copy[rowKey];
+        return copy;
+      });
+      setOpenMonthPickerRow(null);
+
+      // Refresh data
+      await fetchData(selectedMonth);
     } catch (err) {
       alert(err.response?.data?.message || 'Error saving payment.');
     } finally {
@@ -605,18 +708,30 @@ export default function PaymentsView() {
   const fetchData = async (targetMonth = selectedMonth) => {
     try {
       setLoading(true);
-      const [outRes, recRes, tRes, uRes, pRes] = await Promise.all([
+      const [outRes, recRes, tRes, uRes, pRes, expRes, ledRes, assignRes, catRes] = await Promise.all([
         API.get(`/payments/outstanding-summary?upToMonthYear=${targetMonth}`),
         API.get('/payments'),
         API.get('/tenants'),
         API.get('/units'),
-        API.get('/properties')
+        API.get('/properties'),
+        API.get(`/expenses?month=${targetMonth}`),
+        API.get(`/ledger?startMonth=${targetMonth}&endMonth=${targetMonth}`),
+        API.get('/assignments'),
+        API.get('/expenses/categories')
       ]);
       if (outRes.data.success) setOutstandingData(outRes.data.data);
       if (recRes.data.success) setReceipts(recRes.data.data);
       if (tRes.data.success) setTenants(tRes.data.data);
       if (uRes.data.success) setUnits(uRes.data.data);
       if (pRes.data.success) setProperties(pRes.data.data);
+      if (expRes.data?.success) setMonthExpenses(expRes.data.data || []);
+      if (assignRes.data?.success) setAssignments(assignRes.data.data || []);
+      if (catRes.data?.success) setExpenseCategories(catRes.data.data || []);
+      if (ledRes.data?.success && ledRes.data.data?.length > 0) {
+        setPrevMonthBalance(ledRes.data.data[0].openingBalance || 0);
+      } else {
+        setPrevMonthBalance(0);
+      }
     } catch (err) {
       console.error('Error fetching rent and payment data:', err);
     } finally {
@@ -678,6 +793,134 @@ export default function PaymentsView() {
     }));
   };
 
+  // Get matching lease contracts for a tenant & partition active in accounting month
+  const getMatchingContractsForRow = (item, monthToMatch = selectedMonth) => {
+    const tId = String(item.tenant?._id || item.tenant || '');
+    const uId = String(item.unit?._id || item.unit || '');
+    if (!tId || !uId || !assignments || assignments.length === 0) {
+      if (item.contractNo) {
+        return [{ _id: item.assignmentId, contractNo: item.contractNo }];
+      }
+      return [];
+    }
+
+    const matches = assignments.filter(c => {
+      const cTId = String(c.tenantId?._id || c.tenantId || '');
+      const cUId = String(c.unitId?._id || c.unitId || '');
+      if (cTId !== tId || cUId !== uId) return false;
+
+      // Check date range: startDate <= monthToMatch && (!endDate || endDate >= monthToMatch)
+      const sMonth = c.startDate ? c.startDate.slice(0, 7) : null;
+      const eMonth = c.endDate ? c.endDate.slice(0, 7) : null;
+      if (sMonth && sMonth > monthToMatch) return false;
+      if (eMonth && eMonth < monthToMatch) return false;
+      return true;
+    });
+
+    if (matches.length === 0 && item.contractNo) {
+      return [{ _id: item.assignmentId, contractNo: item.contractNo }];
+    }
+    return matches;
+  };
+
+  // Open modal to add an expense (either Property or Other)
+  const openAddExpenseModal = (headType = 'Property', defaultPropId = '') => {
+    setEditingExpense(null);
+    const normHeadType = headType === 'Common' ? 'Other' : headType;
+    const firstCat = expenseCategories.find(c => c.headType === normHeadType || (normHeadType === 'Other' && c.headType === 'Common'))?.name || (normHeadType === 'Property' ? 'Repairs & Renovation' : 'Miscellaneous');
+    setExpenseForm({
+      headType: normHeadType,
+      propertyId: normHeadType === 'Property' ? (defaultPropId || selectedPropertyFilter || properties[0]?._id || '') : '',
+      category: firstCat,
+      amount: '',
+      expenseMonth: selectedMonth,
+      expenseDate: `${selectedMonth}-01`,
+      description: '',
+      vendorOrPayee: '',
+      paymentMode: 'Cash'
+    });
+    setShowExpenseModal(true);
+  };
+
+  // Open modal to edit an existing expense record
+  const openEditExpenseModal = (exp) => {
+    setEditingExpense(exp);
+    const pId = exp.propertyId?._id || exp.propertyId || '';
+    const normHeadType = exp.headType ? (exp.headType === 'Common' ? 'Other' : exp.headType) : (pId ? 'Property' : 'Other');
+    setExpenseForm({
+      headType: normHeadType,
+      propertyId: pId,
+      category: exp.category || '',
+      amount: String(exp.amount || ''),
+      expenseMonth: exp.expenseMonth || (exp.expenseDate ? exp.expenseDate.slice(0, 7) : selectedMonth),
+      expenseDate: exp.expenseDate ? exp.expenseDate.slice(0, 10) : `${selectedMonth}-01`,
+      description: exp.description || '',
+      vendorOrPayee: exp.vendorOrPayee || '',
+      paymentMode: exp.paymentMode || 'Cash'
+    });
+    setShowExpenseModal(true);
+  };
+
+  // Save (Create or Update) Expense
+  const handleSaveExpense = async (e) => {
+    e?.preventDefault();
+    if (!expenseForm.category?.trim()) {
+      alert('Please select an expense head/category.');
+      return;
+    }
+    const amt = Number(expenseForm.amount);
+    if (isNaN(amt) || amt <= 0) {
+      alert('Please enter a valid expense amount.');
+      return;
+    }
+    if (expenseForm.headType === 'Property' && !expenseForm.propertyId) {
+      alert('Please select a property for this property-wise expense.');
+      return;
+    }
+
+    try {
+      setSavingExpense(true);
+      const payload = {
+        headType: expenseForm.headType === 'Common' ? 'Other' : expenseForm.headType,
+        propertyId: expenseForm.headType === 'Property' ? expenseForm.propertyId : null,
+        category: expenseForm.category.trim(),
+        amount: amt,
+        expenseMonth: expenseForm.expenseMonth || selectedMonth,
+        expenseDate: expenseForm.expenseDate ? new Date(expenseForm.expenseDate) : new Date(`${selectedMonth}-01`),
+        description: expenseForm.description?.trim() || `${expenseForm.category} expense`,
+        vendorOrPayee: expenseForm.vendorOrPayee?.trim() || '',
+        paymentMode: expenseForm.paymentMode || 'Cash'
+      };
+
+      if (editingExpense) {
+        await API.put(`/expenses/${editingExpense._id}`, payload);
+      } else {
+        await API.post('/expenses', payload);
+      }
+      setShowExpenseModal(false);
+      await fetchData(selectedMonth);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error saving expense record.');
+    } finally {
+      setSavingExpense(false);
+    }
+  };
+
+  // Delete / Reverse Expense Record
+  const handleDeleteExpense = async (expId, categoryName, amount) => {
+    if (!window.confirm(`Are you sure you want to remove the expense for ${categoryName || 'this item'} (₹${Number(amount || 0).toLocaleString('en-IN')})?`)) {
+      return;
+    }
+    try {
+      await API.post(`/expenses/${expId}/reverse`, {
+        reversalReason: 'Reversed from Rents & Payments view'
+      });
+      await fetchData(selectedMonth);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error reversing expense.');
+    }
+  };
+
   // Open Fast Payment Modal for a specific row / tenant
   const openFastPaymentModal = async (item) => {
     setEditingReceiptId(null);
@@ -690,6 +933,8 @@ export default function PaymentsView() {
 
     setSelectedTenantInfo({
       tenantId,
+      initialTenantId: tenantId,
+      assignmentId: item.assignmentId,
       unitId,
       tenantName: item.tenant?.name || 'Tenant',
       tenantPhone: item.tenant?.phone || '',
@@ -698,6 +943,7 @@ export default function PaymentsView() {
       monthlyRate,
       paidTillMonth: item.paidTillMonth
     });
+    setPaymentForm(f => ({ ...f, tenantId, unitId }));
 
     try {
       // Fetch detailed ledger to get unpaid and historical months
@@ -722,6 +968,9 @@ export default function PaymentsView() {
       }
 
       syncPaymentState(initialMap, [], tenantId, unitId);
+      const matchingContracts = getMatchingContractsForRow(item, selectedMonth);
+      const activeContract = item.contractNo || matchingContracts[0]?.contractNo || '';
+      setPaymentForm(f => ({ ...f, contractNo: activeContract }));
     } catch (err) {
       console.error('Failed to load tenant ledger:', err);
     } finally {
@@ -740,7 +989,9 @@ export default function PaymentsView() {
 
     setSelectedTenantInfo({
       tenantId,
+      initialTenantId: tenantId,
       unitId,
+      receiptNumber: receipt.receiptNumber,
       tenantName: receipt.tenantId?.name || 'Tenant',
       tenantPhone: receipt.tenantId?.phone || '',
       propertyName: receipt.unitId?.propertyId?.name || '',
@@ -822,8 +1073,49 @@ export default function PaymentsView() {
 
   // Update amount allocated to a specific unpaid month
   const updateMonthAmount = (monthYear, newAmount) => {
-    const updated = { ...selectedMonthsMap, [monthYear]: Number(newAmount) || 0 };
-    syncPaymentState(updated, advanceMonthsList);
+    const val = newAmount === '' ? '' : (Number(newAmount) || 0);
+    const updated = { ...selectedMonthsMap, [monthYear]: val };
+    setSelectedMonthsMap(updated);
+
+    const unpaidSum = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
+    const advanceSum = advanceMonthsList.reduce((s, a) => s + Number(a.amount || 0), 0);
+    const total = unpaidSum + advanceSum;
+
+    setPaymentForm(f => ({
+      ...f,
+      totalAmount: String(total)
+    }));
+  };
+
+  // Handle direct typing in the Total Amount Paid field
+  const handleTotalAmountChange = (newVal) => {
+    setPaymentForm(f => ({ ...f, totalAmount: newVal }));
+
+    if (newVal === '') return;
+    const enteredNum = Number(newVal);
+    if (isNaN(enteredNum) || enteredNum < 0) return;
+
+    // Distribute enteredNum across active selected months so allocations always match
+    const activeMonths = Object.keys(selectedMonthsMap).sort();
+    if (activeMonths.length === 1) {
+      setSelectedMonthsMap({ [activeMonths[0]]: enteredNum });
+    } else if (activeMonths.length > 1) {
+      let rem = enteredNum;
+      const updated = {};
+      const defaultRate = selectedTenantInfo?.monthlyRate || 22000;
+      activeMonths.forEach((m, idx) => {
+        if (idx === activeMonths.length - 1) {
+          updated[m] = rem;
+        } else {
+          const alloc = Math.min(rem, defaultRate);
+          updated[m] = alloc;
+          rem = Math.max(0, rem - alloc);
+        }
+      });
+      setSelectedMonthsMap(updated);
+    } else if (advanceMonthsList.length === 1) {
+      setAdvanceMonthsList([{ ...advanceMonthsList[0], amount: enteredNum }]);
+    }
   };
 
   // Add an Advance Month
@@ -891,6 +1183,7 @@ export default function PaymentsView() {
       const payload = {
         tenantId: paymentForm.tenantId,
         unitId: paymentForm.unitId,
+        contractNo: paymentForm.contractNo || '',
         receiptDate: paymentForm.receiptDate,
         totalAmount: enteredTotal,
         paymentMode: paymentForm.paymentMode || 'Cash',
@@ -906,14 +1199,23 @@ export default function PaymentsView() {
           setShowPaymentModal(false);
           setEditingReceiptId(null);
           alert('Payment receipt updated successfully!');
-          fetchData(selectedMonth);
+          await fetchData(selectedMonth);
         }
       } else {
+        if (selectedTenantInfo?.assignmentId && paymentForm.tenantId && paymentForm.tenantId !== selectedTenantInfo.initialTenantId) {
+          try {
+            await API.put(`/assignments/${selectedTenantInfo.assignmentId}`, {
+              tenantId: paymentForm.tenantId
+            });
+          } catch(err) {
+            console.error('Failed to update contract tenant:', err);
+          }
+        }
         const res = await API.post('/payments', payload);
         if (res.data.success) {
           setShowPaymentModal(false);
           alert('Payment recorded successfully!');
-          fetchData(selectedMonth);
+          await fetchData(selectedMonth);
         }
       }
     } catch (err) {
@@ -1090,7 +1392,7 @@ export default function PaymentsView() {
       'Property': r.unitId?.propertyId?.name || '—',
       'Sub-Unit': r.unitId?.subUnitPartition || r.unitId?.unitName || '—',
       'Rent Month(s)': r.monthsCovered || '—',
-      'Amount Paid (₹)': Number(r.totalAmount) || 0,
+      'Total Amount Paid (₹)': Number(r.totalAmount) || 0,
       'Payment Mode': r.paymentMode || 'Cash',
       'Ref / UTR #': r.referenceNumber || '—',
       'Bank Name': r.bankName || '—',
@@ -1126,7 +1428,11 @@ export default function PaymentsView() {
         d.property?._id === selectedPropertyFilter ||
         d.property?.name === selectedPropertyFilter;
 
-      if (!matchesSearch || !matchesProp) return false;
+      const matchesTenant = !selectedTenantFilter ||
+        d.tenant?._id === selectedTenantFilter ||
+        d.tenant?.name === selectedTenantFilter;
+
+      if (!matchesSearch || !matchesProp || !matchesTenant) return false;
 
       // APEX filters
       for (const f of sheetFilters) {
@@ -1150,7 +1456,18 @@ export default function PaymentsView() {
 
       return true;
     });
-  }, [outstandingData, search, selectedPropertyFilter, sheetFilters, selectedMonth]);
+  }, [outstandingData, search, selectedPropertyFilter, selectedTenantFilter, sheetFilters, selectedMonth]);
+
+  const availableTenantsForFilter = React.useMemo(() => {
+    let list = tenants || [];
+    if (selectedPropertyFilter) {
+      list = list.filter(t => {
+        const pId = t.property?._id || t.property;
+        return String(pId) === String(selectedPropertyFilter);
+      });
+    }
+    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [tenants, selectedPropertyFilter]);
 
   // Aggregate sums for Rent Collection Grid
   const totalExpectedSum = React.useMemo(() => {
@@ -1163,13 +1480,84 @@ export default function PaymentsView() {
   const totalPaidSum = React.useMemo(() => {
     return filteredOut.reduce((sum, item) => {
       const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-      return sum + (monthData ? monthData.allocatedAmount : 0);
+      return sum + (monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : 0);
     }, 0);
   }, [filteredOut, selectedMonth]);
 
   const totalOutstandingSum = React.useMemo(() => {
     return filteredOut.reduce((sum, item) => sum + (item.totalOutstanding || 0), 0);
   }, [filteredOut]);
+
+  // Month Expenses and Financial Calculations (Property-Wise, Common/General, Difference, Previous Balance, Cumulative)
+  const filteredMonthExpenses = React.useMemo(() => {
+    if (!selectedPropertyFilter) return monthExpenses;
+    return monthExpenses.filter(e => {
+      const pId = e.propertyId?._id || e.propertyId;
+      return String(pId) === String(selectedPropertyFilter);
+    });
+  }, [monthExpenses, selectedPropertyFilter]);
+
+  // 1. Property-wise Expenses (grouped by property)
+  const propertyExpensesList = React.useMemo(() => {
+    const map = {};
+    filteredMonthExpenses.filter(e => e.propertyId).forEach(e => {
+      const pid = String(e.propertyId?._id || e.propertyId);
+      const propObj = properties.find(p => String(p._id) === pid);
+      const propName = e.propertyId?.name || propObj?.name || 'Property Expense';
+      if (!map[pid]) {
+        map[pid] = {
+          propertyId: pid,
+          propertyName: propName,
+          total: 0,
+          categories: {},
+          items: []
+        };
+      }
+      map[pid].total += (e.amount || 0);
+      const cat = e.category || 'General';
+      map[pid].categories[cat] = (map[pid].categories[cat] || 0) + (e.amount || 0);
+      map[pid].items.push(e);
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [filteredMonthExpenses, properties]);
+
+  const totalPropertyExpenses = React.useMemo(() => {
+    return propertyExpensesList.reduce((sum, p) => sum + p.total, 0);
+  }, [propertyExpensesList]);
+
+  // 2. Common / General Expenses (not tied to a specific property)
+  const commonExpensesList = React.useMemo(() => {
+    const map = {};
+    filteredMonthExpenses.filter(e => !e.propertyId).forEach(e => {
+      const cat = e.category || 'Miscellaneous';
+      if (!map[cat]) {
+        map[cat] = {
+          category: cat,
+          sum: 0,
+          items: []
+        };
+      }
+      map[cat].sum += (e.amount || 0);
+      map[cat].items.push(e);
+    });
+    return Object.values(map).sort((a, b) => b.sum - a.sum);
+  }, [filteredMonthExpenses]);
+
+  const totalCommonExpenses = React.useMemo(() => {
+    return commonExpensesList.reduce((sum, c) => sum + c.sum, 0);
+  }, [commonExpensesList]);
+
+  const activeTotalExpenses = React.useMemo(() => {
+    return totalPropertyExpenses + totalCommonExpenses;
+  }, [totalPropertyExpenses, totalCommonExpenses]);
+
+  const monthDifference = React.useMemo(() => {
+    return totalPaidSum - activeTotalExpenses;
+  }, [totalPaidSum, activeTotalExpenses]);
+
+  const monthCumulative = React.useMemo(() => {
+    return (prevMonthBalance || 0) + monthDifference;
+  }, [prevMonthBalance, monthDifference]);
 
   // Sorted rows for Sheet
   const sortedSheetRows = React.useMemo(() => {
@@ -1242,7 +1630,7 @@ export default function PaymentsView() {
         'Outstanding due': outstandingThroughMonth,
         'Paid Up To': item.paidTillMonth && item.paidTillMonth !== 'None' ? formatMonthYear(item.paidTillMonth) : 'None',
         'Paid for Month': formatMonthYear(selectedMonth),
-        'Amount Paid': paidThisMonth,
+        'Total Amount Paid': paidThisMonth,
         'Created Date': item.createdAt ? formatDate(item.createdAt) : '',
         'Modified Date': item.updatedAt ? formatDate(item.updatedAt) : ''
       };
@@ -1259,22 +1647,19 @@ export default function PaymentsView() {
   }, 0);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-2">
       {/* Top Header Card */}
-      <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h2 className="text-xl font-extrabold text-slate-900">Monthly Rent & Payment Tracking</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Direct editable grid for quick collection, multi-month payments, and instant ledger updates
-            </p>
+            <h2 className="text-xl font-extrabold text-slate-900">Rent & Payments</h2>
           </div>
 
           {/* Tab Selector */}
-          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
             <button
               onClick={() => setActiveTab('sheet')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 activeTab === 'sheet'
                   ? 'bg-white text-emerald-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -1285,7 +1670,7 @@ export default function PaymentsView() {
             </button>
             <button
               onClick={() => setActiveTab('receipts')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 activeTab === 'receipts'
                   ? 'bg-white text-emerald-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -1297,70 +1682,63 @@ export default function PaymentsView() {
           </div>
         </div>
 
-        {/* Top Month Selector & Quick Metrics Bar (replaces old dashboard cards) */}
-        <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-          {/* Active Month Controller */}
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+        {/* Top Month Selector & Quick Metrics Bar - In One Clean Single Row from Active Month to Outstanding */}
+        <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+          {/* Active Month Controller (Today button removed as requested) */}
+          <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-2xl border border-slate-200 shadow-2xs">
             <button
               onClick={handlePrevMonth}
-              className="p-2 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 shadow-none hover:shadow-sm transition-all"
+              className="p-1.5 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
               title="Previous Month"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-2 px-3 py-1">
-              <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div className="flex items-center gap-1.5 px-2 py-0.5">
+              <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <div className="text-left">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Active Month</span>
-                <span className="text-sm font-extrabold text-slate-900">{formatMonthYear(selectedMonth)}</span>
+                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Active Month</span>
+                <span className="text-xs font-black text-slate-900 leading-tight">{formatMonthYear(selectedMonth)}</span>
               </div>
             </div>
 
             <button
               onClick={handleNextMonth}
-              className="p-2 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 shadow-none hover:shadow-sm transition-all"
+              className="p-1.5 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
               title="Next Month"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
 
-            <div className="h-6 w-px bg-slate-200 mx-1" />
+            <div className="h-5 w-px bg-slate-200 mx-0.5" />
 
             {/* Direct Month Picker */}
             <input
               type="month"
               value={selectedMonth}
               onChange={handleSelectCustomMonth}
-              className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              className="text-xs font-semibold px-2 py-1 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
               title="Jump to specific month and year"
             />
-
-            <button
-              onClick={() => setSelectedMonth(getCurrentMonthYear())}
-              className="text-xs font-bold px-3 py-1.5 rounded-xl text-emerald-700 hover:bg-emerald-50 transition-colors"
-            >
-              Today
-            </button>
           </div>
 
-          {/* Compact Overview Badges */}
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <div className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-2">
-              <span className="text-xs text-slate-500 font-medium">Tenancies:</span>
-              <span className="text-xs font-bold text-slate-800">{filteredOut.length} units</span>
+          {/* Compact Overview Badges (Tenancies, Expected, Collected, Outstanding) in the same single row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-1.5 shadow-2xs">
+              <span className="text-xs text-slate-500 font-semibold">Tenancies:</span>
+              <span className="text-xs font-black text-slate-800">{filteredOut.length} units</span>
             </div>
-            <div className="px-3.5 py-2 rounded-xl bg-blue-50/60 border border-blue-200/80 flex items-center gap-2">
-              <span className="text-xs text-blue-600 font-medium">Expected:</span>
-              <span className="text-xs font-bold text-blue-900 font-mono">{formatCurrency(totalExpectedSum)}</span>
+            <div className="px-3 py-1.5 rounded-xl bg-blue-50/70 border border-blue-200/80 flex items-center gap-1.5 shadow-2xs">
+              <span className="text-xs text-blue-600 font-semibold">Expected:</span>
+              <span className="text-xs font-black text-blue-900 font-mono">{formatCurrency(totalExpectedSum)}</span>
             </div>
-            <div className="px-3.5 py-2 rounded-xl bg-emerald-50/60 border border-emerald-200/80 flex items-center gap-2">
-              <span className="text-xs text-emerald-600 font-medium">Collected:</span>
-              <span className="text-xs font-bold text-emerald-800 font-mono">{formatCurrency(totalPaidSum)}</span>
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-center gap-1.5 shadow-2xs">
+              <span className="text-xs text-emerald-600 font-semibold">Collected:</span>
+              <span className="text-xs font-black text-emerald-800 font-mono">{formatCurrency(totalPaidSum)}</span>
             </div>
-            <div className="px-3.5 py-2 rounded-xl bg-rose-50/60 border border-rose-200/80 flex items-center gap-2">
-              <span className="text-xs text-rose-600 font-medium">Outstanding:</span>
-              <span className="text-xs font-bold text-rose-700 font-mono">{formatCurrency(totalOutstandingSum)}</span>
+            <div className="px-3 py-1.5 rounded-xl bg-rose-50/70 border border-rose-200/80 flex items-center gap-1.5 shadow-2xs">
+              <span className="text-xs text-rose-600 font-semibold">Outstanding:</span>
+              <span className="text-xs font-black text-rose-700 font-mono">{formatCurrency(totalOutstandingSum)}</span>
             </div>
           </div>
         </div>
@@ -1368,7 +1746,7 @@ export default function PaymentsView() {
 
       {/* VIEW 1: EXCEL-TEMPLATE-STYLE GRID */}
       {activeTab === 'sheet' && (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {/* APEX Toolbar for Rent Sheet */}
           <ApexToolbar
             search={search}
@@ -1395,16 +1773,28 @@ export default function PaymentsView() {
             activeViewName={sheetActiveViewId}
             onViewChange={setSheetActiveViewId}
             primaryAction={
-              <select
-                value={selectedPropertyFilter}
-                onChange={(e) => { setSelectedPropertyFilter(e.target.value); setSheetCurrentPage(1); }}
-                className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
-              >
-                <option value="">All Properties</option>
-                {properties.map(p => (
-                  <option key={p._id} value={p._id}>{p.name}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2 shrink-0">
+                <select
+                  value={selectedPropertyFilter}
+                  onChange={(e) => { setSelectedPropertyFilter(e.target.value); setSheetCurrentPage(1); }}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
+                >
+                  <option value="">All Properties</option>
+                  {properties.map(p => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={selectedTenantFilter}
+                  onChange={(e) => { setSelectedTenantFilter(e.target.value); setSheetCurrentPage(1); }}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
+                >
+                  <option value="">All Tenants</option>
+                  {availableTenantsForFilter.map(t => (
+                    <option key={t._id} value={t._id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
             }
           />
 
@@ -1449,11 +1839,12 @@ export default function PaymentsView() {
                         else if (colId === 'tenant') { label = 'Tenant Details'; }
                         else if (colId === 'property') { label = 'Property'; }
                         else if (colId === 'subUnit') { label = 'Sub-Unit'; }
+                        else if (colId === 'contractNo') { label = 'Contract No'; }
                         else if (colId === 'monthlyRent') { label = 'Monthly Rent'; align = 'text-right'; }
                         else if (colId === 'outstanding') { label = 'Outstanding'; align = 'text-right'; extraClass = 'bg-rose-50/50 text-rose-900'; }
                         else if (colId === 'paidUpTo') { label = 'Paid Up To'; align = 'text-center'; }
                         else if (colId === 'paidForMonth') { label = 'Month to Pay'; }
-                        else if (colId === 'amount') { label = 'Amount'; }
+                        else if (colId === 'amount') { label = 'Amount Paid'; }
                         else if (colId === 'tenantPhone') { label = 'Tenant Phone'; }
                         else if (colId === 'propertyType') { label = 'Property Type'; }
                         else if (colId === 'subUnitArea') { label = 'Area (Sq Ft)'; align = 'text-right'; }
@@ -1475,22 +1866,22 @@ export default function PaymentsView() {
                           <th
                             key={colId}
                             {...dragProps}
-                            style={{ ...frozenStyle, width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
-                            className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${extraClass}`}
+                            style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                            className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group bg-slate-100 select-none whitespace-normal break-words leading-tight ${align} ${extraClass}`}
                           >
-                            <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                            <div className={`flex items-center gap-1 w-full ${
                               align === 'text-right' ? 'justify-end' : align === 'text-center' ? 'justify-center' : 'justify-start'
                             }`}>
                               {!isSortable ? (
-                                <span className="truncate text-xs font-bold text-slate-700">{label}</span>
+                                <span className="break-words leading-tight text-xs font-bold text-slate-700">{label}</span>
                               ) : (
                                 <button
                                   type="button"
                                   onClick={() => handleSheetHeaderSort(colId)}
-                                  className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                                  className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors text-left"
                                   title={`Sort by ${label} (Click: Descending → Ascending → Clear)`}
                                 >
-                                  <span className="truncate">{label}</span>
+                                  <span className="break-words leading-tight">{label}</span>
                                   <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
                                     {sheetSortConfig.key === colId ? (
                                       sheetSortConfig.direction === 'desc' ? (
@@ -1572,10 +1963,86 @@ export default function PaymentsView() {
                                 </td>
                               );
                             }
+                            if (colId === 'contractNo') {
+                              const matchingContracts = getMatchingContractsForRow(item, selectedMonth);
+                              const activeContractNo = draft.contractNo || item.contractNo || matchingContracts[0]?.contractNo;
+                              return (
+                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs">
+                                  {matchingContracts.length > 1 ? (
+                                    <select
+                                      value={activeContractNo || ''}
+                                      onChange={(e) => updateRowDraft(rowKey, { contractNo: e.target.value }, item)}
+                                      className="text-xs font-bold text-teal-800 bg-teal-50/80 border border-teal-300 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer max-w-[130px]"
+                                      title="Select Lease Contract valid for this period"
+                                    >
+                                      {matchingContracts.map(c => (
+                                        <option key={c._id} value={c.contractNo || c.assignmentCode}>
+                                          {c.contractNo || c.assignmentCode}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : activeContractNo ? (
+                                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/80 font-bold text-xs shadow-2xs font-mono">
+                                      <span>{activeContractNo}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 text-[11px] italic">No active contract</span>
+                                  )}
+                                </td>
+                              );
+                            }
                             if (colId === 'monthlyRent') {
+                              const isEditingThisRent = editingRentUnitId === item.unit?._id;
                               return (
                                 <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right font-semibold text-slate-700 text-xs font-mono">
-                                  {formatCurrency(expectedRate)}
+                                  {isEditingThisRent ? (
+                                    <div className="flex items-center justify-end gap-1">
+                                      <span className="text-[11px] text-slate-400 font-bold">₹</span>
+                                      <input
+                                        type="number"
+                                        autoFocus
+                                        value={editingRentValue}
+                                        onChange={(e) => setEditingRentValue(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') handleSaveRentRate(item.unit?._id);
+                                          if (e.key === 'Escape') setEditingRentUnitId(null);
+                                        }}
+                                        className="w-20 px-1.5 py-1 text-xs font-bold font-mono border border-emerald-400 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={savingRentUnitId === item.unit?._id}
+                                        onClick={() => handleSaveRentRate(item.unit?._id)}
+                                        className="p-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                                        title="Save Rent Rate"
+                                      >
+                                        <Check className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingRentUnitId(null)}
+                                        className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500"
+                                        title="Cancel"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-end gap-1.5 group">
+                                      <span>{formatCurrency(expectedRate)}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingRentUnitId(item.unit?._id);
+                                          setEditingRentValue(String(expectedRate));
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-emerald-600 transition-opacity"
+                                        title="Click to edit expected monthly rent"
+                                      >
+                                        <Edit2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
                               );
                             }
@@ -1735,15 +2202,15 @@ export default function PaymentsView() {
                                     <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
                                     <input
                                       type="number"
-                                      value={draft.amount}
+                                      value={draft.amount ?? ''}
                                       disabled={savingRows[rowKey]}
-                                      onChange={(e) => updateRowDraft(rowKey, { amount: e.target.value })}
+                                      onChange={(e) => updateRowDraft(rowKey, { amount: e.target.value }, item)}
                                       onKeyDown={(e) => {
                                         if (e.key === 'Enter') handleDirectSaveRow(item);
                                       }}
-                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-mono shadow-xs disabled:bg-slate-100"
+                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                       placeholder="Amount ₹"
-                                      title="Direct editable rent amount. Press Enter to Save."
+                                      title="Direct editable rent amount. Type custom amount & press Enter to Save."
                                     />
                                   </div>
                                 </td>
@@ -1807,6 +2274,12 @@ export default function PaymentsView() {
                             }
                              if (colId === 'actions') {
                               const hasEnteredAmount = Boolean(draft.amount && Number(draft.amount) > 0);
+                              const existingReceiptForRow = receipts.find(r => 
+                                !r.isReversed &&
+                                (r.unitId?._id === item.unit?._id || r.unitId === item.unit?._id) &&
+                                r.allocations?.some(a => a.rentMonthYear === selectedMonth)
+                              );
+                              const canSaveRow = hasEnteredAmount || Boolean(existingReceiptForRow);
                               return (
                                 <td key={colId} style={frozenStyle} className="px-3 py-3 text-right">
                                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
@@ -1814,7 +2287,7 @@ export default function PaymentsView() {
                                     <select
                                       value={draft.paymentMode || 'Cash'}
                                       disabled={savingRows[rowKey]}
-                                      onChange={(e) => updateRowDraft(rowKey, { paymentMode: e.target.value })}
+                                      onChange={(e) => updateRowDraft(rowKey, { paymentMode: e.target.value }, item)}
                                       className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer disabled:opacity-50 shrink-0 w-[72px]"
                                       title="Payment Mode"
                                     >
@@ -1828,7 +2301,7 @@ export default function PaymentsView() {
                                     <button
                                       type="button"
                                       onClick={() => handleDirectSaveRow(item)}
-                                      disabled={savingRows[rowKey] || (!hasEnteredAmount && !savedFeedback[rowKey])}
+                                      disabled={savingRows[rowKey] || (!canSaveRow && !savedFeedback[rowKey])}
                                       className={`inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 shrink-0 ${
                                         savedFeedback[rowKey]
                                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
@@ -1854,6 +2327,16 @@ export default function PaymentsView() {
                                       )}
                                     </button>
 
+                                    {/* Row Edit Button (Opens Fast Payment / Edit Details Modal) */}
+                                    <button
+                                      type="button"
+                                      onClick={() => openFastPaymentModal(item)}
+                                      className="p-1.5 rounded-lg text-slate-500 hover:text-teal-700 hover:bg-teal-50 border border-slate-200 transition-colors shrink-0 shadow-2xs cursor-pointer"
+                                      title="Edit Rent Payment & Collection Details"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5 text-teal-600" />
+                                    </button>
+
                                     {/* Ledger Eye Button */}
                                     <button
                                       type="button"
@@ -1873,6 +2356,598 @@ export default function PaymentsView() {
                       );
                     })}
                   </tbody>
+                  {/* Financial Summary & Cash Flow Footer: Total Earning, Expenses, Difference, Previous Month Balance, Cumulative */}
+                  <tfoot>
+                    {/* 1. Total Earning Row */}
+                    <tr className="bg-emerald-50/90 text-emerald-950 font-black text-xs border-t-2 border-emerald-400 select-none shadow-2xs">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="font-mono text-emerald-700">Σ</span>;
+                        else if (colId === 'tenant') content = <span>Total Earning ({formatMonthYear(selectedMonth)})</span>;
+                        else if (colId === 'monthlyRent') content = <span title="Total Expected Rent">{formatCurrency(totalExpectedSum)}</span>;
+                        else if (colId === 'outstanding') content = <span className="text-rose-700" title="Total Outstanding">{formatCurrency(totalOutstandingSum)}</span>;
+                        else if (colId === 'amount') {
+                            content = (
+                              <div className="text-right">
+                                <span className="text-emerald-800 text-xs font-black block font-mono">
+                                  {formatCurrency(totalPaidSum)}
+                                </span>
+                                <span className="text-[10px] text-emerald-600 font-bold block">
+                                  Actual Collected
+                                </span>
+                              </div>
+                            );
+                          }
+                        else if (colId === 'actions') content = <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Collected Rent</span>;
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-2.5 px-3 border-r border-emerald-200/60 ${
+                              ['amount', 'monthlyRent', 'outstanding'].includes(colId) ? 'text-right font-mono' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'
+                            }`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* 2A. Property-Wise Expenses Header Divider */}
+                    <tr className="bg-amber-100/70 text-amber-950 font-black text-xs border-t-2 border-amber-300 select-none">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="font-mono text-amber-700">P</span>;
+                        else if (colId === 'tenant') {
+                          content = (
+                            <div className="flex items-center justify-between gap-1.5 py-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <Building2 className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                <span className="uppercase tracking-wider text-[11px]">2A. Property-Wise Expenses ({propertyExpensesList.length} Properties)</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openAddExpenseModal('Property')}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-[11px] font-bold shadow-2xs transition-all cursor-pointer shrink-0"
+                                title="Add New Property Expense"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>Add Expense</span>
+                              </button>
+                            </div>
+                          );
+                        } else if (colId === 'amount') {
+                          content = <span className="font-mono font-bold text-amber-900">{formatCurrency(totalPropertyExpenses)}</span>;
+                        }
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-2 px-3 border-r border-amber-200/70 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* Property-Wise Expense Rows */}
+                    {propertyExpensesList.map((p, idx) => {
+                      const isExpanded = !!expandedPropertyExpenses[p.propertyId];
+                      const items = p.items || [];
+                      const catSummary = Object.keys(p.categories).map(c => `${c}: ${formatCurrency(p.categories[c])}`).join(' · ');
+
+                      return (
+                        <React.Fragment key={`prop-exp-${p.propertyId}-${idx}`}>
+                          <tr className="bg-white/95 hover:bg-amber-50/50 text-slate-800 text-xs border-b border-slate-100 transition-colors">
+                            {visibleSheetColumns.map((colId, colIndex) => {
+                              const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                              const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                              let content = null;
+                              if (colId === 'index') {
+                                content = (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedPropertyExpenses(prev => ({ ...prev, [p.propertyId]: !prev[p.propertyId] }))}
+                                    className="p-1 rounded text-amber-700 hover:bg-amber-100 transition-colors cursor-pointer"
+                                    title={isExpanded ? "Collapse items" : "Expand items"}
+                                  >
+                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                  </button>
+                                );
+                              } else if (colId === 'tenant') {
+                                content = (
+                                  <div 
+                                    className="cursor-pointer"
+                                    onClick={() => setExpandedPropertyExpenses(prev => ({ ...prev, [p.propertyId]: !prev[p.propertyId] }))}
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-slate-900 block">{p.propertyName}</span>
+                                      <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.2 rounded-full font-bold">
+                                        {items.length} {items.length === 1 ? 'record' : 'records'}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] text-slate-500 block truncate" title={catSummary}>
+                                      {catSummary}
+                                    </span>
+                                  </div>
+                                );
+                              } else if (colId === 'amount') {
+                                content = <span className="font-mono font-bold text-rose-600">{formatCurrency(p.total)}</span>;
+                              } else if (colId === 'actions') {
+                                content = (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {items.length === 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditExpenseModal(items[0])}
+                                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-amber-400 text-slate-700 hover:text-amber-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                                        title="Edit Expense Record"
+                                      >
+                                        <Edit2 className="w-3 h-3 text-amber-600" />
+                                        <span>Edit</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => openAddExpenseModal('Property', p.propertyId)}
+                                      className="flex items-center gap-0.5 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                                      title="Add another expense for this property"
+                                    >
+                                      <Plus className="w-3 h-3 text-amber-700" />
+                                      <span>Add</span>
+                                    </button>
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <td
+                                  key={colId}
+                                  style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                                  className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
+                                >
+                                  {content}
+                                </td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* Expanded Expense Items for Property */}
+                          {isExpanded && items.map((expItem, itemIdx) => (
+                            <tr key={`prop-exp-item-${expItem._id || itemIdx}`} className="bg-amber-50/20 hover:bg-amber-50/50 text-[11px] border-b border-amber-100/60 transition-colors">
+                              {visibleSheetColumns.map((colId, colIndex) => {
+                                const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                                const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                                let itemContent = null;
+                                if (colId === 'index') itemContent = <span className="text-amber-400 pl-2">↳</span>;
+                                else if (colId === 'tenant') {
+                                  itemContent = (
+                                    <div className="pl-4">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-slate-800">{expItem.category}</span>
+                                        {expItem.vendorOrPayee && (
+                                          <span className="text-slate-400 text-[10px]">· Payee: {expItem.vendorOrPayee}</span>
+                                        )}
+                                      </div>
+                                      <span className="text-slate-500 text-[10px] block truncate">{expItem.description}</span>
+                                    </div>
+                                  );
+                                } else if (colId === 'contractNo' || colId === 'property') {
+                                  itemContent = <span className="text-slate-400 text-[10px]">{formatDate(expItem.expenseDate)}</span>;
+                                } else if (colId === 'amount') {
+                                  itemContent = <span className="font-mono font-bold text-rose-600">{formatCurrency(expItem.amount)}</span>;
+                                } else if (colId === 'actions') {
+                                  itemContent = (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditExpenseModal(expItem)}
+                                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-amber-800 hover:border-amber-300 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                                        title="Edit Expense Record"
+                                      >
+                                        <Edit2 className="w-3 h-3 text-amber-600" />
+                                        <span>Edit</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteExpense(expItem._id, expItem.category, expItem.amount)}
+                                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                        title="Reverse / Remove Expense Record"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                      </button>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <td
+                                    key={colId}
+                                    style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                                    className={`py-1.5 px-3 border-r border-amber-100/60 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
+                                  >
+                                    {itemContent}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+
+                    {propertyExpensesList.length === 0 && (
+                      <tr className="bg-white text-slate-400 text-xs italic border-b border-slate-100">
+                        {visibleSheetColumns.map((colId, colIndex) => {
+                          const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                          const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                          return (
+                            <td
+                              key={colId}
+                              style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                              className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right font-mono' : 'text-left'}`}
+                            >
+                              {colId === 'tenant' ? `No property-specific expenses recorded for ${formatMonthYear(selectedMonth)}` : colId === 'amount' ? '₹0' : null}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
+
+                    {/* Subtotal Property Expenses */}
+                    <tr className="bg-amber-50/60 text-amber-950 font-bold text-xs border-b border-amber-200/80 select-none">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'tenant') content = <span className="font-extrabold text-[11px] text-amber-900">Subtotal: Property-Wise Expenses</span>;
+                        else if (colId === 'amount') content = <span className="font-mono font-black text-amber-950">{formatCurrency(totalPropertyExpenses)}</span>;
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-1.5 px-3 border-r border-amber-200/50 ${colId === 'amount' ? 'text-right' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* 2B. General & Common Expenses Header Divider */}
+                    <tr className="bg-purple-100/70 text-purple-950 font-black text-xs border-t-2 border-purple-300 select-none">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="font-mono text-purple-700">C</span>;
+                        else if (colId === 'tenant') {
+                          content = (
+                            <div className="flex items-center justify-between gap-1.5 py-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <Receipt className="w-3.5 h-3.5 text-purple-700 shrink-0" />
+                                <span className="uppercase tracking-wider text-[11px]">2B. General & Common Expenses ({commonExpensesList.length} Categories)</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openAddExpenseModal('Common')}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-800 text-white text-[11px] font-bold shadow-2xs transition-all cursor-pointer shrink-0"
+                                title="Add New Common Expense"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>Add Expense</span>
+                              </button>
+                            </div>
+                          );
+                        } else if (colId === 'amount') {
+                          content = <span className="font-mono font-bold text-purple-900">{formatCurrency(totalCommonExpenses)}</span>;
+                        }
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-2 px-3 border-r border-purple-200/70 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* Common Expense Rows */}
+                    {commonExpensesList.map((cat, idx) => {
+                      const isExpanded = !!expandedCommonExpenses[cat.category];
+                      const items = cat.items || [];
+
+                      return (
+                        <React.Fragment key={`common-exp-${cat.category}-${idx}`}>
+                          <tr className="bg-white/95 hover:bg-purple-50/50 text-slate-800 text-xs border-b border-slate-100 transition-colors">
+                            {visibleSheetColumns.map((colId, colIndex) => {
+                              const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                              const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                              let content = null;
+                              if (colId === 'index') {
+                                content = (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedCommonExpenses(prev => ({ ...prev, [cat.category]: !prev[cat.category] }))}
+                                    className="p-1 rounded text-purple-700 hover:bg-purple-100 transition-colors cursor-pointer"
+                                    title={isExpanded ? "Collapse items" : "Expand items"}
+                                  >
+                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                  </button>
+                                );
+                              } else if (colId === 'tenant') {
+                                content = (
+                                  <div 
+                                    className="cursor-pointer"
+                                    onClick={() => setExpandedCommonExpenses(prev => ({ ...prev, [cat.category]: !prev[cat.category] }))}
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-slate-900">Common: {cat.category}</span>
+                                      <span className="text-[10px] bg-purple-50 text-purple-800 border border-purple-200 px-1.5 py-0.2 rounded-full font-bold">
+                                        {items.length} {items.length === 1 ? 'record' : 'records'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              } else if (colId === 'amount') {
+                                content = <span className="font-mono font-bold text-rose-600">{formatCurrency(cat.sum)}</span>;
+                              } else if (colId === 'actions') {
+                                content = (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {items.length === 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditExpenseModal(items[0])}
+                                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-purple-400 text-slate-700 hover:text-purple-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                                        title="Edit Expense Record"
+                                      >
+                                        <Edit2 className="w-3 h-3 text-purple-600" />
+                                        <span>Edit</span>
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => openAddExpenseModal('Common')}
+                                      className="flex items-center gap-0.5 px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                                      title="Add another expense under this category"
+                                    >
+                                      <Plus className="w-3 h-3 text-purple-700" />
+                                      <span>Add</span>
+                                    </button>
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <td
+                                  key={colId}
+                                  style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                                  className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
+                                >
+                                  {content}
+                                </td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* Expanded Expense Items for Common Category */}
+                          {isExpanded && items.map((expItem, itemIdx) => (
+                            <tr key={`common-exp-item-${expItem._id || itemIdx}`} className="bg-purple-50/20 hover:bg-purple-50/50 text-[11px] border-b border-purple-100/60 transition-colors">
+                              {visibleSheetColumns.map((colId, colIndex) => {
+                                const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                                const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                                let itemContent = null;
+                                if (colId === 'index') itemContent = <span className="text-purple-400 pl-2">↳</span>;
+                                else if (colId === 'tenant') {
+                                  itemContent = (
+                                    <div className="pl-4">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-slate-800">{expItem.description || expItem.category}</span>
+                                        {expItem.vendorOrPayee && (
+                                          <span className="text-slate-400 text-[10px]">· Payee: {expItem.vendorOrPayee}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                } else if (colId === 'contractNo' || colId === 'property') {
+                                  itemContent = <span className="text-slate-400 text-[10px]">{formatDate(expItem.expenseDate)}</span>;
+                                } else if (colId === 'amount') {
+                                  itemContent = <span className="font-mono font-bold text-rose-600">{formatCurrency(expItem.amount)}</span>;
+                                } else if (colId === 'actions') {
+                                  itemContent = (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditExpenseModal(expItem)}
+                                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-purple-800 hover:border-purple-300 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                                        title="Edit Expense Record"
+                                      >
+                                        <Edit2 className="w-3 h-3 text-purple-600" />
+                                        <span>Edit</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteExpense(expItem._id, expItem.category, expItem.amount)}
+                                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                        title="Reverse / Remove Expense Record"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                      </button>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <td
+                                    key={colId}
+                                    style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                                    className={`py-1.5 px-3 border-r border-purple-100/60 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
+                                  >
+                                    {itemContent}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+
+                    {commonExpensesList.length === 0 && (
+                      <tr className="bg-white text-slate-400 text-xs italic border-b border-slate-100">
+                        {visibleSheetColumns.map((colId, colIndex) => {
+                          const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                          const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                          return (
+                            <td
+                              key={colId}
+                              style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                              className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right font-mono' : 'text-left'}`}
+                            >
+                              {colId === 'tenant' ? `No general or common expenses recorded for ${formatMonthYear(selectedMonth)}` : colId === 'amount' ? '₹0' : null}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
+
+                    {/* Subtotal Common Expenses */}
+                    <tr className="bg-purple-50/60 text-purple-950 font-bold text-xs border-b border-purple-200/80 select-none">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'tenant') content = <span className="font-extrabold text-[11px] text-purple-900">Subtotal: General & Common Expenses</span>;
+                        else if (colId === 'amount') content = <span className="font-mono font-black text-purple-950">{formatCurrency(totalCommonExpenses)}</span>;
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-1.5 px-3 border-r border-purple-200/50 ${colId === 'amount' ? 'text-right' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* 2C. Total Expenses Row (Combined: Property + Common) */}
+                    <tr className="bg-rose-50/90 text-rose-950 font-black text-xs border-t-2 border-rose-300 select-none shadow-2xs">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="font-mono text-rose-600">Σ</span>;
+                        else if (colId === 'tenant') content = <span>Total Expenses ({formatMonthYear(selectedMonth)}: Property + Common)</span>;
+                        else if (colId === 'amount') content = <span className="font-mono font-black text-rose-700">{formatCurrency(activeTotalExpenses)}</span>;
+                        else if (colId === 'actions') content = <span className="text-[10px] uppercase font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">Total Paid</span>;
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-2.5 px-3 border-r border-rose-200/60 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* 5. Difference Row (Total Earning - Total Expenses) */}
+                    <tr className="bg-slate-900 text-white font-black text-xs border-t-2 border-slate-950 select-none shadow-md">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="text-emerald-400 font-bold">Δ</span>;
+                        else if (colId === 'tenant') content = <span className="uppercase tracking-wider">Difference (Earnings − Expenses)</span>;
+                        else if (colId === 'amount') {
+                          content = (
+                            <span className={`inline-block px-2.5 py-0.5 rounded-md font-mono font-black ${
+                              monthDifference >= 0 ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'
+                            }`}>
+                              {monthDifference >= 0 ? `+ ${formatCurrency(monthDifference)}` : `- ${formatCurrency(Math.abs(monthDifference))}`}
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-3 px-3 border-r border-slate-800 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* 6. Previous Month Balance Row */}
+                    <tr className="bg-slate-800 text-slate-200 font-bold text-xs border-t border-slate-700 select-none">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="text-slate-400">⏮</span>;
+                        else if (colId === 'tenant') content = <span>Previous Month Balance</span>;
+                        else if (colId === 'amount') content = <span className="font-mono font-bold text-amber-300">{formatCurrency(prevMonthBalance)}</span>;
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-2.5 px-3 border-r border-slate-700 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* 7. Cumulative Row (Previous Balance + Difference) */}
+                    <tr className="bg-teal-950 text-white font-black text-xs border-t-2 border-teal-800 select-none shadow-md">
+                      {visibleSheetColumns.map((colId, colIndex) => {
+                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
+                        let content = null;
+                        if (colId === 'index') content = <span className="text-teal-400">⚑</span>;
+                        else if (colId === 'tenant') content = <span className="uppercase tracking-wider">Cumulative (Prev Balance + Difference)</span>;
+                        else if (colId === 'amount') {
+                          content = (
+                            <span className={`inline-block px-2.5 py-0.5 rounded-md font-mono font-black ${
+                              monthCumulative >= 0 ? 'bg-teal-400 text-slate-950' : 'bg-rose-500 text-white'
+                            }`}>
+                              {monthCumulative >= 0 ? formatCurrency(monthCumulative) : `- ${formatCurrency(Math.abs(monthCumulative))}`}
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <td
+                            key={colId}
+                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                            className={`py-3 px-3 border-r border-teal-900 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             )}
@@ -2127,7 +3202,7 @@ export default function PaymentsView() {
                       if (colId === 'receiptDate') label = 'Date';
                       else if (colId === 'tenant') label = 'Tenant & Sub-Unit';
                       else if (colId === 'monthsCovered') label = 'Rent Month(s)';
-                      else if (colId === 'totalAmount') label = 'Amount Paid';
+                      else if (colId === 'totalAmount') label = 'Total Amount Paid';
                       else if (colId === 'paymentMode') label = 'Mode';
                       else if (colId === 'referenceNumber') label = 'Ref / UTR #';
                       else if (colId === 'bankName') label = 'Bank Name';
@@ -2152,14 +3227,14 @@ export default function PaymentsView() {
                           key={colId}
                           {...dragProps}
                           onClick={() => isSortable && handleReceiptHeaderSort(colId)}
-                          style={{ ...frozenStyle, minWidth: `${Math.max(width, 105)}px`, width: `${Math.max(width, 105)}px` }}
-                          className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${align} ${
+                          style={{ ...frozenStyle, minWidth: `${Math.max(width, 45)}px`, width: `${Math.max(width, 45)}px` }}
+                          className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group bg-slate-100 select-none whitespace-normal break-words leading-tight ${align} ${
                             isSortable ? 'cursor-pointer hover:bg-slate-200/80 transition-colors' : ''
                           }`}
                           title={isSortable ? `${label} (Click: 1st Desc, 2nd Asc, 3rd Off)` : label}
                         >
-                          <div className={`flex items-center gap-1.5 w-full overflow-hidden ${align === 'text-right' ? 'justify-end' : 'justify-start'}`}>
-                            <span className="truncate font-extrabold text-[11px] text-slate-700 tracking-wider">
+                          <div className={`flex items-center gap-1 w-full ${align === 'text-right' ? 'justify-end' : 'justify-start'}`}>
+                            <span className="break-words leading-tight font-extrabold text-[11px] text-slate-700 tracking-wider">
                               {label}
                             </span>
                             {isSortable && (
@@ -2242,7 +3317,17 @@ export default function PaymentsView() {
                         if (colId === 'totalAmount') {
                           return (
                             <td key={colId} style={frozenStyle} className="px-5 py-4 text-right font-extrabold text-emerald-700 text-xs">
-                              {formatCurrency(r.totalAmount)}
+                              <div className="flex items-center justify-end gap-1.5 group">
+                                <span>{formatCurrency(r.totalAmount)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditReceiptModal(r)}
+                                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 rounded transition-opacity"
+                                  title="Edit Receipt Amount"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                              </div>
                             </td>
                           );
                         }
@@ -2435,19 +3520,64 @@ export default function PaymentsView() {
               <div className="py-20 text-center text-slate-400 text-sm">Loading tenant ledger details...</div>
             ) : (
               <form onSubmit={handleSubmitPayment} className="flex-1 overflow-y-auto p-5 space-y-5">
-                {/* Monthly Rate & Paid Up To banner */}
-                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
+                {/* TENANT SELECTION & DETAILS */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
                   <div>
-                    <span className="text-slate-500 font-medium">Monthly Rent:</span>{' '}
-                    <strong className="text-slate-800 font-bold">{formatCurrency(selectedTenantInfo?.monthlyRate || 22000)}</strong>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>Tenant Name</span>
+                        <span className="text-rose-500">*</span>
+                      </label>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        {selectedTenantInfo?.propertyName} • {selectedTenantInfo?.partitionName}
+                      </span>
+                    </div>
+                    <select
+                      value={paymentForm.tenantId || ''}
+                      onChange={async (e) => {
+                        const newTenantId = e.target.value;
+                        const chosenTenant = tenants.find(t => t._id === newTenantId);
+                        setPaymentForm(f => ({ ...f, tenantId: newTenantId }));
+                        setSelectedTenantInfo(prev => ({
+                          ...prev,
+                          tenantId: newTenantId,
+                          tenantName: chosenTenant?.name || prev?.tenantName,
+                          tenantPhone: chosenTenant?.phone || ''
+                        }));
+                        if (newTenantId && selectedTenantInfo?.unitId) {
+                          try {
+                            const lRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${newTenantId}&unitId=${selectedTenantInfo.unitId}&upToMonthYear=${selectedMonth}`);
+                            const breakdown = lRes.data?.data?.monthsBreakdown || [];
+                            const unpaid = breakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid');
+                            setUnpaidMonthsList(unpaid);
+                          } catch(err) {
+                            console.error('Error fetching ledger for new tenant:', err);
+                          }
+                        }
+                      }}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shadow-2xs"
+                    >
+                      {tenants.map(t => (
+                        <option key={t._id} value={t._id}>
+                          {t.name} {t.tenantCode ? `(${t.tenantCode})` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div>
-                    <span className="text-slate-500 font-medium">Paid Up To:</span>{' '}
-                    <strong className="text-emerald-700 font-bold">
-                      {selectedTenantInfo?.paidTillMonth && selectedTenantInfo?.paidTillMonth !== 'None'
-                        ? formatMonthYear(selectedTenantInfo?.paidTillMonth)
-                        : 'No prior payments'}
-                    </strong>
+
+                  <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/60">
+                    <div>
+                      <span className="text-slate-500 font-medium">Monthly Rent:</span>{' '}
+                      <strong className="text-slate-800 font-bold">{formatCurrency(selectedTenantInfo?.monthlyRate || 22000)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 font-medium">Paid Up To:</span>{' '}
+                      <strong className="text-emerald-700 font-bold">
+                        {selectedTenantInfo?.paidTillMonth && selectedTenantInfo?.paidTillMonth !== 'None'
+                          ? formatMonthYear(selectedTenantInfo?.paidTillMonth)
+                          : 'No prior payments'}
+                      </strong>
+                    </div>
                   </div>
                 </div>
 
@@ -2579,7 +3709,19 @@ export default function PaymentsView() {
                             <span className="text-blue-600 font-semibold">(Advance)</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-800">{formatCurrency(a.amount)}</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-slate-400 font-bold">₹</span>
+                              <input
+                                type="number"
+                                value={a.amount}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? '' : (Number(e.target.value) || 0);
+                                  const updated = advanceMonthsList.map(adv => adv.monthYear === a.monthYear ? { ...adv, amount: val } : adv);
+                                  syncPaymentState(selectedMonthsMap, updated);
+                                }}
+                                className="w-24 px-2 py-1 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 text-right focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                              />
+                            </div>
                             <button
                               type="button"
                               onClick={() => handleRemoveAdvanceMonth(a.monthYear)}
@@ -2636,12 +3778,12 @@ export default function PaymentsView() {
                           type="number"
                           required
                           value={paymentForm.totalAmount}
-                          onChange={(e) => setPaymentForm(f => ({ ...f, totalAmount: e.target.value }))}
+                          onChange={(e) => handleTotalAmountChange(e.target.value)}
                           placeholder="e.g. 22000"
                           className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-200 text-sm font-extrabold text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
                         />
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Autofilled based on checked months</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Editable: Type custom amount or select months above</p>
                     </div>
 
                     {/* Payment Date */}
@@ -2880,6 +4022,218 @@ export default function PaymentsView() {
           </div>
         );
       })()}
+
+      {/* ADD / EDIT EXPENSE MODAL */}
+      {showExpenseModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl ${expenseForm.headType === 'Property' ? 'bg-amber-100 text-amber-800' : 'bg-purple-100 text-purple-800'}`}>
+                  {expenseForm.headType === 'Property' ? <Building2 className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">
+                    {editingExpense ? 'Edit Expense Record' : `Add ${expenseForm.headType} Expense`}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Month: {formatMonthYear(expenseForm.expenseMonth || selectedMonth)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExpenseModal(false)}
+                className="p-1.5 rounded-xl hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveExpense} className="p-5 space-y-4 overflow-y-auto flex-1">
+              {/* Type Switcher (only for new expense) */}
+              {!editingExpense && (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Expense Head type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setExpenseForm(f => ({ ...f, headType: 'Property', propertyId: f.propertyId || properties[0]?._id || '' }))}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        expenseForm.headType === 'Property'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Property
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpenseForm(f => ({ ...f, headType: 'Other', propertyId: '' }))}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        expenseForm.headType === 'Other' || expenseForm.headType === 'Common'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Other
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Property Selector (if Property Expense) */}
+              {expenseForm.headType === 'Property' && (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                    Property *
+                  </label>
+                  <select
+                    value={expenseForm.propertyId}
+                    onChange={(e) => setExpenseForm(f => ({ ...f, propertyId: e.target.value }))}
+                    required
+                    className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  >
+                    <option value="">Select Property...</option>
+                    {properties.map(p => (
+                      <option key={p._id} value={p._id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Expense Category / Head */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                  Expense Head / Category *
+                </label>
+                <select
+                  value={expenseForm.category}
+                  onChange={(e) => setExpenseForm(f => ({ ...f, category: e.target.value }))}
+                  required
+                  className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                >
+                  <option value="">Select Category...</option>
+                  {expenseCategories
+                    .filter(c => !c.headType || c.headType === expenseForm.headType)
+                    .map(c => (
+                      <option key={c._id || c.name} value={c.name}>{c.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Amount & Date */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                    Amount (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    value={expenseForm.amount}
+                    onChange={(e) => setExpenseForm(f => ({ ...f, amount: e.target.value }))}
+                    placeholder="e.g. 5000"
+                    required
+                    min="1"
+                    className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                    Expense Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={expenseForm.expenseDate}
+                    onChange={(e) => {
+                      const d = e.target.value;
+                      setExpenseForm(f => ({
+                        ...f,
+                        expenseDate: d,
+                        expenseMonth: d ? d.slice(0, 7) : f.expenseMonth
+                      }));
+                    }}
+                    required
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* Description / Notes */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                  Description / Details *
+                </label>
+                <input
+                  type="text"
+                  value={expenseForm.description}
+                  onChange={(e) => setExpenseForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="e.g. Repairs and property maintenance"
+                  required
+                  className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              {/* Payee / Vendor & Payment Mode */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                    Paid To / Vendor
+                  </label>
+                  <input
+                    type="text"
+                    value={expenseForm.vendorOrPayee}
+                    onChange={(e) => setExpenseForm(f => ({ ...f, vendorOrPayee: e.target.value }))}
+                    placeholder="Payee name"
+                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                    Payment Mode
+                  </label>
+                  <select
+                    value={expenseForm.paymentMode}
+                    onChange={(e) => setExpenseForm(f => ({ ...f, paymentMode: e.target.value }))}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                  >
+                    <option value="Cash">Cash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Modal Buttons */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExpenseModal(false)}
+                  disabled={savingExpense}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingExpense}
+                  className={`px-5 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-all cursor-pointer ${
+                    expenseForm.headType === 'Property'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
+                >
+                  {savingExpense ? 'Saving...' : editingExpense ? 'Update Expense' : 'Save Expense'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

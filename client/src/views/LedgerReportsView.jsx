@@ -1,28 +1,45 @@
 import React, { useState, useEffect } from 'react';
 import PropertyMonthlyMatrixReport from './PropertyMonthlyMatrixReport';
 import MonthWiseReportView from './MonthWiseReportView';
+import AllIncomeReportView from './AllIncomeReportView';
+import AllExpenseReportView from './AllExpenseReportView';
 import LedgerView from './LedgerView';
 import ReportsView from './ReportsView';
 import { 
   Building2, BookOpen, Download, FileSpreadsheet, 
-  ChevronDown, Layers, CheckCircle2, Table
+  ChevronDown, Layers, CheckCircle2, Table, TrendingUp, TrendingDown
 } from 'lucide-react';
 
 const REPORT_OPTIONS = [
   { 
     id: 'month_wise', 
     sidebarId: 'reports_month_wise',
-    label: 'Month wise Report (Property Earnings)', 
+    label: 'Month wise Report', 
     shortLabel: 'Month wise Report',
     icon: Table, 
-    badge: 'Monthly Earnings',
     desc: 'Property-wise earnings matrix with monthly columns, drilldown edit, batch entries, and Excel export' 
+  },
+  { 
+    id: 'all_income', 
+    sidebarId: 'reports_all_income',
+    label: 'All Income', 
+    shortLabel: 'All Income',
+    icon: TrendingUp, 
+    desc: 'Full register of all rent income receipts, payment modes, and transactions' 
+  },
+  { 
+    id: 'all_expense', 
+    sidebarId: 'reports_all_expense',
+    label: 'All Expense', 
+    shortLabel: 'All Expense',
+    icon: TrendingDown, 
+    desc: 'Full register of all property and common expenses, categories, and vendors' 
   },
   { 
     id: 'property_matrix', 
     sidebarId: 'reports_matrix',
-    label: 'Property Monthly Matrix (Sheet 1)', 
-    shortLabel: 'Sheet 1 Master Matrix',
+    label: 'Property Monthly Matrix', 
+    shortLabel: 'Property Monthly Matrix',
     icon: FileSpreadsheet, 
     badge: 'Master Sheet 1',
     desc: 'Spreadsheet-style full year matrix: Rent Income, Property & Other Expenses, and Balance Reconciliation' 
@@ -39,8 +56,8 @@ const REPORT_OPTIONS = [
   { 
     id: 'export', 
     sidebarId: 'reports_export',
-    label: 'Portfolio Workbook (Excel Export)', 
-    shortLabel: 'Portfolio Export',
+    label: 'Portfolio Workbook (Excel)', 
+    shortLabel: 'Portfolio Workbook',
     icon: Download, 
     badge: 'Full Backup',
     desc: 'Export all properties, units, tenants, receipts, expenses, and ledger into an Excel workbook' 
@@ -92,25 +109,22 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
   const CurrentIcon = currentReport.icon;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-2.5">
       {/* Top Header Card with Dropdown Switcher */}
-      <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-200">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white shadow-md shadow-emerald-500/20 shrink-0 mt-0.5 sm:mt-0">
-              <CurrentIcon className="w-5 h-5" />
+      <div className="bg-white px-3.5 py-2.5 rounded-xl shadow-xs border border-slate-200">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white shadow-xs shrink-0">
+              <CurrentIcon className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Reports Section</span>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reports Section</span>
+                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
                   {currentReport.badge}
                 </span>
               </div>
-              <h2 className="text-xl font-black text-slate-900 tracking-tight">{currentReport.label}</h2>
-              <p className="text-xs font-medium text-slate-500 mt-0.5 max-w-2xl">
-                {currentReport.desc}
-              </p>
+              <h2 className="text-base font-black text-slate-900 tracking-tight leading-tight">{currentReport.label}</h2>
             </div>
           </div>
 
@@ -119,16 +133,16 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
             <button
               type="button"
               onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="w-full sm:w-auto flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl border-2 border-emerald-500/30 bg-emerald-50/50 hover:bg-emerald-50 text-slate-900 font-extrabold text-xs transition-all shadow-xs cursor-pointer"
+              className="w-full sm:w-auto flex items-center justify-between gap-2.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-50/50 hover:bg-emerald-50 text-slate-900 font-extrabold text-xs transition-all shadow-xs cursor-pointer"
             >
               <div className="flex items-center gap-2 text-left">
-                <CurrentIcon className="w-4 h-4 text-emerald-600 shrink-0" />
+                <CurrentIcon className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <div>
-                  <p className="text-[10px] text-emerald-700 font-bold uppercase leading-none">Switch Report View</p>
+                  <p className="text-[9px] text-emerald-700 font-bold uppercase leading-none">Switch Report View</p>
                   <p className="text-xs font-extrabold text-slate-900 leading-tight mt-0.5">{currentReport.shortLabel}</p>
                 </div>
               </div>
-              <ChevronDown className={`w-4 h-4 text-emerald-600 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 text-emerald-600 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Dropdown Menu */}
@@ -167,7 +181,6 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
                               <p className="text-xs font-extrabold truncate">{item.label}</p>
                               {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 ml-1" />}
                             </div>
-                            <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{item.desc}</p>
                           </div>
                         </button>
                       );
@@ -183,6 +196,8 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
       {/* Render Active Report */}
       <div>
         {activeTab === 'month_wise' && <MonthWiseReportView />}
+        {activeTab === 'all_income' && <AllIncomeReportView />}
+        {activeTab === 'all_expense' && <AllExpenseReportView />}
         {activeTab === 'property_matrix' && <PropertyMonthlyMatrixReport />}
         {activeTab === 'ledger' && <LedgerView />}
         {activeTab === 'export' && <ReportsView />}

@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { formatCurrency, formatMonthYear, formatDate } from '../utils/formatters';
-import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle } from '../components/ColumnManager';
+import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
+import ApexToolbar from '../components/ApexToolbar';
+import { cycleThreeStateSort, evaluateFilterRule, sortDataRows } from '../utils/tableUtils';
+import * as XLSX from 'xlsx';
 import { 
   BookOpen, CheckCircle2, TrendingUp, TrendingDown, Minus, 
-  RotateCcw, RefreshCw, Eye, X, ArrowUpRight, Calendar, DollarSign
+  RotateCcw, RefreshCw, Eye, X, ArrowUpRight, Calendar, DollarSign,
+  ArrowUp, ArrowDown, ArrowUpDown, Download
 } from 'lucide-react';
 
 const LEDGER_COLUMNS_DEF = [
@@ -43,6 +47,37 @@ export default function LedgerView() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [monthDetails, setMonthDetails] = useState(null);
 
+  // APEX Toolbar, Search, Sort & Pagination States
+  const [search, setSearch] = useState('');
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
+  const [isHeaderSticky, setIsHeaderSticky] = useState(true);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('ledger_freeze_v1', 0);
+  const [activeViewId, setActiveViewId] = useState(null);
+  const [ledgerFilters, setLedgerFilters] = useState([]);
+
+  const handleSort = (colKey) => {
+    setSortConfig(prev => cycleThreeStateSort(prev, colKey));
+  };
+
+  const handleExportExcel = () => {
+    const exportRows = ledger.map(m => ({
+      'Month': formatMonthYear(m.monthYear),
+      'Starting Balance': m.openingBalance || 0,
+      'Rent Received': m.totalIncomeReceived || 0,
+      'Expenses Paid': m.totalExpensesPaid || 0,
+      'Net Cash Flow': m.netCashFlow || 0,
+      'Closing Balance': m.closingBalance || 0,
+      'Status': 'Verified'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ledger_Account_Book');
+    XLSX.writeFile(wb, `Account_Ledger_Book_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_ledger');
     if (saved) {
@@ -72,6 +107,55 @@ export default function LedgerView() {
     }
   };
 
+  // Filtered & Sorted Ledger
+  const filteredLedger = React.useMemo(() => {
+    return ledger.filter(m => {
+      const monthStr = formatMonthYear(m.monthYear).toLowerCase();
+      const rawMonth = (m.monthYear || '').toLowerCase();
+      const q = search.toLowerCase();
+
+      const matchesSearch = !search || monthStr.includes(q) || rawMonth.includes(q);
+      if (!matchesSearch) return false;
+
+      // APEX Filters
+      for (const f of ledgerFilters) {
+        let val = '';
+        if (f.columnId === 'month') val = formatMonthYear(m.monthYear);
+        else if (f.columnId === 'opening') val = String(m.openingBalance || 0);
+        else if (f.columnId === 'income') val = String(m.totalIncomeReceived || 0);
+        else if (f.columnId === 'expenses') val = String(m.totalExpensesPaid || 0);
+        else if (f.columnId === 'net') val = String(m.netCashFlow || 0);
+        else if (f.columnId === 'closing') val = String(m.closingBalance || 0);
+        else if (f.columnId === 'status') val = 'Verified';
+
+        if (!evaluateFilterRule(val, f.operator, f.value)) return false;
+      }
+
+      return true;
+    });
+  }, [ledger, search, ledgerFilters]);
+
+  const sortedLedger = React.useMemo(() => {
+    return sortDataRows(filteredLedger, sortConfig, {
+      month: m => m.monthYear || '',
+      opening: m => Number(m.openingBalance) || 0,
+      income: m => Number(m.totalIncomeReceived) || 0,
+      expenses: m => Number(m.totalExpensesPaid) || 0,
+      net: m => Number(m.netCashFlow) || 0,
+      closing: m => Number(m.closingBalance) || 0,
+      status: () => 'Verified'
+    });
+  }, [filteredLedger, sortConfig]);
+
+  const isAllRows = rowsPerPage === 'All';
+  const effectivePageSize = isAllRows ? sortedLedger.length || 1 : Number(rowsPerPage);
+  const totalPages = Math.ceil(sortedLedger.length / effectivePageSize) || 1;
+  const paginatedLedger = React.useMemo(() => {
+    if (isAllRows) return sortedLedger;
+    const start = (currentPage - 1) * effectivePageSize;
+    return sortedLedger.slice(start, start + effectivePageSize);
+  }, [sortedLedger, isAllRows, currentPage, effectivePageSize]);
+
   const handleOpenMonthDetails = async (monthYear) => {
     try {
       setSelectedMonth(monthYear);
@@ -98,23 +182,19 @@ export default function LedgerView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-2">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div>
-          <div className="flex items-center gap-3 mb-1">
+          <div className="flex items-center gap-3">
             <BookOpen className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-xl font-extrabold text-slate-900">Monthly Account Book</h2>
+            <h2 className="text-xl font-extrabold text-slate-900">Account Book (Ledger)</h2>
           </div>
-          <p className="text-sm text-slate-500">
-            Simple formula: <span className="font-semibold text-slate-700">Opening Balance + Rent Received − Expenses = Closing Balance</span>. 
-            All newly added expenses and payments update this book automatically.
-          </p>
         </div>
         <button
           onClick={() => fetchLedger(true)}
           disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 text-xs font-semibold transition-all shrink-0 self-start sm:self-auto"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 text-xs font-semibold transition-all shrink-0 self-start sm:self-auto cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-600' : ''}`} />
           <span>{refreshing ? 'Updating...' : 'Refresh Live Book'}</span>
@@ -122,7 +202,7 @@ export default function LedgerView() {
       </div>
 
       {/* Monthly Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
         {ledger.map((m) => (
           <div 
             key={m.monthYear} 
@@ -174,31 +254,39 @@ export default function LedgerView() {
 
       {/* Ledger Table */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-bold text-slate-800 text-sm">Full Account Summary</h3>
-            <p className="text-xs text-slate-400">Chronological carry-forward book across all operational months</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {hasCustomWidths && (
-              <button
-                onClick={resetColumnWidths}
-                title="Reset column widths to default"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl shadow-xs transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset Widths</span>
-              </button>
-            )}
-            <ColumnManager
-              columns={LEDGER_COLUMNS_DEF}
-              visibleColumns={visibleColumns}
-              onChangeVisible={setVisibleColumns}
-              onResetWidths={resetColumnWidths}
-              storageKey="ledger"
-            />
-          </div>
+        <div>
+          <h3 className="font-bold text-slate-800 text-sm">Full Account Summary</h3>
+          <p className="text-xs text-slate-400">Chronological carry-forward book across all operational months</p>
         </div>
+
+        {/* APEX Toolbar for Ledger */}
+        <ApexToolbar
+          search={search}
+          onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(val) => { setRowsPerPage(val); setCurrentPage(1); }}
+          availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+          columns={LEDGER_COLUMNS_DEF}
+          visibleColumns={visibleColumns}
+          onChangeVisibleColumns={(cols) => {
+            setVisibleColumns(cols);
+            try { localStorage.setItem('cols_ledger', JSON.stringify(cols)); } catch(e){}
+          }}
+          columnWidths={columnWidths}
+          onResetWidths={resetColumnWidths}
+          sortConfig={sortConfig}
+          onSortChange={setSortConfig}
+          isHeaderSticky={isHeaderSticky}
+          onToggleHeaderSticky={setIsHeaderSticky}
+          frozenColumnCount={frozenColumnCount}
+          onFrozenColumnCountChange={setFrozenColumnCount}
+          activeViewName={activeViewId}
+          onViewChange={setActiveViewId}
+          filters={ledgerFilters}
+          onFiltersChange={(flts) => { setLedgerFilters(flts); setCurrentPage(1); }}
+          onExport={handleExportExcel}
+          storageKey="ledger_v1"
+        />
         <div className="overflow-x-auto">
           <table
             className="w-full text-left text-sm border-collapse table-fixed"
@@ -212,29 +300,42 @@ export default function LedgerView() {
                 />
               ))}
             </colgroup>
-            <thead>
-              <tr className="border-b border-slate-200 text-[11px] text-slate-500 uppercase tracking-wide select-none">
-                {visibleColumns.map((colId) => {
+            <thead className={isHeaderSticky ? 'sticky top-0 z-20 shadow-xs' : ''}>
+              <tr className="border-b border-slate-200 text-[11px] text-slate-700 uppercase tracking-wide select-none bg-slate-50">
+                {visibleColumns.map((colId, colIndex) => {
                   const dragProps = getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'ledger');
                   const colDef = LEDGER_COLUMNS_DEF.find(c => c.id === colId);
                   const width = columnWidths[colId] || DEFAULT_LEDGER_COLUMN_WIDTHS[colId] || 100;
+                  const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                   
                   let alignClass = 'text-left';
                   if (colId === 'status' || colId === 'actions') alignClass = 'text-center';
                   else if (['opening', 'income', 'expenses', 'net', 'closing', 'netMargin', 'expenseRatio'].includes(colId)) alignClass = 'text-right';
 
-                  let colorClass = '';
-                  if (colId === 'income') colorClass = 'text-emerald-600';
-                  if (colId === 'expenses') colorClass = 'text-rose-600';
+                  const isSortable = colId !== 'actions';
+                  const isSorted = sortConfig.key === colId;
 
                   return (
                     <th
                       key={colId}
                       {...dragProps}
-                      style={{ width: `${width}px` }}
-                      className={`pb-3 font-semibold relative group ${alignClass} ${colorClass}`}
+                      onClick={() => isSortable && handleSort(colId)}
+                      style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                      className={`py-2.5 px-3 font-bold border-r border-slate-200 relative group whitespace-normal break-words leading-tight ${alignClass} ${frozenStyle.backgroundColor ? '' : 'bg-slate-50'} ${isSortable ? 'cursor-pointer hover:bg-slate-200/60 transition-colors' : ''}`}
+                      title={isSortable ? `Sort by ${colDef?.label || colId}` : ''}
                     >
-                      <span className="truncate block pr-2">{colDef?.label || colId}</span>
+                      <div className={`flex items-center gap-1 ${alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'}`}>
+                        <span className="break-words leading-tight">{colDef?.label || colId}</span>
+                        {isSortable && (
+                          <span className="shrink-0 text-slate-400">
+                            {isSorted ? (
+                              sortConfig.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600 font-bold" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600 font-bold" />
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60" />
+                            )}
+                          </span>
+                        )}
+                      </div>
                       <ResizeHandle colId={colId} onResizeStart={handleResizeStart} />
                     </th>
                   );
@@ -242,7 +343,7 @@ export default function LedgerView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {ledger.map((m) => {
+              {paginatedLedger.map((m) => {
                 const income = m.totalIncomeReceived || 0;
                 const expenses = m.totalExpensesPaid || 0;
                 const netMargin = income > 0 ? ((m.netCashFlow / income) * 100).toFixed(1) : '0.0';
@@ -250,22 +351,23 @@ export default function LedgerView() {
 
                 return (
                   <tr key={m.monthYear} className="hover:bg-slate-50/60">
-                    {visibleColumns.map((colId) => {
+                    {visibleColumns.map((colId, colIndex) => {
+                      const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, false);
                       if (colId === 'month') {
-                        return <td key={colId} className="py-4 font-bold text-slate-900 text-xs">{formatMonthYear(m.monthYear)}</td>;
+                        return <td key={colId} style={frozenStyle} className="py-4 font-bold text-slate-900 text-xs">{formatMonthYear(m.monthYear)}</td>;
                       }
                       if (colId === 'opening') {
-                        return <td key={colId} className="py-4 text-right text-slate-600 text-xs font-medium">{formatCurrency(m.openingBalance)}</td>;
+                        return <td key={colId} style={frozenStyle} className="py-4 text-right text-slate-600 text-xs font-medium">{formatCurrency(m.openingBalance)}</td>;
                       }
                       if (colId === 'income') {
-                        return <td key={colId} className="py-4 text-right text-emerald-600 text-xs font-semibold">{formatCurrency(m.totalIncomeReceived)}</td>;
+                        return <td key={colId} style={frozenStyle} className="py-4 text-right text-emerald-600 text-xs font-semibold">{formatCurrency(m.totalIncomeReceived)}</td>;
                       }
                       if (colId === 'expenses') {
-                        return <td key={colId} className="py-4 text-right text-rose-600 text-xs font-semibold">{formatCurrency(m.totalExpensesPaid)}</td>;
+                        return <td key={colId} style={frozenStyle} className="py-4 text-right text-rose-600 text-xs font-semibold">{formatCurrency(m.totalExpensesPaid)}</td>;
                       }
                       if (colId === 'net') {
                         return (
-                          <td key={colId} className="py-4 text-right text-xs font-bold">
+                          <td key={colId} style={frozenStyle} className="py-4 text-right text-xs font-bold">
                             <span className={m.netCashFlow >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
                               {formatCurrency(m.netCashFlow)}
                             </span>
@@ -273,11 +375,11 @@ export default function LedgerView() {
                         );
                       }
                       if (colId === 'closing') {
-                        return <td key={colId} className="py-4 text-right text-slate-900 text-xs font-extrabold">{formatCurrency(m.closingBalance)}</td>;
+                        return <td key={colId} style={frozenStyle} className="py-4 text-right text-slate-900 text-xs font-extrabold">{formatCurrency(m.closingBalance)}</td>;
                       }
                       if (colId === 'status') {
                         return (
-                          <td key={colId} className="py-4 text-center">
+                          <td key={colId} style={frozenStyle} className="py-4 text-center">
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-full">
                               <CheckCircle2 className="w-3 h-3" /> Verified
                             </span>
@@ -286,7 +388,7 @@ export default function LedgerView() {
                       }
                       if (colId === 'actions') {
                         return (
-                          <td key={colId} className="py-4 text-center">
+                          <td key={colId} style={frozenStyle} className="py-4 text-center">
                             <button
                               onClick={() => handleOpenMonthDetails(m.monthYear)}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 text-xs font-semibold transition-colors"
@@ -300,7 +402,7 @@ export default function LedgerView() {
                       }
                       if (colId === 'netMargin') {
                         return (
-                          <td key={colId} className="py-4 text-right text-xs font-mono font-bold">
+                          <td key={colId} style={frozenStyle} className="py-4 text-right text-xs font-mono font-bold">
                             <span className={Number(netMargin) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
                               {Number(netMargin) >= 0 ? '+' : ''}{netMargin}%
                             </span>
@@ -309,7 +411,7 @@ export default function LedgerView() {
                       }
                       if (colId === 'expenseRatio') {
                         return (
-                          <td key={colId} className="py-4 text-right text-xs font-mono text-slate-600">
+                          <td key={colId} style={frozenStyle} className="py-4 text-right text-xs font-mono text-slate-600">
                             {expenseRatio}%
                           </td>
                         );
@@ -321,6 +423,60 @@ export default function LedgerView() {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination & Count Footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 rounded-b-2xl">
+          <div className="flex items-center gap-2">
+            <span>
+              Showing {sortedLedger.length === 0 ? 0 : isAllRows ? 1 : ((currentPage - 1) * effectivePageSize) + 1}
+              - {isAllRows ? sortedLedger.length : Math.min(currentPage * effectivePageSize, sortedLedger.length)} of {sortedLedger.length} months
+            </span>
+            {sortConfig.key && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px] border border-emerald-200">
+                Sorted by {sortConfig.key} ({sortConfig.direction?.toUpperCase()})
+              </span>
+            )}
+          </div>
+          {!isAllRows && totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(1)}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                «
+              </button>
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                Prev
+              </button>
+              <span className="px-3 py-1 text-slate-700">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage(totalPages)}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                »
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

@@ -50,3 +50,318 @@ button, a, input, select, textarea {
   transition-duration: 150ms;
   transition-timing-function: ease;
 }
+
+/* ==========================================================================
+   Global Data Grids & Tables Styling
+   ========================================================================== */
+
+/* 1. Header Wrapping on Column Reduction */
+table th,
+.table-header,
+th {
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  hyphens: auto;
+  line-height: 1.25 !important;
+  vertical-align: middle;
+}
+
+table th .truncate,
+table th span.truncate,
+table th div.truncate,
+table th button span.truncate {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  line-height: 1.25 !important;
+}
+
+table th .whitespace-nowrap {
+  white-space: normal !important;
+}
+
+table th button,
+table th div.flex {
+  white-space: normal !important;
+  text-align: inherit;
+}
+
+/* 2. Distinct Row and Column Gridlines */
+table:not(.border-separate) {
+  border-collapse: collapse !important;
+  border: 1px solid #cbd5e1 !important;
+}
+table.border-separate {
+  border-collapse: separate !important;
+}
+
+table thead th {
+  border-right: 1px solid #cbd5e1 !important;
+  border-bottom: 2px solid #94a3b8 !important;
+  background-color: #f1f5f9;
+}
+
+table tbody td {
+  border-right: 1px solid #cbd5e1 !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+}
+
+table thead tr th:first-child,
+table tbody tr td:first-child {
+  border-left: 1px solid #cbd5e1 !important;
+}
+
+/* 3. Alternate Rows with Light Grey Background (Zebra Striping) */
+table tbody tr:nth-child(even),
+table tbody tr.even {
+  background-color: #f1f5f9 !important; /* light grey to identify lines clearly */
+}
+
+table tbody tr:nth-child(odd),
+table tbody tr.odd {
+  background-color: #ffffff !important;
+}
+
+/* Row Hover State with Clear Highlight */
+table tbody tr:hover,
+table tbody tr:hover td {
+  background-color: #e2e8f0 !important;
+}
+
+/* Sticky / Frozen column synchronization with alternate row background */
+table tbody tr:nth-child(even) td[style*="position: sticky"],
+table tbody tr:nth-child(even) td.sticky {
+  background-color: #f1f5f9 !important;
+}
+
+table tbody tr:nth-child(odd) td[style*="position: sticky"],
+table tbody tr:nth-child(odd) td.sticky {
+  background-color: #ffffff !important;
+}
+
+table tbody tr:hover td[style*="position: sticky"],
+table tbody tr:hover td.sticky {
+  background-color: #e2e8f0 !important;
+}
+
+/* 4. Reduced Space Between Lines (Compact, Professional Grid) */
+table tbody td {
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+  line-height: 1.3 !important;
+}
+
+table thead th {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  padding-left: 8px !important;
+  padding-right: 20px !important; /* leaves room for resize handle */
+}
+
+/* ==========================================================================
+   Font Size Scaling (Universal Forms, Modals & Grid Layouts)
+   ========================================================================== */
+
+/* Extra Small (9.5px - 10px) */
+body.font-xs {
+  font-size: 10px;
+}
+body.font-xs table {
+  font-size: 9.5px !important;
+}
+body.font-xs table thead th {
+  font-size: 9px !important;
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+}
+body.font-xs table tbody td {
+  font-size: 9.5px !important;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+body.font-xs input,
+body.font-xs select,
+body.font-xs textarea,
+body.font-xs button {
+  font-size: 10px !important;
+}
+body.font-xs label {
+  font-size: 9.5px !important;
+}
+
+/* Compact (11px) */
+body.font-compact {
+  font-size: 11px;
+}
+body.font-compact table {
+  font-size: 10.5px !important;
+}
+body.font-compact table thead th {
+  font-size: 10px !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+body.font-compact table tbody td {
+  font-size: 10.5px !important;
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+}
+body.font-compact input,
+body.font-compact select,
+body.font-compact textarea,
+body.font-compact button {
+  font-size: 11px !important;
+}
+body.font-compact label {
+  font-size: 10.5px !important;
+}
+
+/* Normal (12.5px - Default) */
+body.font-normal {
+  font-size: 12.5px;
+}
+body.font-normal table {
+  font-size: 12px !important;
+}
+body.font-normal table thead th {
+  font-size: 11px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+body.font-normal table tbody td {
+  font-size: 12px !important;
+  padding-top: 4.5px !important;
+  padding-bottom: 4.5px !important;
+}
+body.font-normal input,
+body.font-normal select,
+body.font-normal textarea,
+body.font-normal button {
+  font-size: 12.5px !important;
+}
+body.font-normal label {
+  font-size: 11.5px !important;
+}
+
+/* Medium (13.5px) */
+body.font-medium {
+  font-size: 13.5px;
+}
+body.font-medium table {
+  font-size: 13px !important;
+}
+body.font-medium table thead th {
+  font-size: 12px !important;
+  padding-top: 6.5px !important;
+  padding-bottom: 6.5px !important;
+}
+body.font-medium table tbody td {
+  font-size: 13px !important;
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+}
+body.font-medium input,
+body.font-medium select,
+body.font-medium textarea,
+body.font-medium button {
+  font-size: 13px !important;
+}
+body.font-medium label {
+  font-size: 12px !important;
+}
+
+/* Comfortable (14.5px) */
+body.font-comfortable {
+  font-size: 14.5px;
+}
+body.font-comfortable table {
+  font-size: 14px !important;
+}
+body.font-comfortable table thead th {
+  font-size: 13px !important;
+  padding-top: 7px !important;
+  padding-bottom: 7px !important;
+}
+body.font-comfortable table tbody td {
+  font-size: 14px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+body.font-comfortable input,
+body.font-comfortable select,
+body.font-comfortable textarea,
+body.font-comfortable button {
+  font-size: 14px !important;
+}
+body.font-comfortable label {
+  font-size: 13px !important;
+}
+
+/* Large (16px) */
+body.font-large {
+  font-size: 16px;
+}
+body.font-large table {
+  font-size: 15.5px !important;
+}
+body.font-large table thead th {
+  font-size: 14.5px !important;
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+}
+body.font-large table tbody td {
+  font-size: 15.5px !important;
+  padding-top: 7.5px !important;
+  padding-bottom: 7.5px !important;
+}
+body.font-large input,
+body.font-large select,
+body.font-large textarea,
+body.font-large button {
+  font-size: 15.5px !important;
+}
+body.font-large label {
+  font-size: 14.5px !important;
+}
+
+/* Extra Large (17.5px) */
+body.font-xl {
+  font-size: 17.5px;
+}
+body.font-xl table {
+  font-size: 17px !important;
+}
+body.font-xl table thead th {
+  font-size: 16px !important;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+body.font-xl table tbody td {
+  font-size: 17px !important;
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+}
+body.font-xl input,
+body.font-xl select,
+body.font-xl textarea,
+body.font-xl button {
+  font-size: 17px !important;
+}
+body.font-xl label {
+  font-size: 16px !important;
+}
+
+/* Data Auto-Wrap */
+body.grid-auto-wrap table tbody td,
+body.grid-auto-wrap table tbody td .truncate,
+body.grid-auto-wrap table tbody td span.truncate {
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  line-height: 1.35 !important;
+}

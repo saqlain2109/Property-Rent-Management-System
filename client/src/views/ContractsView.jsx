@@ -8,13 +8,14 @@ import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import {
   FileText, Plus, Search, Calendar, TrendingUp, Edit2, LogOut, History,
-  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown, AlertCircle
+  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown, AlertCircle, Receipt, Check, Eye
 } from 'lucide-react';
 
 const CONTRACTS_COLUMNS_DEF = [
   { id: 'property', label: 'Property' },
   { id: 'subUnit', label: 'Sub-Property / Partition' },
   { id: 'tenant', label: 'Tenant' },
+  { id: 'contractNo', label: 'Contract No', defaultVisible: true },
   { id: 'contractType', label: 'Contract Type' },
   { id: 'monthlyRent', label: 'Rent Per Month' },
   { id: 'annualRent', label: 'Rent Per Annum' },
@@ -23,7 +24,7 @@ const CONTRACTS_COLUMNS_DEF = [
   { id: 'endDate', label: 'End Date' },
   { id: 'status', label: 'Contract Status' },
   { id: 'notes', label: 'Comments / Notes' },
-  { id: 'actions', label: 'Actions' },
+  { id: 'actions', label: 'Edit' },
   // Preserved secondary columns available in Column Manager
   { id: 'assignmentCode', label: 'Contract Code', defaultVisible: false },
   { id: 'rentType', label: 'Rent Frequency', defaultVisible: false },
@@ -36,7 +37,7 @@ const CONTRACTS_COLUMNS_DEF = [
 ];
 
 const DEFAULT_CONTRACTS_COLS = [
-  'property', 'subUnit', 'tenant', 'contractType', 'monthlyRent', 'annualRent',
+  'property', 'subUnit', 'tenant', 'contractNo', 'contractType', 'monthlyRent', 'annualRent',
   'depositHeld', 'startDate', 'endDate', 'status', 'notes', 'actions'
 ];
 
@@ -44,6 +45,7 @@ const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
   property: 160,
   subUnit: 140,
   tenant: 150,
+  contractNo: 130,
   contractType: 120,
   monthlyRent: 120,
   annualRent: 125,
@@ -52,7 +54,7 @@ const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
   endDate: 110,
   status: 110,
   notes: 190,
-  actions: 140,
+  actions: 90,
   assignmentCode: 120,
   rentType: 110,
   currentRate: 120,
@@ -80,6 +82,52 @@ const isContractEndDatePast = (endDate) => (
   Boolean(endDate) && endDate.slice(0, 10) < new Date().toISOString().slice(0, 10)
 );
 
+const doContractDatesOverlap = (startA, endA, startB, endB) => {
+  const sA = startA ? String(startA).slice(0, 10) : '0000-01-01';
+  const eA = endA ? String(endA).slice(0, 10) : '9999-12-31';
+  const sB = startB ? String(startB).slice(0, 10) : '0000-01-01';
+  const eB = endB ? String(endB).slice(0, 10) : '9999-12-31';
+
+  return sA <= eB && eA >= sB;
+};
+
+const findContractConflict = (contractsList, unitId, startDate, endDate, excludeId = null) => {
+  if (!unitId) return null;
+  return contractsList.find(c => {
+    if (excludeId && c._id === excludeId) return false;
+    const cUnitId = String(c.unitId?._id || c.unitId);
+    if (cUnitId !== String(unitId)) return false;
+    if (c.status === 'Terminated' || c.status === 'Cancelled') return false;
+    return doContractDatesOverlap(startDate, endDate, c.startDate, c.endDate);
+  });
+};
+
+const CONTRACT_RECEIPTS_COLUMNS_DEF = [
+  { id: 'receiptNumber', label: 'Receipt #', defaultVisible: true },
+  { id: 'receiptDate', label: 'Date', defaultVisible: true },
+  { id: 'monthsCovered', label: 'Month(s) Covered', defaultVisible: true },
+  { id: 'paymentMode', label: 'Payment Mode', defaultVisible: true },
+  { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
+  { id: 'comments', label: 'Comments', defaultVisible: true },
+  { id: 'totalAmount', label: 'Amount Received (₹)', defaultVisible: true },
+  { id: 'actions', label: 'Action', defaultVisible: true },
+];
+
+const DEFAULT_CONTRACT_RECEIPTS_COLS = [
+  'receiptNumber', 'receiptDate', 'monthsCovered', 'paymentMode', 'referenceNumber', 'comments', 'totalAmount', 'actions'
+];
+
+const DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS = {
+  receiptNumber: 130,
+  receiptDate: 110,
+  monthsCovered: 160,
+  paymentMode: 120,
+  referenceNumber: 130,
+  comments: 180,
+  totalAmount: 140,
+  actions: 90
+};
+
 const changeRentType = (form, setForm, nextRentType) => {
   let rentAmount = form.rentAmount;
   if (rentAmount !== '' && form.rentType !== nextRentType) {
@@ -95,7 +143,7 @@ const changeRentType = (form, setForm, nextRentType) => {
 
 const getContractColumnWidth = (columnId, columnWidths) => Math.max(
   columnWidths[columnId] || DEFAULT_CONTRACTS_COLUMN_WIDTHS[columnId] || 100,
-  columnId === 'actions' ? 220 : 0
+  columnId === 'actions' ? 85 : 0
 );
 
 export default function ContractsView() {
@@ -114,8 +162,13 @@ export default function ContractsView() {
       const allowed = CONTRACTS_COLUMNS_DEF.map((c) => c.id);
       const savedColumns = JSON.parse(saved).filter((c) => allowed.includes(c));
       if (savedColumns.length > 0) {
-        if (!savedColumns.includes('contractType')) {
+        if (!savedColumns.includes('contractNo')) {
           const tIdx = savedColumns.indexOf('tenant');
+          if (tIdx !== -1) savedColumns.splice(tIdx + 1, 0, 'contractNo');
+          else savedColumns.push('contractNo');
+        }
+        if (!savedColumns.includes('contractType')) {
+          const tIdx = savedColumns.indexOf('contractNo');
           if (tIdx !== -1) savedColumns.splice(tIdx + 1, 0, 'contractType');
           else savedColumns.push('contractType');
         }
@@ -155,6 +208,7 @@ export default function ContractsView() {
       property: extractUniqueValues(contracts, c => c.unitId?.propertyId?.name),
       subUnit: extractUniqueValues(contracts, c => c.unitId?.subUnitPartition || c.unitId?.unitName),
       tenant: extractUniqueValues(contracts, c => c.tenantId?.name),
+      contractNo: extractUniqueValues(contracts, c => c.contractNo),
       contractType: ['Rent', 'Business'],
       status: ['Active', 'Ended'],
       startDate: extractUniqueValues(contracts, c => c.startDate ? formatDate(c.startDate) : ''),
@@ -170,7 +224,7 @@ export default function ContractsView() {
   };
 
   // Pagination State
-  const [rowsPerPage, setRowsPerPage] = useState(10); // default 10 or 'All'
+  const [rowsPerPage, setRowsPerPage] = useState(25); // default 25 or 'All'
   const [currentPage, setCurrentPage] = useState(1);
 
   // Modals
@@ -186,6 +240,7 @@ export default function ContractsView() {
     tenantId: '',
     propertyId: '',
     unitId: '',
+    contractNo: '',
     contractType: 'Rent',
     startDate: '',
     endDate: '',
@@ -201,6 +256,7 @@ export default function ContractsView() {
     tenantId: '',
     propertyId: '',
     unitId: '',
+    contractNo: '',
     contractType: 'Rent',
     startDate: '',
     endDate: '',
@@ -224,6 +280,243 @@ export default function ContractsView() {
     depositRefunded: 0,
     notes: '',
   });
+
+  // Rent Receipts for selected contract in Full-Screen Edit Modal
+  const [contractReceipts, setContractReceipts] = useState([]);
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [receiptSearchQuery, setReceiptSearchQuery] = useState('');
+  const [receiptSortConfig, setReceiptSortConfig] = useState({ key: 'receiptDate', direction: 'desc' });
+  const [receiptActiveFilters, setReceiptActiveFilters] = useState([]);
+  const [receiptRowsPerPage, setReceiptRowsPerPage] = useState(25);
+  const [receiptCurrentPage, setReceiptCurrentPage] = useState(1);
+  const [receiptVisibleColumns, setReceiptVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('cols_contract_receipts_v1');
+    if (!saved) return DEFAULT_CONTRACT_RECEIPTS_COLS;
+    try {
+      const allowed = CONTRACT_RECEIPTS_COLUMNS_DEF.map(c => c.id);
+      const parsed = JSON.parse(saved).filter(c => allowed.includes(c));
+      return parsed.length > 0 ? parsed : DEFAULT_CONTRACT_RECEIPTS_COLS;
+    } catch {
+      return DEFAULT_CONTRACT_RECEIPTS_COLS;
+    }
+  });
+
+  const {
+    columnWidths: receiptColumnWidths,
+    handleResizeStart: handleReceiptResizeStart
+  } = useResizableColumns('contract_receipts', DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS);
+
+  const [viewingReceipt, setViewingReceipt] = useState(null);
+  const [receiptEditForm, setReceiptEditForm] = useState({
+    receiptDate: '',
+    totalAmount: '',
+    paymentMode: 'Cash',
+    referenceNumber: '',
+    comments: ''
+  });
+  const [receiptSaving, setReceiptSaving] = useState(false);
+
+  const handleReceiptHeaderSort = (colId) => {
+    if (colId === 'actions') return;
+    setReceiptSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
+
+  const receiptFilterSuggestions = useMemo(() => {
+    return {
+      receiptNumber: extractUniqueValues(contractReceipts, r => r.receiptNumber),
+      receiptDate: extractUniqueValues(contractReceipts, r => r.receiptDate ? formatDate(r.receiptDate) : ''),
+      monthsCovered: extractUniqueValues(contractReceipts, r => r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || ''),
+      paymentMode: ['Cash', 'Bank Transfer', 'Cheque', 'UPI / Online'],
+      referenceNumber: extractUniqueValues(contractReceipts, r => r.referenceNumber),
+      comments: extractUniqueValues(contractReceipts, r => r.comments)
+    };
+  }, [contractReceipts]);
+
+  const processedContractReceipts = useMemo(() => {
+    let rows = [...contractReceipts];
+
+    // 1. Search Query
+    if (receiptSearchQuery.trim()) {
+      const q = receiptSearchQuery.toLowerCase().trim();
+      rows = rows.filter(r => 
+        (r.receiptNumber && r.receiptNumber.toLowerCase().includes(q)) ||
+        (r.paymentMode && r.paymentMode.toLowerCase().includes(q)) ||
+        (r.referenceNumber && r.referenceNumber.toLowerCase().includes(q)) ||
+        (r.comments && r.comments.toLowerCase().includes(q)) ||
+        (r.monthsCovered && r.monthsCovered.toLowerCase().includes(q)) ||
+        (r.allocations && r.allocations.some(a => a.rentMonthYear && a.rentMonthYear.toLowerCase().includes(q))) ||
+        String(r.totalAmount || '').includes(q)
+      );
+    }
+
+    // 2. Active APEX Filters
+    if (receiptActiveFilters.length > 0) {
+      rows = rows.filter(r => {
+        return receiptActiveFilters.every(flt => {
+          let cellVal = '';
+          if (flt.column === 'receiptNumber') cellVal = r.receiptNumber;
+          else if (flt.column === 'receiptDate') cellVal = r.receiptDate ? formatDate(r.receiptDate) : '';
+          else if (flt.column === 'monthsCovered') cellVal = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+          else if (flt.column === 'paymentMode') cellVal = r.paymentMode;
+          else if (flt.column === 'referenceNumber') cellVal = r.referenceNumber;
+          else if (flt.column === 'comments') cellVal = r.comments;
+          else if (flt.column === 'totalAmount') cellVal = r.totalAmount;
+          return evaluateFilterRule(cellVal, flt.operator, flt.value);
+        });
+      });
+    }
+
+    // 3. Sorting
+    if (receiptSortConfig.key) {
+      rows = sortDataRows(rows, receiptSortConfig.key, receiptSortConfig.direction, (item, key) => {
+        if (key === 'totalAmount') return Number(item.totalAmount) || 0;
+        if (key === 'receiptDate') return item.receiptDate ? new Date(item.receiptDate).getTime() : 0;
+        if (key === 'monthsCovered') return item.monthsCovered || (item.allocations && item.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+        return item[key] || '';
+      });
+    }
+
+    return rows;
+  }, [contractReceipts, receiptSearchQuery, receiptActiveFilters, receiptSortConfig]);
+
+  const paginatedContractReceipts = useMemo(() => {
+    if (receiptRowsPerPage === 'All') return processedContractReceipts;
+    const start = (receiptCurrentPage - 1) * Number(receiptRowsPerPage);
+    return processedContractReceipts.slice(start, start + Number(receiptRowsPerPage));
+  }, [processedContractReceipts, receiptRowsPerPage, receiptCurrentPage]);
+
+  const exportContractReceiptsToExcel = () => {
+    try {
+      const dataToExport = processedContractReceipts.map((r, i) => ({
+        '#': i + 1,
+        'Receipt #': r.receiptNumber || '',
+        'Date': r.receiptDate ? formatDate(r.receiptDate) : '',
+        'Contract No': r.contractNo || selectedContract?.contractNo || '',
+        'Month(s) Covered': r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '',
+        'Payment Mode': r.paymentMode || 'Cash',
+        'Ref / Cheque #': r.referenceNumber || '',
+        'Comments': r.comments || '',
+        'Amount Received (₹)': Number(r.totalAmount) || 0
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Rent Receipts');
+      const cNo = selectedContract?.contractNo || 'Contract';
+      XLSX.writeFile(wb, `Rent_Receipts_${cNo}.xlsx`);
+    } catch (err) {
+      console.error('Failed to export receipts to Excel:', err);
+      alert('Failed to export Excel.');
+    }
+  };
+
+  const openEditModal = async (c) => {
+    setSelectedContract(c);
+    const agreement = c.currentAgreement || {};
+    const rentType = agreement.rentType || 'Monthly Fixed';
+    setEditForm({
+      tenantId: c.tenantId?._id || '',
+      propertyId: c.unitId?.propertyId?._id || c.unitId?.propertyId || '',
+      unitId: c.unitId?._id || '',
+      contractNo: c.contractNo || '',
+      startDate: c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : '',
+      endDate: c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : '',
+      status: c.status || 'Active',
+      contractType: c.contractType || 'Rent',
+      rentType,
+      rentAmount: String(
+        rentType === 'Annual Fixed'
+          ? (agreement.annualRate || (agreement.monthlyRate || 0) * 12)
+          : agreement.monthlyRate ?? c.currentMonthlyRate ?? ''
+      ),
+      depositHeld: c.depositHeld || 0,
+      terms: agreement.terms || '',
+      notes: c.notes || '',
+    });
+    setReceiptSearchQuery('');
+    setShowEditModal(true);
+
+    // Fetch rent receipts for this contract
+    setReceiptsLoading(true);
+    try {
+      const tId = c.tenantId?._id || c.tenantId || '';
+      const uId = c.unitId?._id || c.unitId || '';
+      const cNo = c.contractNo || '';
+      const res = await API.get(`/payments?tenantId=${tId}&unitId=${uId}&contractNo=${encodeURIComponent(cNo)}`);
+      const allReceipts = res.data?.data || [];
+
+      const matching = allReceipts.filter(r => {
+        if (cNo && r.contractNo) {
+          return r.contractNo.toLowerCase() === cNo.toLowerCase();
+        }
+        if (c.startDate && r.receiptDate) {
+          const rDate = new Date(r.receiptDate);
+          if (new Date(c.startDate) > rDate) return false;
+          if (c.endDate && new Date(c.endDate) < rDate) return false;
+        }
+        return true;
+      });
+
+      setContractReceipts(matching);
+    } catch (err) {
+      console.error('Failed to load contract receipts:', err);
+      setContractReceipts([]);
+    } finally {
+      setReceiptsLoading(false);
+    }
+  };
+
+  const openViewReceiptModal = (r) => {
+    setViewingReceipt(r);
+    setReceiptEditForm({
+      receiptDate: r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+      totalAmount: String(r.totalAmount || 0),
+      paymentMode: r.paymentMode || 'Cash',
+      referenceNumber: r.referenceNumber || '',
+      comments: r.comments || ''
+    });
+  };
+
+  const handleSaveReceiptDetails = async (e) => {
+    e.preventDefault();
+    if (!viewingReceipt) return;
+    try {
+      setReceiptSaving(true);
+      const payload = {
+        receiptDate: receiptEditForm.receiptDate,
+        totalAmount: Number(receiptEditForm.totalAmount),
+        paymentMode: receiptEditForm.paymentMode,
+        referenceNumber: receiptEditForm.referenceNumber,
+        comments: receiptEditForm.comments,
+        allocations: (viewingReceipt.allocations || []).map(a => ({
+          rentMonthYear: a.rentMonthYear,
+          allocatedAmount: a.allocatedAmount,
+          notes: a.notes || ''
+        }))
+      };
+      const res = await API.put(`/payments/${viewingReceipt._id}`, payload);
+      if (res.data?.success) {
+        setViewingReceipt(null);
+        if (selectedContract) {
+          const tId = selectedContract.tenantId?._id || selectedContract.tenantId || '';
+          const uId = selectedContract.unitId?._id || selectedContract.unitId || '';
+          const cNo = selectedContract.contractNo || '';
+          const refreshRes = await API.get(`/payments?tenantId=${tId}&unitId=${uId}&contractNo=${encodeURIComponent(cNo)}`);
+          const allR = refreshRes.data?.data || [];
+          setContractReceipts(allR.filter(r => {
+            if (cNo && r.contractNo) return r.contractNo.toLowerCase() === cNo.toLowerCase();
+            return true;
+          }));
+        }
+        fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to update receipt:', err);
+      alert(err.response?.data?.message || 'Failed to update receipt');
+    } finally {
+      setReceiptSaving(false);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -258,31 +551,36 @@ export default function ContractsView() {
     u => !editForm.propertyId || String(u.propertyId?._id || u.propertyId) === editForm.propertyId
   );
 
-  // Active conflict check: exactly 1 active contract allowed per unit
-  const activeConflictInCreate = useMemo(() => {
-    if (!createForm.unitId || createForm.status !== 'Active') return null;
-    return contracts.find(c => c.status === 'Active' && String(c.unitId?._id || c.unitId) === createForm.unitId);
-  }, [contracts, createForm.unitId, createForm.status]);
+  // Date-range overlap conflict check: validate against existing contracts for this unit
+  const conflictInCreate = useMemo(() => {
+    return findContractConflict(contracts, createForm.unitId, createForm.startDate, createForm.endDate);
+  }, [contracts, createForm.unitId, createForm.startDate, createForm.endDate]);
 
-  const activeConflictInEdit = useMemo(() => {
-    if (!editForm.unitId || editForm.status !== 'Active' || !selectedContract) return null;
-    return contracts.find(c => c.status === 'Active' && String(c.unitId?._id || c.unitId) === editForm.unitId && c._id !== selectedContract._id);
-  }, [contracts, editForm.unitId, editForm.status, selectedContract]);
+  const conflictInEdit = useMemo(() => {
+    return findContractConflict(contracts, editForm.unitId, editForm.startDate, editForm.endDate, selectedContract?._id);
+  }, [contracts, editForm.unitId, editForm.startDate, editForm.endDate, selectedContract]);
 
   const handleCreateContract = async (e) => {
     e.preventDefault();
-    if (createForm.status === 'Active' && activeConflictInCreate) {
-      alert(`Cannot activate contract: This sub-property already has an active contract (${activeConflictInCreate.assignmentCode}) with ${activeConflictInCreate.tenantId?.name}. Please end or vacate the current contract first, or save as 'Ended' for historical tracking.`);
+    if (conflictInCreate) {
+      const conflictNo = conflictInCreate.contractNo || conflictInCreate.assignmentCode;
+      const tName = conflictInCreate.tenantId?.name || 'Unknown';
+      const range = `${conflictInCreate.startDate ? formatDate(conflictInCreate.startDate) : 'Open Start'} to ${conflictInCreate.endDate ? formatDate(conflictInCreate.endDate) : 'Ongoing'}`;
+      alert(`A contract already exists within this date range for this sub-property:\n• Contract No: ${conflictNo}\n• Tenant: ${tName}\n• Date Range: ${range}\n• Status: ${conflictInCreate.status}`);
       return;
     }
+    const isPast = isContractEndDatePast(createForm.endDate);
+    const finalStatus = isPast ? 'Ended' : createForm.status;
+
     try {
       setSubmitting(true);
       const res = await API.post('/assignments', {
         tenantId: createForm.tenantId,
         unitId: createForm.unitId,
+        contractNo: createForm.contractNo?.trim() || undefined,
         startDate: createForm.startDate || null,
         endDate: createForm.endDate || null,
-        status: createForm.status,
+        status: finalStatus,
         contractType: createForm.contractType || 'Rent',
         rentType: createForm.rentType,
         rentAmount: Number(createForm.rentAmount),
@@ -291,12 +589,13 @@ export default function ContractsView() {
         notes: createForm.notes,
       });
       if (res.data.success) {
-        if (createForm.status === 'Active' && isContractEndDatePast(createForm.endDate)) setStatusFilter('Past');
+        if (finalStatus === 'Ended') setStatusFilter('Past');
         setShowCreateModal(false);
         setCreateForm({
           tenantId: '',
           propertyId: '',
           unitId: '',
+          contractNo: '',
           contractType: 'Rent',
           startDate: '',
           endDate: '',
@@ -319,19 +618,26 @@ export default function ContractsView() {
   const handleEditContract = async (e) => {
     e.preventDefault();
     if (!selectedContract) return;
-    if (editForm.status === 'Active' && activeConflictInEdit) {
-      alert(`Cannot activate contract: This sub-property already has an active contract (${activeConflictInEdit.assignmentCode}) with ${activeConflictInEdit.tenantId?.name}. Only 1 active contract is allowed per sub-property.`);
+    if (conflictInEdit) {
+      const conflictNo = conflictInEdit.contractNo || conflictInEdit.assignmentCode;
+      const tName = conflictInEdit.tenantId?.name || 'Unknown';
+      const range = `${conflictInEdit.startDate ? formatDate(conflictInEdit.startDate) : 'Open Start'} to ${conflictInEdit.endDate ? formatDate(conflictInEdit.endDate) : 'Ongoing'}`;
+      alert(`A contract already exists within this date range for this sub-property:\n• Contract No: ${conflictNo}\n• Tenant: ${tName}\n• Date Range: ${range}\n• Status: ${conflictInEdit.status}`);
       return;
     }
+    const isPast = isContractEndDatePast(editForm.endDate);
+    const finalStatus = isPast ? 'Ended' : editForm.status;
+
     try {
       setSubmitting(true);
       const res = await API.put(`/assignments/${selectedContract._id}`, {
         tenantId: editForm.tenantId,
         unitId: editForm.unitId,
         propertyId: editForm.propertyId,
+        contractNo: editForm.contractNo?.trim() || undefined,
         startDate: editForm.startDate || null,
         endDate: editForm.endDate || null,
-        status: editForm.status,
+        status: finalStatus,
         contractType: editForm.contractType || 'Rent',
         rentType: editForm.rentType,
         rentAmount: Number(editForm.rentAmount),
@@ -342,6 +648,7 @@ export default function ContractsView() {
       if (res.data.success) {
         setShowEditModal(false);
         setSelectedContract(null);
+        setContractReceipts([]);
         fetchData();
       }
     } catch (err) {
@@ -409,6 +716,7 @@ export default function ContractsView() {
       const pName = c.unitId?.propertyId?.name || '';
       const uName = c.unitId?.subUnitPartition || c.unitId?.unitName || '';
       const code = c.assignmentCode || '';
+      const contractNo = c.contractNo || '';
       const rentType = getContractRentType(c);
       const rentAmount = String(getContractRentAmount(c));
       const sDate = c.startDate ? formatDate(c.startDate) : '';
@@ -421,6 +729,7 @@ export default function ContractsView() {
         pName.toLowerCase().includes(search.toLowerCase()) ||
         uName.toLowerCase().includes(search.toLowerCase()) ||
         code.toLowerCase().includes(search.toLowerCase()) ||
+        contractNo.toLowerCase().includes(search.toLowerCase()) ||
         (c.contractType || 'Rent').toLowerCase().includes(search.toLowerCase()) ||
         rentAmount.includes(search);
 
@@ -443,6 +752,7 @@ export default function ContractsView() {
         if (f.columnId === 'property') fieldVal = pName;
         else if (f.columnId === 'subUnit') fieldVal = uName;
         else if (f.columnId === 'tenant') fieldVal = tName;
+        else if (f.columnId === 'contractNo') fieldVal = contractNo;
         else if (f.columnId === 'contractType') fieldVal = c.contractType || 'Rent';
         else if (f.columnId === 'monthlyRent') fieldVal = String(c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)));
         else if (f.columnId === 'annualRent') fieldVal = String(c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0));
@@ -472,6 +782,7 @@ export default function ContractsView() {
       property: c => (c.unitId?.propertyId?.displayOrder && c.unitId.propertyId.displayOrder > 0) ? c.unitId.propertyId.displayOrder : (c.unitId?.propertyId?.name || ''),
       subUnit: c => c.unitId?.subUnitPartition || c.unitId?.unitName || '',
       tenant: c => c.tenantId?.name || '',
+      contractNo: c => c.contractNo || '',
       contractType: c => c.contractType || 'Rent',
       monthlyRent: c => c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
       annualRent: c => c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
@@ -514,6 +825,7 @@ export default function ContractsView() {
         'Property': c.unitId?.propertyId?.name || '',
         'Sub Property / Partition': c.unitId?.subUnitPartition || c.unitId?.unitName || '',
         'Tenant': c.tenantId?.name || '',
+        'Contract No': c.contractNo || '',
         'Contract Type': c.contractType || 'Rent',
         'Rent Per month': c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
         'Rent per Annum': c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
@@ -540,18 +852,15 @@ export default function ContractsView() {
   const totalActive = contracts.filter(c => c.status === 'Active').length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Header View: Clean Title without Dashboard KPIs as requested */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold shrink-0">
             <FileText className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Contracts & Leases</h2>
-            <p className="text-xs text-slate-500">
-              Clean lease agreement manager with monthly rent, start & end dates, rate revisions, and vacancy logs
-            </p>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Lease Contract</h2>
           </div>
         </div>
 
@@ -630,7 +939,7 @@ export default function ContractsView() {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Create Contract</span>
+            <span>New Lease Contract</span>
           </button>
         }
       />
@@ -684,22 +993,22 @@ export default function ContractsView() {
                           setVisibleColumns(cols);
                           try { localStorage.setItem('cols_contracts_v2', JSON.stringify(cols)); } catch(e){}
                         }, 'contracts_v2')}
-                        style={{ ...frozenStyle, width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
-                        className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 whitespace-nowrap overflow-hidden select-none ${alignClass}`}
+                        style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                        className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group bg-slate-100 whitespace-normal break-words leading-tight select-none ${alignClass}`}
                       >
-                        <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                        <div className={`flex items-center gap-1 w-full ${
                           alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'
                         }`}>
                           {colId === 'actions' ? (
-                            <span className="truncate text-xs font-bold text-slate-700">{def.label}</span>
+                            <span className="text-xs font-bold text-slate-700 break-words leading-tight">{def.label}</span>
                           ) : (
                             <button
                               type="button"
                               onClick={() => handleHeaderSort(colId)}
-                              className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                              className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors text-left"
                               title={`Sort by ${def.label} (Click: Descending → Ascending → Clear)`}
                             >
-                              <span className="truncate">{def.label}</span>
+                              <span className="break-words leading-tight">{def.label}</span>
                               <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
                                 {sortConfig.key === colId ? (
                                   sortConfig.direction === 'desc' ? (
@@ -776,6 +1085,16 @@ export default function ContractsView() {
                               {c.tenantId?.phone && (
                                 <span className="text-slate-500 text-[11px] block">{c.tenantId.phone}</span>
                               )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'contractNo') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 whitespace-nowrap">
+                              <span className="font-mono font-bold text-teal-800 bg-teal-50 border border-teal-200/60 px-2 py-0.5 rounded-md text-xs inline-block">
+                                {c.contractNo || '—'}
+                              </span>
                             </td>
                           );
                         }
@@ -932,78 +1251,16 @@ export default function ContractsView() {
 
                         if (colId === 'actions') {
                           return (
-                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  onClick={() => {
-                                    setSelectedContract(c);
-                                    const agreement = c.currentAgreement || {};
-                                    const rentType = agreement.rentType || 'Monthly Fixed';
-                                    setEditForm({
-                                      tenantId: c.tenantId?._id || '',
-                                      propertyId: c.unitId?.propertyId?._id || c.unitId?.propertyId || '',
-                                      unitId: c.unitId?._id || '',
-                                      startDate: c.startDate ? new Date(c.startDate).toISOString().slice(0, 10) : '',
-                                      endDate: c.endDate ? new Date(c.endDate).toISOString().slice(0, 10) : '',
-                                      status: c.status || 'Active',
-                                      contractType: c.contractType || 'Rent',
-                                      rentType,
-                                      rentAmount: String(
-                                        rentType === 'Annual Fixed'
-                                          ? (agreement.annualRate || (agreement.monthlyRate || 0) * 12)
-                                          : agreement.monthlyRate ?? c.currentMonthlyRate ?? ''
-                                      ),
-                                      depositHeld: c.depositHeld || 0,
-                                      terms: agreement.terms || '',
-                                      notes: c.notes || '',
-                                    });
-                                    setShowEditModal(true);
-                                  }}
-                                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1"
-                                  title="Edit Contract details"
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                  Edit
-                                </button>
-                                {!isVacated && (
-                                  <>
-                                    <button
-                                      onClick={() => {
-                                        setSelectedContract(c);
-                                        const agreement = c.currentAgreement || {};
-                                        const rentType = agreement.rentType || 'Monthly Fixed';
-                                        setReviseForm({
-                                          rentType,
-                                          rentAmount: String(getContractRentAmount(c)),
-                                          effectiveFrom: new Date().toISOString().split('T')[0],
-                                          reason: '',
-                                        });
-                                        setShowReviseModal(true);
-                                      }}
-                                      className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors"
-                                      title="Revise or Increase Rent"
-                                    >
-                                      Revise Rate
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setSelectedContract(c);
-                                        setVacateForm({
-                                          endDate: new Date().toISOString().split('T')[0],
-                                          depositRefunded: c.depositHeld || 0,
-                                          notes: '',
-                                        });
-                                        setShowVacateModal(true);
-                                      }}
-                                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] transition-colors"
-                                      title="Vacate / End Tenancy"
-                                    >
-                                      Vacate
-                                    </button>
-                                  </>
-                                )}
-                              </div>
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 text-center whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(c)}
+                                className="px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-xs transition-colors inline-flex items-center gap-1.5 shadow-2xs border border-teal-200/60 hover:border-teal-300 cursor-pointer"
+                                title="Edit Lease Contract & View Rent Received"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                                <span>Edit</span>
+                              </button>
                             </td>
                           );
                         }
@@ -1072,7 +1329,7 @@ export default function ContractsView() {
                   <Plus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-base">New Rent Contract</h3>
+                  <h3 className="font-extrabold text-slate-900 text-base">New Lease Contract</h3>
                   <p className="text-xs text-slate-500">Link tenant to property unit with start date and rent rate</p>
                 </div>
               </div>
@@ -1085,19 +1342,34 @@ export default function ContractsView() {
             </div>
 
             <form onSubmit={handleCreateContract} className="p-5 sm:p-6 space-y-4 overflow-y-auto">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Select Tenant *</label>
-                <select
-                  required
-                  value={createForm.tenantId}
-                  onChange={(e) => setCreateForm({ ...createForm, tenantId: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
-                >
-                  <option value="">-- Choose Tenant --</option>
-                  {tenants.map(t => (
-                    <option key={t._id} value={t._id}>{t.name} {t.phone ? `(${t.phone})` : ''}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Select Tenant *</label>
+                  <select
+                    required
+                    value={createForm.tenantId}
+                    onChange={(e) => setCreateForm({ ...createForm, tenantId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="">-- Choose Tenant --</option>
+                    {tenants.map(t => (
+                      <option key={t._id} value={t._id}>{t.name} {t.phone ? `(${t.phone})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Contract No <span className="text-slate-400 font-normal">(Auto e.g. Snip-2026)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Snip-2026 (leave blank for auto)"
+                    value={createForm.contractNo}
+                    onChange={(e) => setCreateForm({ ...createForm, contractNo: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1179,18 +1451,31 @@ export default function ContractsView() {
                   <input
                     type="date"
                     value={createForm.endDate}
-                    onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCreateForm(prev => ({
+                        ...prev,
+                        endDate: val,
+                        status: isContractEndDatePast(val) ? 'Ended' : prev.status
+                      }));
+                    }}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
                   <p className="text-[10px] text-slate-400 mt-0.5">Leave blank if ongoing</p>
                 </div>
               </div>
 
-              {activeConflictInCreate && createForm.status === 'Active' && (
-                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2 animate-in fade-in">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              {conflictInCreate && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-900 text-xs flex items-start gap-2.5 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold">Active Contract Conflict:</span> This sub-property already has an active contract ({activeConflictInCreate.assignmentCode}) with <strong>{activeConflictInCreate.tenantId?.name}</strong>. Only 1 active contract is permitted per sub-property. Set status to "Ended" if recording a past contract, or vacate the current tenant first.
+                    <span className="font-bold text-rose-950">Conflicting Contract Detected:</span> A contract already exists within this date range for this sub-property:
+                    <div className="mt-1.5 pl-2 border-l-2 border-rose-300 text-[11px] space-y-0.5 font-medium text-rose-900">
+                      <div>• <strong>Contract No:</strong> {conflictInCreate.contractNo || conflictInCreate.assignmentCode}</div>
+                      <div>• <strong>Tenant:</strong> {conflictInCreate.tenantId?.name || 'Unknown'}</div>
+                      <div>• <strong>Date Range:</strong> {conflictInCreate.startDate ? formatDate(conflictInCreate.startDate) : 'Open Start'} to {conflictInCreate.endDate ? formatDate(conflictInCreate.endDate) : 'Ongoing'}</div>
+                      <div>• <strong>Status:</strong> <span className="font-bold">{conflictInCreate.status}</span></div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1279,7 +1564,7 @@ export default function ContractsView() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || Boolean(activeConflictInCreate && createForm.status === 'Active')}
+                  disabled={submitting || Boolean(conflictInCreate)}
                   className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 disabled:opacity-50 cursor-pointer"
                 >
                   {submitting ? 'Creating...' : 'Create Contract'}
@@ -1290,224 +1575,635 @@ export default function ContractsView() {
         </div>
       )}
 
-      {/* MODAL 2: Edit Contract Modal (Clean Layout) */}
+      {/* MODAL 2: Full-Screen Edit Lease Contract & Rent Received Register */}
       {showEditModal && selectedContract && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
-            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-slate-900 text-white">
-                  <Edit2 className="w-5 h-5" />
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex flex-col w-screen h-screen overflow-hidden animate-in fade-in duration-150">
+          <div className="bg-slate-100 w-full h-full flex flex-col overflow-hidden">
+            
+            {/* Top Bar: Clean header with title, contract info, and buttons in ONE single row */}
+            <div className="bg-white border-b border-slate-200 px-5 sm:px-6 py-3 flex items-center justify-between shrink-0 shadow-xs z-20">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2.5 rounded-xl bg-teal-600 text-white shadow-sm shadow-teal-600/30 shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-extrabold text-slate-900 text-base sm:text-lg">Edit Lease Contract</h2>
+                    <span className="px-2.5 py-0.5 rounded-lg bg-teal-100 text-teal-800 font-mono font-bold text-xs border border-teal-200">
+                      {editForm.contractNo || selectedContract.contractNo || selectedContract.assignmentCode}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      editForm.status === 'Active' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300/60' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                    }`}>
+                      {editForm.status}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                      {editForm.contractType || 'Rent'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                    <strong>{selectedContract.tenantId?.name || 'Tenant'}</strong> · {selectedContract.unitId?.propertyId?.name || 'Property'} ({selectedContract.unitId?.subUnitPartition || selectedContract.unitId?.unitName})
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons in ONE Single Row */}
+              <div className="flex items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setSelectedContract(null);
+                    setContractReceipts([]);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 border border-slate-300 bg-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <X className="w-4 h-4 text-slate-500" />
+                  <span>Cancel / Close</span>
+                </button>
+                <button
+                  type="submit"
+                  form="editContractForm"
+                  disabled={submitting || Boolean(conflictInEdit)}
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{submitting ? 'Saving...' : 'Save Changes'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Body: Form Card + Rent Received Grid Card */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-7xl mx-auto w-full">
+              
+              {/* Conflict warning if any */}
+              {conflictInEdit && (
+                <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-rose-900 text-xs flex items-start gap-3 shadow-xs animate-in fade-in">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-rose-950">Conflicting Contract Detected:</span> A contract already exists within this date range for this sub-property:
+                    <div className="mt-1.5 pl-2 border-l-2 border-rose-300 text-[11px] space-y-0.5 font-medium text-rose-900">
+                      <div>• <strong>Contract No:</strong> {conflictInEdit.contractNo || conflictInEdit.assignmentCode}</div>
+                      <div>• <strong>Tenant:</strong> {conflictInEdit.tenantId?.name || 'Unknown'}</div>
+                      <div>• <strong>Date Range:</strong> {conflictInEdit.startDate ? formatDate(conflictInEdit.startDate) : 'Open Start'} to {conflictInEdit.endDate ? formatDate(conflictInEdit.endDate) : 'Ongoing'}</div>
+                      <div>• <strong>Status:</strong> <span className="font-bold">{conflictInEdit.status}</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CARD 1: Contract Details Form */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                  <Edit2 className="w-4 h-4 text-teal-600" />
+                  <h3 className="text-sm font-bold text-slate-800">Contract & Tenancy Details</h3>
+                </div>
+
+                <form id="editContractForm" onSubmit={handleEditContract} className="space-y-4">
+                  {/* Row 1: Tenant, Contract No, Property, Sub-Property */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Tenant *</label>
+                      <select
+                        required
+                        value={editForm.tenantId}
+                        onChange={(e) => setEditForm({ ...editForm, tenantId: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      >
+                        <option value="">-- Choose Tenant --</option>
+                        {tenants.map(t => (
+                          <option key={t._id} value={t._id}>{t.name} {t.phone ? `(${t.phone})` : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Contract No</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Snip-2026"
+                        value={editForm.contractNo}
+                        onChange={(e) => setEditForm({ ...editForm, contractNo: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono font-bold text-teal-800 bg-teal-50/30"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Property *</label>
+                      <select
+                        required
+                        value={editForm.propertyId}
+                        onChange={(e) => setEditForm({ ...editForm, propertyId: e.target.value, unitId: '' })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      >
+                        <option value="">-- Choose Property --</option>
+                        {properties.map(p => (
+                          <option key={p._id} value={p._id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Property / Partition *</label>
+                      <select
+                        required
+                        value={editForm.unitId}
+                        onChange={(e) => setEditForm({ ...editForm, unitId: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      >
+                        <option value="">-- Choose Sub-Property --</option>
+                        {availableUnitsForEdit.map(u => (
+                          <option key={u._id} value={u._id}>
+                            {u.subUnitPartition || u.unitName} {u.unitCode ? `(${u.unitCode})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Contract Type, Status, Start Date, End Date */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Type *</label>
+                      <select
+                        value={editForm.contractType || 'Rent'}
+                        onChange={(e) => setEditForm({ ...editForm, contractType: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      >
+                        <option value="Rent">Rent</option>
+                        <option value="Business">Business</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Status *</label>
+                      <select
+                        value={editForm.status}
+                        onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      >
+                        <option value="Active">Active</option>
+                        <option value="Ended">Ended / Past</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Start Date <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={editForm.startDate}
+                        onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        End Date <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={editForm.endDate}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditForm(prev => ({
+                            ...prev,
+                            endDate: val,
+                            status: isContractEndDatePast(val) ? 'Ended' : prev.status
+                          }));
+                        }}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Rent Frequency, Rent Rate, Security Deposit, Agreement Terms */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Rent Frequency *</label>
+                      <select
+                        value={editForm.rentType}
+                        onChange={(e) => changeRentType(editForm, setEditForm, e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      >
+                        <option value="Monthly Fixed">Monthly Fixed</option>
+                        <option value="Annual Fixed">Annual Fixed</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        {editForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *'}
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min="0"
+                        value={editForm.rentAmount}
+                        onChange={(e) => setEditForm({ ...editForm, rentAmount: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      />
+                      <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                        <span>{editForm.rentType === 'Annual Fixed' ? 'Monthly:' : 'Annual:'}</span>
+                        <span className="font-bold text-slate-800">
+                          {editForm.rentAmount
+                            ? (editForm.rentType === 'Annual Fixed'
+                                ? formatCurrency(Math.round(Number(editForm.rentAmount) / 12)) + '/mo'
+                                : formatCurrency(Number(editForm.rentAmount) * 12) + '/yr')
+                            : '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Security Deposit Held (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editForm.depositHeld}
+                        onChange={(e) => setEditForm({ ...editForm, depositHeld: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Agreement Terms</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 11 months, 10% annual escalation"
+                        value={editForm.terms}
+                        onChange={(e) => setEditForm({ ...editForm, terms: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 4: Notes */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Comments / Notes</label>
+                    <textarea
+                      rows="2"
+                      placeholder="e.g. Rate revision details, deposit remarks, terms..."
+                      value={editForm.notes}
+                      onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    />
+                  </div>
+                </form>
+              </div>
+
+              {/* CARD 2: Rent Received Under This Contract Grid Layout */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+                {/* Header & KPI Bar */}
+                <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-xs">
+                      <Receipt className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-900 text-sm">Rent Received Under This Contract</h3>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-extrabold border border-emerald-200">
+                          {processedContractReceipts.length} Receipt{processedContractReceipts.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        All payments allocated to contract <span className="font-mono font-bold text-slate-700">{editForm.contractNo || selectedContract.contractNo || selectedContract.assignmentCode}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Summary KPI Badges */}
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="px-3.5 py-1.5 rounded-xl bg-white border border-slate-200 shadow-xs text-right">
+                      <span className="text-[10px] text-slate-500 block leading-tight font-medium">Total Rent Received</span>
+                      <span className="text-sm font-extrabold text-emerald-700 font-mono">
+                        {formatCurrency(contractReceipts.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Standard APEX Toolbar for Contract Receipts */}
+                <ApexToolbar
+                  search={receiptSearchQuery}
+                  onSearchChange={(v) => { setReceiptSearchQuery(v); setReceiptCurrentPage(1); }}
+                  rowsPerPage={receiptRowsPerPage}
+                  onRowsPerPageChange={(v) => { setReceiptRowsPerPage(v); setReceiptCurrentPage(1); }}
+                  availableRowsOptions={[5, 10, 25, 50, 100, 'All']}
+                  columns={CONTRACT_RECEIPTS_COLUMNS_DEF}
+                  defaultColumns={DEFAULT_CONTRACT_RECEIPTS_COLS}
+                  visibleColumns={receiptVisibleColumns}
+                  onChangeVisibleColumns={(cols) => {
+                    setReceiptVisibleColumns(cols);
+                    try { localStorage.setItem('cols_contract_receipts_v1', JSON.stringify(cols)); } catch(e){}
+                  }}
+                  columnWidths={receiptColumnWidths}
+                  onResetWidths={() => {}}
+                  sortConfig={receiptSortConfig}
+                  onSortChange={setReceiptSortConfig}
+                  filters={receiptActiveFilters}
+                  onFiltersChange={(f) => { setReceiptActiveFilters(f); setReceiptCurrentPage(1); }}
+                  filterSuggestions={receiptFilterSuggestions}
+                  onExport={exportContractReceiptsToExcel}
+                  storageKey="contract_receipts_v1"
+                />
+
+                {/* Receipts Table with Sorting & Filter Handles */}
+                <div className="overflow-x-auto max-h-[50vh] overflow-y-auto">
+                  {receiptsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="w-6 h-6 border-3 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs text-slate-500 ml-2 font-medium">Loading rent receipts...</span>
+                    </div>
+                  ) : paginatedContractReceipts.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400 text-xs">
+                      {contractReceipts.length === 0
+                        ? 'No rent payments recorded under this contract yet.'
+                        : 'No receipts match your search / filter criteria.'}
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="sticky top-0 bg-slate-100 text-slate-700 font-bold border-b border-slate-200 z-10 select-none">
+                        <tr>
+                          {receiptVisibleColumns.map((colId) => {
+                            const def = CONTRACT_RECEIPTS_COLUMNS_DEF.find(c => c.id === colId) || { id: colId, label: colId };
+                            const width = receiptColumnWidths[colId] || DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS[colId] || 120;
+                            const isActions = colId === 'actions';
+                            const isAmount = colId === 'totalAmount';
+                            const align = isActions ? 'text-center' : isAmount ? 'text-right' : 'text-left';
+
+                            return (
+                              <th
+                                key={colId}
+                                style={{ width: `${Math.max(width, 50)}px`, minWidth: `${Math.max(width, 50)}px` }}
+                                className={`py-2 pl-3 pr-6 border-r border-slate-300 relative group bg-slate-100 ${align}`}
+                              >
+                                <div className={`flex items-center gap-1 w-full ${isActions ? 'justify-center' : isAmount ? 'justify-end' : 'justify-start'}`}>
+                                  {isActions ? (
+                                    <span className="text-xs font-bold text-slate-700">{def.label}</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleReceiptHeaderSort(colId)}
+                                      className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors text-left cursor-pointer"
+                                      title={`Sort by ${def.label} (Click: Descending → Ascending → Clear)`}
+                                    >
+                                      <span className="truncate">{def.label}</span>
+                                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                                        {receiptSortConfig.key === colId ? (
+                                          receiptSortConfig.direction === 'desc' ? (
+                                            <span className="text-teal-600 font-extrabold text-[13px] leading-none">↓</span>
+                                          ) : (
+                                            <span className="text-teal-600 font-extrabold text-[13px] leading-none">↑</span>
+                                          )
+                                        ) : (
+                                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                                        )}
+                                      </span>
+                                    </button>
+                                  )}
+                                </div>
+                                <ResizeHandle colId={colId} onResizeStart={handleReceiptResizeStart} />
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {paginatedContractReceipts.map((r) => (
+                          <tr key={r._id} className="hover:bg-slate-50/80 transition-colors">
+                            {receiptVisibleColumns.map((colId) => {
+                              if (colId === 'receiptNumber') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 font-mono font-bold text-teal-800 whitespace-nowrap">
+                                    {r.receiptNumber}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'receiptDate') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap text-slate-700">
+                                    {formatDate(r.receiptDate)}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'monthsCovered') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">
+                                    <span className="inline-block px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 font-bold text-[11px] border border-teal-200/60">
+                                      {r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '—'}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              if (colId === 'paymentMode') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">
+                                    <span className="inline-block px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold border border-slate-200">
+                                      {r.paymentMode || 'Cash'}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              if (colId === 'referenceNumber') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600 whitespace-nowrap">
+                                    {r.referenceNumber || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'comments') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-slate-600 text-[11px] max-w-xs truncate" title={r.comments}>
+                                    {r.comments || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'totalAmount') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-emerald-700 whitespace-nowrap">
+                                    {formatCurrency(r.totalAmount || 0)}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'actions') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 text-center whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => openViewReceiptModal(r)}
+                                      className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1.5 border border-teal-200/60 cursor-pointer shadow-2xs"
+                                      title="Edit Receipt Details"
+                                    >
+                                      <Edit2 className="w-3 h-3 text-teal-600" />
+                                      <span>Edit</span>
+                                    </button>
+                                  </td>
+                                );
+                              }
+                              return <td key={colId} className="py-2 px-3 border-r border-slate-200">—</td>;
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Pagination Footer */}
+                {processedContractReceipts.length > 0 && (
+                  <div className="px-4 py-2.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
+                    <span className="font-medium">
+                      Showing{' '}
+                      <strong>
+                        {receiptRowsPerPage === 'All'
+                          ? 1
+                          : Math.min((receiptCurrentPage - 1) * Number(receiptRowsPerPage) + 1, processedContractReceipts.length)}
+                      </strong>{' '}
+                      to{' '}
+                      <strong>
+                        {receiptRowsPerPage === 'All'
+                          ? processedContractReceipts.length
+                          : Math.min(receiptCurrentPage * Number(receiptRowsPerPage), processedContractReceipts.length)}
+                      </strong>{' '}
+                      of <strong>{processedContractReceipts.length}</strong> receipts
+                    </span>
+
+                    {receiptRowsPerPage !== 'All' && Math.ceil(processedContractReceipts.length / Number(receiptRowsPerPage)) > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setReceiptCurrentPage(p => Math.max(p - 1, 1))}
+                          disabled={receiptCurrentPage === 1}
+                          className="p-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-bold text-slate-700 px-2">
+                          Page {receiptCurrentPage} of {Math.ceil(processedContractReceipts.length / Number(receiptRowsPerPage))}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setReceiptCurrentPage(p => Math.min(p + 1, Math.ceil(processedContractReceipts.length / Number(receiptRowsPerPage))))}
+                          disabled={receiptCurrentPage >= Math.ceil(processedContractReceipts.length / Number(receiptRowsPerPage))}
+                          className="p-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT DETAIL / EDIT MODAL */}
+      {viewingReceipt && (
+        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-teal-600 text-white">
+                  <Receipt className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-base">Edit Contract</h3>
-                  <p className="text-xs text-slate-500 font-mono">{selectedContract.assignmentCode}</p>
+                  <h3 className="font-bold text-slate-900 text-sm">Receipt Details</h3>
+                  <p className="text-xs font-mono text-teal-800 font-bold">{viewingReceipt.receiptNumber}</p>
                 </div>
               </div>
               <button
-                onClick={() => { setShowEditModal(false); setSelectedContract(null); }}
+                type="button"
+                onClick={() => setViewingReceipt(null)}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleEditContract} className="p-5 sm:p-6 space-y-4 overflow-y-auto">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Tenant *</label>
-                <select
-                  required
-                  value={editForm.tenantId}
-                  onChange={(e) => setEditForm({ ...editForm, tenantId: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
-                >
-                  <option value="">-- Choose Tenant --</option>
-                  {tenants.map(t => (
-                    <option key={t._id} value={t._id}>{t.name} {t.phone ? `(${t.phone})` : ''}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <form onSubmit={handleSaveReceiptDetails} className="p-5 space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Property *</label>
-                  <select
-                    required
-                    value={editForm.propertyId}
-                    onChange={(e) => setEditForm({ ...editForm, propertyId: e.target.value, unitId: '' })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  >
-                    <option value="">-- Choose Property --</option>
-                    {properties.map(p => (
-                      <option key={p._id} value={p._id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Property / Partition *</label>
-                  <select
-                    required
-                    value={editForm.unitId}
-                    onChange={(e) => setEditForm({ ...editForm, unitId: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  >
-                    <option value="">-- Choose Sub-Property --</option>
-                    {availableUnitsForEdit.map(u => (
-                      <option key={u._id} value={u._id}>
-                        {u.subUnitPartition || u.unitName} {u.unitCode ? `(${u.unitCode})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Type *</label>
-                  <select
-                    value={editForm.contractType || 'Rent'}
-                    onChange={(e) => setEditForm({ ...editForm, contractType: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  >
-                    <option value="Rent">Rent</option>
-                    <option value="Business">Business</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contract Status *</label>
-                  <select
-                    value={editForm.status}
-                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Ended">Ended / Past</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    Start Date <span className="text-slate-400 font-normal">(Optional)</span>
-                  </label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Receipt Date</label>
                   <input
                     type="date"
-                    value={editForm.startDate}
-                    onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    required
+                    value={receiptEditForm.receiptDate}
+                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, receiptDate: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Commencement date</p>
                 </div>
-
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    End Date <span className="text-slate-400 font-normal">(Optional)</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={editForm.endDate}
-                    onChange={(e) => setEditForm({ ...editForm, endDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Leave blank if ongoing</p>
-                </div>
-              </div>
-
-              {activeConflictInEdit && editForm.status === 'Active' && (
-                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2 animate-in fade-in">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold">Active Contract Conflict:</span> This sub-property already has an active contract ({activeConflictInEdit.assignmentCode}) with <strong>{activeConflictInEdit.tenantId?.name}</strong>. Only 1 active contract is permitted per sub-property. Set status to "Ended" if recording a past contract, or vacate the current tenant first.
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Rent Frequency *</label>
-                  <select
-                    value={editForm.rentType}
-                    onChange={(e) => changeRentType(editForm, setEditForm, e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  >
-                    <option value="Monthly Fixed">Monthly Fixed</option>
-                    <option value="Annual Fixed">Annual Fixed</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    {editForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *'}
-                  </label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Amount (₹)</label>
                   <input
                     type="number"
                     required
                     min="0"
-                    value={editForm.rentAmount}
-                    onChange={(e) => setEditForm({ ...editForm, rentAmount: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    value={receiptEditForm.totalAmount}
+                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, totalAmount: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
                   />
-                  <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-                    <span>{editForm.rentType === 'Annual Fixed' ? 'Monthly Equivalent:' : 'Annual Equivalent:'}</span>
-                    <span className="font-bold text-slate-800">
-                      {editForm.rentAmount
-                        ? (editForm.rentType === 'Annual Fixed'
-                            ? formatCurrency(Math.round(Number(editForm.rentAmount) / 12)) + ' / month'
-                            : formatCurrency(Number(editForm.rentAmount) * 12) + ' / year')
-                        : '—'}
-                    </span>
-                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Security Deposit Held (₹)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={editForm.depositHeld}
-                    onChange={(e) => setEditForm({ ...editForm, depositHeld: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Payment Mode</label>
+                  <select
+                    value={receiptEditForm.paymentMode}
+                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, paymentMode: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  >
+                    <option value="Cash">Cash</option>
+                    <option value="Bank Transfer / NEFT / RTGS">Bank Transfer</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="UPI / GPay">UPI / GPay</option>
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
-
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Agreement Terms</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Ref / Cheque #</label>
                   <input
                     type="text"
-                    value={editForm.terms}
-                    onChange={(e) => setEditForm({ ...editForm, terms: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    placeholder="e.g. UTR / Cheque number"
+                    value={receiptEditForm.referenceNumber}
+                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, referenceNumber: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Comments / Notes</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Comments / Remarks</label>
                 <textarea
                   rows="2"
-                  value={editForm.notes}
-                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  value={receiptEditForm.comments}
+                  onChange={(e) => setReceiptEditForm({ ...receiptEditForm, comments: e.target.value })}
+                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => { setShowEditModal(false); setSelectedContract(null); }}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  onClick={() => setViewingReceipt(null)}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || Boolean(activeConflictInEdit && editForm.status === 'Active')}
-                  className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md disabled:opacity-50 cursor-pointer"
+                  disabled={receiptSaving}
+                  className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 flex items-center gap-1 cursor-pointer"
                 >
-                  {submitting ? 'Saving...' : 'Save Changes'}
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{receiptSaving ? 'Saving...' : 'Save Receipt'}</span>
                 </button>
               </div>
             </form>

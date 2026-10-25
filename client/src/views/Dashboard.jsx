@@ -108,8 +108,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900">Home Overview</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Live summary of your properties, rent, and money</p>
+          <h2 className="text-xl font-extrabold text-slate-900">Dashboard</h2>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">

@@ -11,11 +11,14 @@ const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 // @route GET /api/expenses
 router.get('/', protect, async (req, res) => {
   try {
-    const { propertyId, category, startDate, endDate, month, search } = req.query;
+    const { propertyId, category, startDate, endDate, month, search, headType } = req.query;
     let query = { isReversed: false };
 
     if (propertyId) query.propertyId = propertyId;
     if (category) query.category = category;
+    if (headType) {
+      query.headType = headType === 'Common' ? 'Other' : headType;
+    }
     if (month) {
       const [year, m] = month.split('-').map(Number);
       const startOfMonth = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
@@ -56,8 +59,9 @@ router.get('/categories', protect, async (req, res) => {
   try {
     const { headType } = req.query;
     const filter = {};
-    if (headType && ['Property', 'Common'].includes(headType)) {
-      filter.headType = headType;
+    if (headType) {
+      const normalized = headType === 'Common' ? 'Other' : headType;
+      filter.$or = [{ headType: normalized }, { headType: headType }];
     }
 
     let categories = await ExpenseCategory.find(filter).sort({ headType: 1, name: 1 });
@@ -69,7 +73,7 @@ router.get('/categories', protect, async (req, res) => {
         'Sweeper & Cleaning', 'Water Charges', 'Property Rent Paid', 
         'Deposit Refund', 'Property Tax', 'Other expenses'
       ];
-      const defaultCommonHeads = [
+      const defaultOtherHeads = [
         'MOM', 'Margaret', 'Islamic & Zakat', 'Zakat', 'Sadka', 
         'Send to dubai', 'IT Fees', 'Donations', 'Miscellaneous', 
         'Miscellaneous exp', 'Micellaneous Expenses', 'Akbar', 
@@ -83,10 +87,10 @@ router.get('/categories', protect, async (req, res) => {
           { upsert: true }
         );
       }
-      for (const name of defaultCommonHeads) {
+      for (const name of defaultOtherHeads) {
         await ExpenseCategory.updateOne(
           { name },
-          { $setOnInsert: { name, headType: 'Common', isDefault: true } },
+          { $setOnInsert: { name, headType: 'Other', isDefault: true } },
           { upsert: true }
         );
       }
@@ -102,7 +106,7 @@ router.get('/categories', protect, async (req, res) => {
 // @route POST /api/expenses/categories
 router.post('/categories', protect, authorize('admin', 'manager'), [
   body('name').trim().notEmpty().withMessage('Category name is required'),
-  body('headType').optional().isIn(['Property', 'Common']).withMessage('headType must be Property or Common')
+  body('headType').optional().isIn(['Property', 'Other', 'Common']).withMessage('headType must be Property or Other')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -111,7 +115,9 @@ router.post('/categories', protect, authorize('admin', 'manager'), [
 
   try {
     const name = req.body.name.trim();
-    const headType = req.body.headType || 'Property';
+    let headType = req.body.headType || 'Property';
+    if (headType === 'Common') headType = 'Other';
+
     const existing = await ExpenseCategory.findOne({ name });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Category already exists' });
@@ -132,7 +138,7 @@ router.post('/categories', protect, authorize('admin', 'manager'), [
 // @route PUT /api/expenses/categories/:id
 router.put('/categories/:id', protect, authorize('admin', 'manager'), [
   body('name').optional().trim().notEmpty().withMessage('Category name cannot be empty'),
-  body('headType').optional().isIn(['Property', 'Common']).withMessage('headType must be Property or Common')
+  body('headType').optional().isIn(['Property', 'Other', 'Common']).withMessage('headType must be Property or Other')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -140,7 +146,10 @@ router.put('/categories/:id', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    const { name, headType, description } = req.body;
+    const { name, description } = req.body;
+    let { headType } = req.body;
+    if (headType === 'Common') headType = 'Other';
+
     const cat = await ExpenseCategory.findById(req.params.id);
     if (!cat) {
       return res.status(404).json({ success: false, message: 'Expense head not found' });
@@ -199,7 +208,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    let { expenseDate, expenseMonth, ...rest } = req.body;
+    let { expenseDate, expenseMonth, headType, ...rest } = req.body;
 
     if (!expenseDate && !expenseMonth) {
       const now = new Date();
@@ -220,11 +229,24 @@ router.post('/', protect, authorize('admin', 'manager'), [
       finalExpenseMonth = expenseMonth || `${y}-${m}`;
     }
 
+    // Resolve headType (Property or Other)
+    let finalHeadType = headType;
+    if (finalHeadType === 'Common') finalHeadType = 'Other';
+    if (!finalHeadType) {
+      if (rest.propertyId) {
+        finalHeadType = 'Property';
+      } else {
+        const catDoc = await ExpenseCategory.findOne({ name: req.body.category?.trim() });
+        finalHeadType = (catDoc && (catDoc.headType === 'Property')) ? 'Property' : 'Other';
+      }
+    }
+
     const count = await Expense.countDocuments();
     const expenseCode = `EXP-${finalExpenseDate.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
 
     const expense = await Expense.create({
       ...rest,
+      headType: finalHeadType,
       expenseDate: finalExpenseDate,
       expenseMonth: finalExpenseMonth,
       expenseCode,
@@ -237,7 +259,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       action: 'RECORD_EXPENSE',
       entityType: 'Expense',
       entityId: expense._id,
-      description: `Recorded expense ${expenseCode} of ₹${expense.amount} under ${expense.category} for month ${finalExpenseMonth}`,
+      description: `Recorded ${finalHeadType} expense ${expenseCode} of ₹${expense.amount} under ${expense.category} for month ${finalExpenseMonth}`,
       newState: expense.toObject(),
       req
     });
@@ -272,7 +294,8 @@ router.post('/:id/reverse', protect, authorize('admin'), [
       action: 'REVERSE_EXPENSE',
       entityType: 'Expense',
       entityId: expense._id,
-      description: `Reversed expense ${expense.expenseCode} of ₹${expense.amount}. Reason: ${req.body.reversalReason}`,
+      description: `Reversed expense ${expense.expenseCode} of ₹${expense.amount}. Reason: ${expense.reversalReason}`,
+      newState: expense.toObject(),
       req
     });
 
@@ -291,7 +314,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
-    const { expenseDate, expenseMonth, propertyId, unitId, category, amount, description, vendorOrPayee, paymentMode } = req.body;
+    const { expenseDate, expenseMonth, propertyId, unitId, headType, category, amount, description, vendorOrPayee, paymentMode, referenceNumber, expenseCode } = req.body;
     if (expenseMonth && !expenseDate) {
       expense.expenseMonth = expenseMonth;
       const [y, m] = expenseMonth.split('-').map(Number);
@@ -304,11 +327,19 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     }
     if (propertyId !== undefined) expense.propertyId = propertyId || null;
     if (unitId !== undefined) expense.unitId = unitId || null;
+    if (headType) {
+      expense.headType = headType === 'Common' ? 'Other' : headType;
+    } else if (propertyId !== undefined) {
+      if (propertyId) expense.headType = 'Property';
+      else if (!expense.headType) expense.headType = 'Other';
+    }
     if (category) expense.category = category;
     if (amount !== undefined) expense.amount = Number(amount);
-    if (description) expense.description = description;
+    if (description !== undefined) expense.description = description;
     if (vendorOrPayee !== undefined) expense.vendorOrPayee = vendorOrPayee;
     if (paymentMode) expense.paymentMode = paymentMode;
+    if (referenceNumber !== undefined) expense.referenceNumber = referenceNumber;
+    if (expenseCode && expenseCode.trim()) expense.expenseCode = expenseCode.trim();
 
     await expense.save();
     await syncMonthlyLedgers().catch(console.error);
@@ -320,7 +351,6 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
 });
 
 // @route DELETE /api/expenses/:id
-// Hard delete expense
 router.delete('/:id', protect, authorize('admin'), async (req, res) => {
   try {
     const expense = await Expense.findById(req.params.id);

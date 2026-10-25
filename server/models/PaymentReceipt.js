@@ -27,7 +27,6 @@ const paymentReceiptSchema = new mongoose.Schema({
   totalAmount: {
     type: Number,
     required: true,
-    min: 0,
   },
   paymentMode: {
     type: String,
@@ -48,6 +47,12 @@ const paymentReceiptSchema = new mongoose.Schema({
     type: String,
     trim: true,
     default: '',
+  },
+  contractNo: {
+    type: String,
+    trim: true,
+    default: '',
+    index: true,
   },
   recordedBy: {
     type: mongoose.Schema.Types.ObjectId,

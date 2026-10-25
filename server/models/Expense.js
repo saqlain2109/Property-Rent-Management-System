@@ -20,7 +20,7 @@ const expenseSchema = new mongoose.Schema({
   propertyId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Property',
-    default: null, // null if general/other expense
+    default: null, // null if other/general expense
     index: true,
   },
   unitId: {
@@ -28,10 +28,16 @@ const expenseSchema = new mongoose.Schema({
     ref: 'Unit',
     default: null,
   },
+  headType: {
+    type: String,
+    enum: ['Property', 'Other'],
+    default: 'Property',
+    index: true,
+  },
   category: {
     type: String,
     required: true,
-    trim: true, // "Maintenance", "Property Rent Paid", "Electricity Meters", "Repairs", "Deposit Refund", "Sweeper", "Miscellaneous"
+    trim: true, // "Maintenance", "Property Rent Paid", "Electricity & Utilities", "Repairs & Renovation", "Deposit Refund", "Sweeper", "Miscellaneous", "MOM", etc.
   },
   amount: {
     type: Number,

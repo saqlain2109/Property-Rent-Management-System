@@ -30,8 +30,7 @@ export default function ReportsView() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Reports & Excel Export</h2>
-          <p className="text-sm text-slate-500">Download formatted workbooks and generate portfolio statements</p>
+          <h2 className="text-xl font-bold text-slate-900">Portfolio Workbook (Excel)</h2>
         </div>
         <button
           onClick={handleExportExcel}

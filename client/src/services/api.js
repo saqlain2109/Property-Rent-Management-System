@@ -15,7 +15,8 @@ API.interceptors.request.use((config) => {
 API.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    const isAuthRoute = error.config?.url?.includes('/auth/');
+    if (error.response && error.response.status === 401 && !isAuthRoute) {
       localStorage.removeItem('property_rent_token');
       localStorage.removeItem('property_rent_user');
       if (window.location.pathname !== '/login') {

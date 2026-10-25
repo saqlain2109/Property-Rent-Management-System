@@ -52,7 +52,7 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('properties', 0);
   const [activeFilters, setActiveFilters] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Suggestions for APEX filter builder dropdown
@@ -371,18 +371,15 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
   }, [sortedProperties, isAllRows, currentPage, effectivePageSize]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
             <Building2 className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Property Master</h2>
-            <p className="text-xs text-slate-500">
-              Clear Excel-style grid showing property details, total area (sq ft), and percentage ownership
-            </p>
+            <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Properties</h2>
           </div>
         </div>
 
@@ -481,19 +478,19 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
                     <th 
                       key={colId} 
                       {...getHeaderDragProps(colId, visibleColumns, setVisibleColumns, 'properties')}
-                      style={{ ...frozenStyle, width: `${Math.max(width, 105)}px`, minWidth: `${Math.max(width, 105)}px` }}
-                      className={`py-3 pl-3 pr-7 border-r border-slate-200 relative group bg-slate-100/95 select-none whitespace-nowrap overflow-hidden ${alignClass}`}
+                      style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
+                      className={`py-2 pl-2.5 pr-6 border-r border-slate-300 relative group bg-slate-100 select-none whitespace-normal break-words leading-tight ${alignClass}`}
                     >
-                      <div className={`flex items-center gap-1.5 w-full overflow-hidden ${
+                      <div className={`flex items-center gap-1 w-full ${
                         alignClass === 'text-right' ? 'justify-end' : alignClass === 'text-center' ? 'justify-center' : 'justify-start'
                       }`}>
                         {colId === 'actions' ? (
-                          <span className="truncate text-xs font-bold text-slate-700">{def.label}</span>
+                          <span className="text-xs font-bold text-slate-700 break-words leading-tight">{def.label}</span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => handleHeaderSort(colId)}
-                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                            className="group/btn flex items-center gap-1 min-w-0 max-w-full text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors text-left"
                             title={`Sort by ${def.label} (Click: Descending → Ascending → Clear)`}
                           >
                             <span className="truncate">{def.label}</span>

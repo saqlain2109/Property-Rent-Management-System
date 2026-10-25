@@ -27,11 +27,16 @@ const paymentAllocationSchema = new mongoose.Schema({
   allocatedAmount: {
     type: Number,
     required: true,
-    min: 0,
   },
   isAdvanceOrExcess: {
     type: Boolean,
     default: false,
+  },
+  contractNo: {
+    type: String,
+    trim: true,
+    default: '',
+    index: true,
   },
   notes: {
     type: String,

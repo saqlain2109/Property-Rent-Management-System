@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import API from '../services/api';
-import { Lock, User, ShieldCheck, KeyRound, ArrowLeft, Mail } from 'lucide-react';
+import { Lock, User, ShieldCheck, KeyRound, ArrowLeft, Mail, Eye, EyeOff, Sparkles } from 'lucide-react';
 
 export default function LoginModal({ onLoginSuccess, onSuccess, isSetupMode = false, isInitialSetup = false }) {
   const handleSuccess = onLoginSuccess || onSuccess || (() => {});
   const [isSetup, setIsSetup] = useState(isSetupMode || isInitialSetup);
   const [step, setStep] = useState('credentials'); // 'credentials' | '2fa'
 
-  // Credentials State - Clean and NOT pre-filled as requested
+  // Credentials State
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   // 2FA State
   const [twoFactorCode, setTwoFactorCode] = useState('');
@@ -172,15 +173,49 @@ export default function LoginModal({ onLoginSuccess, onSuccess, isSetupMode = fa
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
+
+              {!isSetup && (
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600 flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <div className="font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Default Admin Login:</span>
+                    </div>
+                    <div className="font-mono text-[11px] text-slate-500">
+                      User: <span className="font-semibold text-slate-700">admin</span> | Pass: <span className="font-semibold text-slate-700">AdminPassword123!</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsername('admin');
+                      setPassword('AdminPassword123!');
+                      setError('');
+                    }}
+                    className="shrink-0 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg border border-emerald-200 text-[11px] transition-colors"
+                  >
+                    Auto-Fill
+                  </button>
+                </div>
+              )}
 
               <button
                 type="submit"

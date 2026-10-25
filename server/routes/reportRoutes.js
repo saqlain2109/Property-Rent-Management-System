@@ -515,7 +515,12 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
     const startMonth = req.query.startMonth || req.query.fromMonth || null;
     const endMonth = req.query.endMonth || req.query.toMonth || null;
 
-    const properties = await Property.find().sort({ displayOrder: 1, name: 1 }).lean();
+    const propertyIdFilter = req.query.propertyId || null;
+    let propQuery = {};
+    if (propertyIdFilter) {
+      propQuery._id = propertyIdFilter;
+    }
+    const properties = await Property.find(propQuery).sort({ displayOrder: 1, name: 1 }).lean();
     const units = await Unit.find().sort({ unitName: 1 }).lean();
     const unitMap = {};
     const propUnitsMap = {};
@@ -589,13 +594,17 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
       });
     }
 
-    const allAvailableMonths = Array.from(allEverMonthsSet).sort();
-    let sortedMonths = [...allAvailableMonths];
+    // Ensure all 12 calendar months are generated for the selected year (or 2026 by default)
+    const activeYr = filterYear !== 'all' ? filterYear : '2026';
+    const year12Months = Array.from({ length: 12 }, (_, i) => `${activeYr}-${String(i + 1).padStart(2, '0')}`);
+    
+    // Combine existing recorded months with the 12 calendar months of activeYr
+    const allAvailableMonths = Array.from(new Set([...allEverMonthsSet, ...year12Months])).sort();
+    
+    let sortedMonths = filterYear !== 'all' 
+      ? year12Months 
+      : allAvailableMonths;
 
-    // Filter by year if specified
-    if (filterYear !== 'all') {
-      sortedMonths = sortedMonths.filter(m => m.startsWith(filterYear));
-    }
     // Filter by startMonth and endMonth range if specified
     if (startMonth) {
       sortedMonths = sortedMonths.filter(m => m >= startMonth);
@@ -605,7 +614,7 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
     }
 
     // Available years for dropdown
-    const allYearsSet = new Set();
+    const allYearsSet = new Set(['2026', '2025', '2024']);
     allAvailableMonths.forEach(m => {
       allYearsSet.add(m.split('-')[0]);
     });
@@ -674,6 +683,126 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
       };
     });
 
+    // Aggregate Expenses: Property-wise and Common
+    const expenses = await Expense.find({ isReversed: false }).lean();
+    const propertyExpenses = {};
+    const propertyExpenseCats = {};
+    const commonExpenses = {};
+    const commonExpenseCategories = {};
+
+    properties.forEach(p => {
+      propertyExpenses[p._id.toString()] = {};
+      propertyExpenseCats[p._id.toString()] = {};
+    });
+
+    expenses.forEach(e => {
+      const d = new Date(e.expenseDate);
+      const m = e.expenseMonth || (`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      const pid = e.propertyId ? e.propertyId.toString() : null;
+      const cat = e.category || 'Maintenance';
+      const amt = Number(e.amount) || 0;
+
+      if (pid && propertyExpenses[pid]) {
+        propertyExpenses[pid][m] = (propertyExpenses[pid][m] || 0) + amt;
+        if (!propertyExpenseCats[pid][cat]) {
+          propertyExpenseCats[pid][cat] = {};
+        }
+        propertyExpenseCats[pid][cat][m] = (propertyExpenseCats[pid][cat][m] || 0) + amt;
+      } else {
+        commonExpenses[m] = (commonExpenses[m] || 0) + amt;
+        if (!commonExpenseCategories[cat]) {
+          commonExpenseCategories[cat] = {};
+        }
+        commonExpenseCategories[cat][m] = (commonExpenseCategories[cat][m] || 0) + amt;
+      }
+    });
+
+    // Build expense rows for each property
+    const expenseRows = properties.map((p) => {
+      const pid = p._id.toString();
+      const pExpMap = propertyExpenses[pid] || {};
+      let propExpTotal = 0;
+      const monthlyExp = {};
+      sortedMonths.forEach(m => {
+        const val = pExpMap[m] || 0;
+        monthlyExp[m] = val;
+        propExpTotal += val;
+      });
+
+      const catList = Object.keys(propertyExpenseCats[pid] || {}).map(cat => {
+        const catMonthly = {};
+        let catTotal = 0;
+        sortedMonths.forEach(m => {
+          const val = propertyExpenseCats[pid][cat][m] || 0;
+          catMonthly[m] = val;
+          catTotal += val;
+        });
+        return {
+          category: cat,
+          expenses: catMonthly,
+          total: catTotal
+        };
+      });
+
+      return {
+        propertyId: p._id,
+        propertyName: p.name,
+        propertyCode: p.propertyCode,
+        expenses: monthlyExp,
+        total: propExpTotal,
+        categories: catList
+      };
+    });
+
+    // Build common expense data
+    const commonMonthly = {};
+    let commonTotal = 0;
+    sortedMonths.forEach(m => {
+      const val = commonExpenses[m] || 0;
+      commonMonthly[m] = val;
+      commonTotal += val;
+    });
+
+    const commonCategories = Object.keys(commonExpenseCategories).map(cat => {
+      const catMonthly = {};
+      let catTotal = 0;
+      sortedMonths.forEach(m => {
+        const val = commonExpenseCategories[cat][m] || 0;
+        catMonthly[m] = val;
+        catTotal += val;
+      });
+      return {
+        category: cat,
+        expenses: catMonthly,
+        total: catTotal
+      };
+    });
+
+    const commonExpenseData = {
+      title: 'Common / Other Expenses',
+      expenses: commonMonthly,
+      total: commonTotal,
+      categories: commonCategories
+    };
+
+    // Calculate Expense Column Totals & Grand Total Expenses
+    const expenseColumnTotals = {};
+    let grandTotalExpenses = 0;
+    sortedMonths.forEach(m => {
+      const propSum = properties.reduce((sum, p) => sum + (propertyExpenses[p._id.toString()]?.[m] || 0), 0);
+      const commVal = commonExpenses[m] || 0;
+      const colExp = propSum + commVal;
+      expenseColumnTotals[m] = colExp;
+      grandTotalExpenses += colExp;
+    });
+
+    // Calculate Net Difference (Earnings - Expenses)
+    const netDifference = {};
+    sortedMonths.forEach(m => {
+      netDifference[m] = (columnTotals[m] || 0) - (expenseColumnTotals[m] || 0);
+    });
+    const grandTotalDifference = grandTotal - grandTotalExpenses;
+
     res.json({
       success: true,
       basis,
@@ -686,7 +815,13 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
       monthLabels,
       rows,
       columnTotals,
-      grandTotal
+      grandTotal,
+      expenseRows,
+      commonExpenseData,
+      expenseColumnTotals,
+      grandTotalExpenses,
+      netDifference,
+      grandTotalDifference
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -715,7 +850,12 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
     const startMonth = req.query.startMonth || req.query.fromMonth || null;
     const endMonth = req.query.endMonth || req.query.toMonth || null;
 
-    const properties = await Property.find().sort({ displayOrder: 1, name: 1 }).lean();
+    const propertyIdFilter = req.query.propertyId || null;
+    let propQuery = {};
+    if (propertyIdFilter) {
+      propQuery._id = propertyIdFilter;
+    }
+    const properties = await Property.find(propQuery).sort({ displayOrder: 1, name: 1 }).lean();
     const units = await Unit.find().lean();
     const unitMap = {};
     units.forEach(u => { unitMap[u._id.toString()] = u; });
@@ -766,12 +906,31 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
       return d.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
     });
 
-    const header = ['#', 'Property Name', 'Property Code', ...monthHeaderLabels, 'Total'];
+    // Query expenses for full matrix report
+    const expenses = await Expense.find({ isReversed: false }).lean();
+    const propertyExpenses = {};
+    const commonExpenses = {};
+    properties.forEach(p => { propertyExpenses[p._id.toString()] = {}; });
+
+    expenses.forEach(e => {
+      const d = new Date(e.expenseDate);
+      const m = e.expenseMonth || (`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      const pid = e.propertyId ? e.propertyId.toString() : null;
+      const amt = Number(e.amount) || 0;
+      if (pid && propertyExpenses[pid]) {
+        propertyExpenses[pid][m] = (propertyExpenses[pid][m] || 0) + amt;
+      } else {
+        commonExpenses[m] = (commonExpenses[m] || 0) + amt;
+      }
+    });
+
+    const header = ['#', 'Property / Partition', ...monthHeaderLabels, 'Total'];
     const rangeInfo = (startMonth || endMonth) ? ` (Range: ${startMonth || 'Earliest'} to ${endMonth || 'Latest'})` : '';
     const sheetRows = [
-      [`MONTHLY PROPERTY EARNINGS MATRIX (${basis === 'allocatedMonth' ? 'Rent Month Allocated' : 'Collection Month'})${rangeInfo}`],
+      [`MONTHLY PROPERTY MATRIX - EARNINGS & EXPENSES (${basis === 'allocatedMonth' ? 'Rent Month Allocated' : 'Collection Month'})${rangeInfo}`],
       [`Generated: ${new Date().toISOString().split('T')[0]}`],
       [''],
+      ['', '1. RENT INCOME & EARNINGS', ...sortedMonths.map(() => ''), ''],
       header
     ];
 
@@ -794,19 +953,95 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
       sheetRows.push([
         idx + 1,
         p.name,
-        p.propertyCode,
         ...monthCols,
         rowTotal
       ]);
     });
 
-    // Last row: Total
+    // Subtotal row: Total Earnings
     sheetRows.push([
-      '',
+      'Σ',
       'TOTAL EARNINGS',
-      '',
       ...sortedMonths.map(m => colTotals[m]),
       grandTotal
+    ]);
+
+    // Section 2: EXPENSES
+    sheetRows.push(['']);
+    sheetRows.push(['', '2. EXPENSES', ...sortedMonths.map(() => ''), '']);
+    sheetRows.push(header);
+
+    const expColTotals = {};
+    sortedMonths.forEach(m => { expColTotals[m] = 0; });
+    let grandTotalExpenses = 0;
+
+    // Property-wise expenses
+    properties.forEach((p, idx) => {
+      const pid = p._id.toString();
+      const pExpMap = propertyExpenses[pid] || {};
+      let propExpTotal = 0;
+      const monthCols = sortedMonths.map(m => {
+        const val = pExpMap[m] || 0;
+        propExpTotal += val;
+        expColTotals[m] += val;
+        return val;
+      });
+      grandTotalExpenses += propExpTotal;
+
+      sheetRows.push([
+        idx + 1,
+        `${p.name} (Expenses)`,
+        ...monthCols,
+        propExpTotal
+      ]);
+    });
+
+    // Common expenses row
+    let commonTotal = 0;
+    const commonCols = sortedMonths.map(m => {
+      const val = commonExpenses[m] || 0;
+      commonTotal += val;
+      expColTotals[m] += val;
+      return val;
+    });
+    grandTotalExpenses += commonTotal;
+
+    sheetRows.push([
+      'C',
+      'Common / Other Expenses',
+      ...commonCols,
+      commonTotal
+    ]);
+
+    // Subtotal row: Total Expenses
+    sheetRows.push([
+      'Σ',
+      'TOTAL EXPENSES',
+      ...sortedMonths.map(m => expColTotals[m]),
+      grandTotalExpenses
+    ]);
+
+    // Section 3: NET DIFFERENCE
+    sheetRows.push(['']);
+    sheetRows.push([
+      'Δ',
+      'Difference',
+      ...sortedMonths.map(m => (colTotals[m] || 0) - (expColTotals[m] || 0)),
+      grandTotal - grandTotalExpenses
+    ]);
+
+    // Section 4: CUMULATIVE
+    let runningDiff = 0;
+    const cumulativeCols = sortedMonths.map(m => {
+      const diff = (colTotals[m] || 0) - (expColTotals[m] || 0);
+      runningDiff += diff;
+      return runningDiff;
+    });
+    sheetRows.push([
+      'Σ',
+      'Cumulative',
+      ...cumulativeCols,
+      grandTotal - grandTotalExpenses
     ]);
 
     const wb = XLSX.utils.book_new();
@@ -815,8 +1050,7 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
     // Auto column widths
     ws['!cols'] = [
       { wch: 6 },
-      { wch: 36 },
-      { wch: 18 },
+      { wch: 40 },
       ...sortedMonths.map(() => ({ wch: 16 })),
       { wch: 18 }
     ];
@@ -836,7 +1070,67 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
 // Returns underlying payment receipts/allocations contributing to a specific cell in the monthly matrix
 router.get('/monthly-drilldown', protect, async (req, res) => {
   try {
-    const { propertyId, unitId, month, basis = 'receiptDate', year = 'all', startMonth, endMonth } = req.query;
+    const { propertyId, unitId, month, basis = 'receiptDate', year = 'all', startMonth, endMonth, type, category } = req.query;
+
+    if (type === 'expense') {
+      const expQuery = { isReversed: false };
+      if (propertyId === '__COMMON__' || propertyId === 'null') {
+        expQuery.propertyId = null;
+      } else if (propertyId) {
+        expQuery.propertyId = propertyId;
+      }
+      if (category) {
+        expQuery.category = category;
+      }
+      if (month && month !== 'all') {
+        const [y, m] = month.split('-').map(Number);
+        const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+        const end = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
+        expQuery.$or = [
+          { expenseMonth: month },
+          { expenseDate: { $gte: start, $lte: end } }
+        ];
+      } else {
+        if (startMonth && endMonth) {
+          const [sy, sm] = startMonth.split('-').map(Number);
+          const [ey, em] = endMonth.split('-').map(Number);
+          const start = new Date(Date.UTC(sy, sm - 1, 1, 0, 0, 0));
+          const end = new Date(Date.UTC(ey, em, 0, 23, 59, 59, 999));
+          expQuery.expenseDate = { $gte: start, $lte: end };
+        } else if (year && year !== 'all') {
+          const y = Number(year);
+          const start = new Date(Date.UTC(y, 0, 1, 0, 0, 0));
+          const end = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
+          expQuery.expenseDate = { $gte: start, $lte: end };
+        }
+      }
+      const expenses = await Expense.find(expQuery).populate('propertyId', 'name propertyCode').sort({ expenseDate: -1 });
+      const records = expenses.map(e => ({
+        receiptId: e._id,
+        receiptNumber: e.expenseCode,
+        receiptDate: e.expenseDate,
+        expenseMonth: e.expenseMonth,
+        totalAmount: e.amount,
+        receiptTotalAmount: e.amount,
+        paymentMode: e.paymentMode,
+        category: e.category,
+        description: e.description,
+        vendorOrPayee: e.vendorOrPayee,
+        referenceNumber: e.referenceNumber,
+        comments: e.description ? `${e.category}: ${e.description}` : e.category,
+        tenant: { name: e.vendorOrPayee || '—' },
+        property: e.propertyId ? { name: e.propertyId.name, _id: e.propertyId._id } : { name: 'Common / Other' },
+        unit: null,
+        isExpense: true
+      }));
+      return res.json({
+        success: true,
+        property: propertyId && propertyId !== '__COMMON__' ? await Property.findById(propertyId).select('name propertyCode') : { name: 'Common / Other' },
+        records,
+        totalAmount: records.reduce((s, r) => s + r.totalAmount, 0),
+        count: records.length
+      });
+    }
 
     let targetUnits = [];
     let property = null;
@@ -1042,692 +1336,12 @@ router.get('/monthly-batch-entry', protect, async (req, res) => {
     const dStart = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
     const dEnd = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
 
-    const properties = await Property.find().sort({ displayOrder: 1, name: 1 }).lean();
-    const units = await Unit.find().populate('propertyId', 'name propertyCode').sort({ displayOrder: 1, unitName: 1 }).lean();
-
-    const assignments = await TenantAssignment.find({ status: 'Active' }).populate('tenantId', 'name').lean();
-    const unitTenantMap = {};
-    assignments.forEach(a => {
-      if (a.unitId) unitTenantMap[a.unitId.toString()] = a.tenantId;
-    });
-
-    const receipts = await PaymentReceipt.find({
-      receiptDate: { $gte: dStart, $lte: dEnd },
-      isReversed: false
-    }).populate('tenantId', 'name').lean();
-
-    const unitReceiptMap = {};
-    receipts.forEach(r => {
-      const uid = r.unitId?.toString();
-      if (uid) unitReceiptMap[uid] = r;
-    });
-
-    const rentGrid = units.map(u => {
-      const existingR = unitReceiptMap[u._id.toString()];
-      const tenant = existingR?.tenantId || unitTenantMap[u._id.toString()] || null;
-      return {
-        unitId: u._id,
-        unitName: u.subUnitPartition || u.unitName || u.unitNumber,
-        unitCode: u.unitCode,
-        propertyId: u.propertyId?._id,
-        propertyName: u.propertyId?.name,
-        propertyCode: u.propertyId?.propertyCode,
-        tenantId: tenant?._id || null,
-        tenantName: tenant?.name || '—',
-        amount: existingR?.totalAmount || 0,
-        receiptId: existingR?._id || null,
-        notes: existingR?.comments || ''
-      };
-    });
-
-    const expenses = await Expense.find({
-      $or: [
-        { expenseMonth: targetMonth },
-        { expenseDate: { $gte: dStart, $lte: dEnd } }
-      ],
-      isReversed: false
-    }).populate('propertyId', 'name propertyCode').lean();
-
-    const expenseGrid = expenses.map(e => ({
-      expenseId: e._id,
-      propertyId: e.propertyId?._id || null,
-      propertyName: e.propertyId?.name || 'General / Other',
-      category: e.category,
-      amount: e.amount,
-      description: e.description,
-      paymentMode: e.paymentMode || 'Cash'
-    }));
-
-    res.json({
-      success: true,
-      month: targetMonth,
-      properties,
-      rentGrid,
-      expenseGrid
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// @route POST /api/reports/monthly-batch-entry
-// Bulk saves/updates all rent and expense records for a selected month
-router.post('/monthly-batch-entry', protect, authorize('admin', 'manager'), async (req, res) => {
-  try {
-    const { month, rentEntries = [], expenseEntries = [] } = req.body;
-    if (!month) return res.status(400).json({ success: false, message: 'Month is required' });
-
-    const [y, m] = month.split('-').map(Number);
-    const receiptDate = new Date(Date.UTC(y, m - 1, 10));
-    const expenseDate = new Date(Date.UTC(y, m - 1, 15));
-
-    for (const r of rentEntries) {
-      const val = Number(r.amount || 0);
-      if (r.receiptId) {
-        if (val === 0) {
-          await PaymentAllocation.deleteMany({ receiptId: r.receiptId });
-          await PaymentReceipt.findByIdAndDelete(r.receiptId);
-        } else {
-          const rec = await PaymentReceipt.findById(r.receiptId);
-          if (rec) {
-            rec.totalAmount = val;
-            rec.comments = r.notes || rec.comments;
-            await rec.save();
-            await PaymentAllocation.updateMany({ receiptId: rec._id }, { allocatedAmount: val });
-          }
-        }
-      } else if (val > 0 && r.unitId) {
-        let tId = r.tenantId;
-        if (!tId) {
-          const fallbackTenant = await Tenant.findOne();
-          tId = fallbackTenant?._id;
-        }
-        const recNumber = `REC-${month.replace('-', '')}-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 1000)}`;
-        const newRec = await PaymentReceipt.create({
-          receiptNumber: recNumber,
-          receiptDate,
-          tenantId: tId,
-          unitId: r.unitId,
-          totalAmount: val,
-          paymentMode: r.paymentMode || 'Bank Transfer / NEFT / RTGS',
-          comments: r.notes || `Rent for ${month}`
-        });
-        await PaymentAllocation.create({
-          receiptId: newRec._id,
-          tenantId: tId,
-          unitId: r.unitId,
-          rentMonthYear: month,
-          allocatedAmount: val,
-          notes: r.notes || `Rent for ${month}`
-        });
-      }
+    const propertyIdFilter = req.query.propertyId || null;
+    let propQuery = {};
+    if (propertyIdFilter) {
+      propQuery._id = propertyIdFilter;
     }
-
-    for (const e of expenseEntries) {
-      const val = Number(e.amount || 0);
-      if (e.expenseId) {
-        if (val === 0) {
-          await Expense.findByIdAndDelete(e.expenseId);
-        } else {
-          const exp = await Expense.findById(e.expenseId);
-          if (exp) {
-            exp.amount = val;
-            exp.category = e.category || exp.category;
-            exp.description = e.description || exp.description;
-            if (e.propertyId !== undefined) exp.propertyId = e.propertyId || null;
-            await exp.save();
-          }
-        }
-      } else if (val > 0) {
-        const expCode = `EXP-${month.replace('-', '')}-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 1000)}`;
-        await Expense.create({
-          expenseCode: expCode,
-          expenseDate,
-          expenseMonth: month,
-          propertyId: e.propertyId || null,
-          category: e.category || 'Maintenance',
-          amount: val,
-          description: e.description || `Expense for ${month}`,
-          paymentMode: e.paymentMode || 'Bank Transfer'
-        });
-      }
-    }
-
-    await syncMonthlyLedgers();
-
-    res.json({
-      success: true,
-      message: `Successfully saved month data for ${month}`
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// @route GET /api/reports/monthly-property-earnings
-// Returns matrix of all properties with monthly earnings as columns, plus row totals and column totals
-router.get('/monthly-property-earnings', protect, async (req, res) => {
-  try {
-    const basis = req.query.basis === 'allocatedMonth' ? 'allocatedMonth' : 'receiptDate';
-    const filterYear = req.query.year || 'all';
-    const startMonth = req.query.startMonth || req.query.fromMonth || null;
-    const endMonth = req.query.endMonth || req.query.toMonth || null;
-
-    const properties = await Property.find().sort({ displayOrder: 1, name: 1 }).lean();
-    const units = await Unit.find().sort({ unitName: 1 }).lean();
-    const unitMap = {};
-    const propUnitsMap = {};
-
-    properties.forEach(p => {
-      propUnitsMap[p._id.toString()] = [];
-    });
-
-    units.forEach(u => {
-      unitMap[u._id.toString()] = u;
-      const pid = u.propertyId?.toString();
-      if (propUnitsMap[pid]) {
-        propUnitsMap[pid].push(u);
-      }
-    });
-
-    const reversedReceiptIds = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
-
-    // Aggregate data according to basis
-    const allEverMonthsSet = new Set();
-    const propertyEarnings = {};
-    const unitEarnings = {};
-
-    properties.forEach(p => {
-      propertyEarnings[p._id.toString()] = {};
-    });
-    units.forEach(u => {
-      unitEarnings[u._id.toString()] = {};
-    });
-
-    if (basis === 'allocatedMonth') {
-      const allocations = await PaymentAllocation.find({
-        receiptId: { $nin: reversedReceiptIds }
-      }).lean();
-
-      allocations.forEach(a => {
-        const m = a.rentMonthYear;
-        if (!m) return;
-        allEverMonthsSet.add(m);
-
-        const uid = a.unitId?.toString();
-        const u = unitMap[uid];
-        if (uid && unitEarnings[uid]) {
-          unitEarnings[uid][m] = (unitEarnings[uid][m] || 0) + (a.allocatedAmount || 0);
-        }
-        if (u && u.propertyId && propertyEarnings[u.propertyId.toString()]) {
-          propertyEarnings[u.propertyId.toString()][m] = 
-            (propertyEarnings[u.propertyId.toString()][m] || 0) + (a.allocatedAmount || 0);
-        }
-      });
-    } else {
-      // Default: basis === 'receiptDate'
-      const receipts = await PaymentReceipt.find({
-        isReversed: false
-      }).lean();
-
-      receipts.forEach(r => {
-        const d = new Date(r.receiptDate);
-        const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        allEverMonthsSet.add(m);
-
-        const uid = r.unitId?.toString();
-        const u = unitMap[uid];
-        if (uid && unitEarnings[uid]) {
-          unitEarnings[uid][m] = (unitEarnings[uid][m] || 0) + (r.totalAmount || 0);
-        }
-        if (u && u.propertyId && propertyEarnings[u.propertyId.toString()]) {
-          propertyEarnings[u.propertyId.toString()][m] = 
-            (propertyEarnings[u.propertyId.toString()][m] || 0) + (r.totalAmount || 0);
-        }
-      });
-    }
-
-    const allAvailableMonths = Array.from(allEverMonthsSet).sort();
-    let sortedMonths = [...allAvailableMonths];
-
-    // Filter by year if specified
-    if (filterYear !== 'all') {
-      sortedMonths = sortedMonths.filter(m => m.startsWith(filterYear));
-    }
-    // Filter by startMonth and endMonth range if specified
-    if (startMonth) {
-      sortedMonths = sortedMonths.filter(m => m >= startMonth);
-    }
-    if (endMonth) {
-      sortedMonths = sortedMonths.filter(m => m <= endMonth);
-    }
-
-    // Available years for dropdown
-    const allYearsSet = new Set();
-    allAvailableMonths.forEach(m => {
-      allYearsSet.add(m.split('-')[0]);
-    });
-    const availableYears = Array.from(allYearsSet).sort().reverse();
-
-    // Build row structures based on filtered sortedMonths
-    const columnTotals = {};
-    sortedMonths.forEach(m => { columnTotals[m] = 0; });
-    let grandTotal = 0;
-
-    const rows = properties.map(p => {
-      const pid = p._id.toString();
-      const pEarnMap = propertyEarnings[pid] || {};
-      let propTotal = 0;
-
-      const monthlyValues = {};
-      sortedMonths.forEach(m => {
-        const val = pEarnMap[m] || 0;
-        monthlyValues[m] = val;
-        propTotal += val;
-        columnTotals[m] += val;
-      });
-
-      grandTotal += propTotal;
-
-      const childUnits = (propUnitsMap[pid] || []).map(u => {
-        const uid = u._id.toString();
-        const uEarnMap = unitEarnings[uid] || {};
-        let uTotal = 0;
-        const uMonthly = {};
-        sortedMonths.forEach(m => {
-          const val = uEarnMap[m] || 0;
-          uMonthly[m] = val;
-          uTotal += val;
-        });
-
-        return {
-          unitId: u._id,
-          unitName: u.subUnitPartition || u.unitName || u.unitNumber,
-          unitCode: u.unitCode,
-          occupancyStatus: u.occupancyStatus,
-          earnings: uMonthly,
-          total: uTotal
-        };
-      });
-
-      return {
-        propertyId: p._id,
-        propertyName: p.name,
-        propertyCode: p.propertyCode,
-        displayOrder: p.displayOrder,
-        propertyType: p.propertyType,
-        address: p.address,
-        earnings: monthlyValues,
-        total: propTotal,
-        units: childUnits
-      };
-    });
-
-    const monthLabels = sortedMonths.map(m => {
-      const [y, mm] = m.split('-');
-      const d = new Date(Date.UTC(Number(y), Number(mm) - 1, 1));
-      return {
-        key: m,
-        label: d.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
-      };
-    });
-
-    res.json({
-      success: true,
-      basis,
-      filterYear,
-      startMonth,
-      endMonth,
-      availableYears,
-      availableMonths: allAvailableMonths,
-      months: sortedMonths,
-      monthLabels,
-      rows,
-      columnTotals,
-      grandTotal
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// @route GET /api/reports/export-monthly-property-matrix
-// Exports the monthly property earnings matrix directly into an Excel (.xlsx) file
-router.get('/export-monthly-property-matrix', protect, async (req, res) => {
-  try {
-    const basis = req.query.basis === 'allocatedMonth' ? 'allocatedMonth' : 'receiptDate';
-    const filterYear = req.query.year || 'all';
-    const startMonth = req.query.startMonth || req.query.fromMonth || null;
-    const endMonth = req.query.endMonth || req.query.toMonth || null;
-
-    const properties = await Property.find().sort({ displayOrder: 1, name: 1 }).lean();
-    const units = await Unit.find().lean();
-    const unitMap = {};
-    units.forEach(u => { unitMap[u._id.toString()] = u; });
-
-    const reversedReceiptIds = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
-    const allMonthsSet = new Set();
-    const propertyEarnings = {};
-    properties.forEach(p => { propertyEarnings[p._id.toString()] = {}; });
-
-    if (basis === 'allocatedMonth') {
-      const allocations = await PaymentAllocation.find({ receiptId: { $nin: reversedReceiptIds } }).lean();
-      allocations.forEach(a => {
-        const m = a.rentMonthYear;
-        if (!m) return;
-        allMonthsSet.add(m);
-        const u = unitMap[a.unitId?.toString()];
-        if (u && u.propertyId && propertyEarnings[u.propertyId.toString()]) {
-          propertyEarnings[u.propertyId.toString()][m] = (propertyEarnings[u.propertyId.toString()][m] || 0) + (a.allocatedAmount || 0);
-        }
-      });
-    } else {
-      const receipts = await PaymentReceipt.find({ isReversed: false }).lean();
-      receipts.forEach(r => {
-        const d = new Date(r.receiptDate);
-        const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        allMonthsSet.add(m);
-        const u = unitMap[r.unitId?.toString()];
-        if (u && u.propertyId && propertyEarnings[u.propertyId.toString()]) {
-          propertyEarnings[u.propertyId.toString()][m] = (propertyEarnings[u.propertyId.toString()][m] || 0) + (r.totalAmount || 0);
-        }
-      });
-    }
-
-    let sortedMonths = Array.from(allMonthsSet).sort();
-    if (filterYear !== 'all') {
-      sortedMonths = sortedMonths.filter(m => m.startsWith(filterYear));
-    }
-    if (startMonth) {
-      sortedMonths = sortedMonths.filter(m => m >= startMonth);
-    }
-    if (endMonth) {
-      sortedMonths = sortedMonths.filter(m => m <= endMonth);
-    }
-
-    const monthHeaderLabels = sortedMonths.map(m => {
-      const [y, mm] = m.split('-');
-      const d = new Date(Date.UTC(Number(y), Number(mm) - 1, 1));
-      return d.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-    });
-
-    const header = ['#', 'Property Name', 'Property Code', ...monthHeaderLabels, 'Total'];
-    const rangeInfo = (startMonth || endMonth) ? ` (Range: ${startMonth || 'Earliest'} to ${endMonth || 'Latest'})` : '';
-    const sheetRows = [
-      [`MONTHLY PROPERTY EARNINGS MATRIX (${basis === 'allocatedMonth' ? 'Rent Month Allocated' : 'Collection Month'})${rangeInfo}`],
-      [`Generated: ${new Date().toISOString().split('T')[0]}`],
-      [''],
-      header
-    ];
-
-    const colTotals = {};
-    sortedMonths.forEach(m => { colTotals[m] = 0; });
-    let grandTotal = 0;
-
-    properties.forEach((p, idx) => {
-      const pid = p._id.toString();
-      const pEarnMap = propertyEarnings[pid] || {};
-      let rowTotal = 0;
-      const monthCols = sortedMonths.map(m => {
-        const val = pEarnMap[m] || 0;
-        rowTotal += val;
-        colTotals[m] += val;
-        return val;
-      });
-      grandTotal += rowTotal;
-
-      sheetRows.push([
-        idx + 1,
-        p.name,
-        p.propertyCode,
-        ...monthCols,
-        rowTotal
-      ]);
-    });
-
-    // Last row: Total
-    sheetRows.push([
-      '',
-      'TOTAL EARNINGS',
-      '',
-      ...sortedMonths.map(m => colTotals[m]),
-      grandTotal
-    ]);
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(sheetRows);
-
-    // Auto column widths
-    ws['!cols'] = [
-      { wch: 6 },
-      { wch: 36 },
-      { wch: 18 },
-      ...sortedMonths.map(() => ({ wch: 16 })),
-      { wch: 18 }
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Monthly Earnings');
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const filenameSuffix = (startMonth || endMonth) ? `${startMonth || 'start'}_to_${endMonth || 'end'}` : filterYear;
-    res.setHeader('Content-Disposition', `attachment; filename="Monthly_Property_Earnings_${filenameSuffix}.xlsx"`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// @route GET /api/reports/monthly-drilldown
-// Returns underlying payment receipts/allocations contributing to a specific cell in the monthly matrix
-router.get('/monthly-drilldown', protect, async (req, res) => {
-  try {
-    const { propertyId, unitId, month, basis = 'receiptDate', year = 'all', startMonth, endMonth } = req.query;
-
-    let targetUnits = [];
-    let property = null;
-    let unit = null;
-
-    if (unitId) {
-      unit = await Unit.findById(unitId).populate('propertyId', 'name propertyCode');
-      if (unit) {
-        targetUnits = [unit._id];
-        property = unit.propertyId;
-      }
-    } else if (propertyId) {
-      property = await Property.findById(propertyId).select('name propertyCode');
-      const units = await Unit.find({ propertyId: property._id });
-      targetUnits = units.map(u => u._id);
-    }
-
-    const reversedReceiptIds = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
-    let records = [];
-
-    if (basis === 'allocatedMonth') {
-      const allocQuery = {
-        receiptId: { $nin: reversedReceiptIds }
-      };
-      if (targetUnits.length > 0) {
-        allocQuery.unitId = { $in: targetUnits };
-      }
-      if (month && month !== 'all') {
-        allocQuery.rentMonthYear = month;
-      } else if (startMonth && endMonth) {
-        allocQuery.rentMonthYear = { $gte: startMonth, $lte: endMonth };
-      } else if (startMonth) {
-        allocQuery.rentMonthYear = { $gte: startMonth };
-      } else if (endMonth) {
-        allocQuery.rentMonthYear = { $lte: endMonth };
-      } else if (year && year !== 'all') {
-        allocQuery.rentMonthYear = { $regex: `^${year}` };
-      }
-
-      const allocations = await PaymentAllocation.find(allocQuery)
-        .populate({
-          path: 'receiptId',
-          populate: [
-            { path: 'tenantId', select: 'name tenantCode phone' },
-            { path: 'unitId', populate: { path: 'propertyId', select: 'name propertyCode' } }
-          ]
-        })
-        .sort({ rentMonthYear: -1, createdAt: -1 });
-
-      // Group or format
-      for (const a of allocations) {
-        const r = a.receiptId;
-        if (!r) continue;
-        const allRAllocs = await PaymentAllocation.find({ receiptId: r._id });
-        records.push({
-          allocationId: a._id,
-          receiptId: r._id,
-          receiptNumber: r.receiptNumber,
-          receiptDate: r.receiptDate,
-          rentMonthYear: a.rentMonthYear,
-          allocatedAmount: a.allocatedAmount,
-          receiptTotalAmount: r.totalAmount,
-          paymentMode: r.paymentMode,
-          referenceNumber: r.referenceNumber || '',
-          bankName: r.bankName || '',
-          comments: a.notes || r.comments || '',
-          tenant: r.tenantId,
-          unit: r.unitId,
-          property: r.unitId?.propertyId || property,
-          allocations: allRAllocs.map(al => ({
-            _id: al._id,
-            rentMonthYear: al.rentMonthYear,
-            allocatedAmount: al.allocatedAmount,
-            notes: al.notes
-          }))
-        });
-      }
-    } else {
-      // Basis: receiptDate
-      const receiptQuery = {
-        isReversed: false
-      };
-      if (targetUnits.length > 0) {
-        receiptQuery.unitId = { $in: targetUnits };
-      }
-      if (month && month !== 'all') {
-        const [y, m] = month.split('-').map(Number);
-        const dStart = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
-        const dEnd = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
-        receiptQuery.receiptDate = { $gte: dStart, $lte: dEnd };
-      } else if (startMonth || endMonth) {
-        let dStart, dEnd;
-        if (startMonth) {
-          const [sy, sm] = startMonth.split('-').map(Number);
-          dStart = new Date(Date.UTC(sy, sm - 1, 1, 0, 0, 0));
-        }
-        if (endMonth) {
-          const [ey, em] = endMonth.split('-').map(Number);
-          dEnd = new Date(Date.UTC(ey, em, 0, 23, 59, 59, 999));
-        }
-        if (dStart && dEnd) {
-          receiptQuery.receiptDate = { $gte: dStart, $lte: dEnd };
-        } else if (dStart) {
-          receiptQuery.receiptDate = { $gte: dStart };
-        } else if (dEnd) {
-          receiptQuery.receiptDate = { $lte: dEnd };
-        }
-      } else if (year && year !== 'all') {
-        const y = Number(year);
-        const dStart = new Date(Date.UTC(y, 0, 1, 0, 0, 0));
-        const dEnd = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
-        receiptQuery.receiptDate = { $gte: dStart, $lte: dEnd };
-      }
-
-      const receipts = await PaymentReceipt.find(receiptQuery)
-        .populate('tenantId', 'name tenantCode phone')
-        .populate({
-          path: 'unitId',
-          populate: { path: 'propertyId', select: 'name propertyCode' }
-        })
-        .sort({ receiptDate: -1, createdAt: -1 });
-
-      const receiptIds = receipts.map(r => r._id);
-      const allAllocations = await PaymentAllocation.find({ receiptId: { $in: receiptIds } });
-      const allocMap = {};
-      allAllocations.forEach(a => {
-        const rid = a.receiptId.toString();
-        if (!allocMap[rid]) allocMap[rid] = [];
-        allocMap[rid].push({
-          _id: a._id,
-          rentMonthYear: a.rentMonthYear,
-          allocatedAmount: a.allocatedAmount,
-          notes: a.notes
-        });
-      });
-
-      records = receipts.map(r => {
-        const rid = r._id.toString();
-        return {
-          receiptId: r._id,
-          receiptNumber: r.receiptNumber,
-          receiptDate: r.receiptDate,
-          receiptTotalAmount: r.totalAmount,
-          paymentMode: r.paymentMode,
-          referenceNumber: r.referenceNumber || '',
-          bankName: r.bankName || '',
-          comments: r.comments || '',
-          tenant: r.tenantId,
-          unit: r.unitId,
-          property: r.unitId?.propertyId || property,
-          allocations: allocMap[rid] || []
-        };
-      });
-    }
-
-    const totalAmount = records.reduce((sum, item) => {
-      const val = basis === 'allocatedMonth' ? (item.allocatedAmount || 0) : (item.receiptTotalAmount || 0);
-      return sum + val;
-    }, 0);
-
-    let title = 'Drill-Down Details';
-    if (unit) {
-      title = `${unit.subUnitPartition || unit.unitName} (${unit.propertyId?.name || ''})`;
-    } else if (property) {
-      title = property.name;
-    } else {
-      title = 'All Properties Portfolio';
-    }
-
-    let subtitle = '';
-    if (month && month !== 'all') {
-      const [y, mm] = month.split('-');
-      const d = new Date(Date.UTC(Number(y), Number(mm) - 1, 1));
-      const mLabel = d.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-      subtitle = `${mLabel} · ${basis === 'allocatedMonth' ? 'Rent Month (Allocated)' : 'Collection Month (Receipt Date)'}`;
-    } else {
-      subtitle = `All Months · ${basis === 'allocatedMonth' ? 'Rent Month (Allocated)' : 'Collection Month (Receipt Date)'}`;
-    }
-
-    res.json({
-      success: true,
-      title,
-      subtitle,
-      basis,
-      month,
-      property,
-      unit,
-      count: records.length,
-      totalAmount,
-      records
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// @route GET /api/reports/monthly-batch-entry
-// Pre-fills all properties & units (for rent) and expenses for the selected month
-router.get('/monthly-batch-entry', protect, async (req, res) => {
-  try {
-    const targetMonth = req.query.month || getCurrentMonthYear();
-    const [y, m] = targetMonth.split('-').map(Number);
-    const dStart = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
-    const dEnd = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
-
-    const properties = await Property.find().sort({ displayOrder: 1, name: 1 }).lean();
+    const properties = await Property.find(propQuery).sort({ displayOrder: 1, name: 1 }).lean();
     const units = await Unit.find().populate('propertyId', 'name propertyCode').sort({ displayOrder: 1, unitName: 1 }).lean();
 
     const assignments = await TenantAssignment.find({ status: 'Active' }).populate('tenantId', 'name').lean();
