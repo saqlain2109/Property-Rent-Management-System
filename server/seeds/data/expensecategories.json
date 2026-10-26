@@ -1,0 +1,262 @@
+[
+  {
+    "_id": "6adb7308d86fb0bfcce54e86",
+    "name": "Maintenance",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:28.495Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.452Z"
+  },
+  {
+    "_id": "6adb7308d86fb0bfcce54e87",
+    "name": "Electricity & Utilities",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:28.545Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.454Z"
+  },
+  {
+    "_id": "6adb7308d86fb0bfcce54e88",
+    "name": "Repairs & Renovation",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:28.661Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.456Z"
+  },
+  {
+    "_id": "6adb7308d86fb0bfcce54e89",
+    "name": "Sweeper & Cleaning",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:28.709Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.457Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e8a",
+    "name": "Water Charges",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:28.891Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.459Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e8b",
+    "name": "Property Rent Paid",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.135Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.461Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e8c",
+    "name": "Deposit Refund",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.232Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.462Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e8d",
+    "name": "Property Tax",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.334Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.464Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e8e",
+    "name": "Other expenses",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.424Z",
+    "description": "",
+    "headType": "Property",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.465Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e8f",
+    "name": "MOM",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.511Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.466Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e90",
+    "name": "Margaret",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.636Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.467Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e91",
+    "name": "Islamic & Zakat",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.700Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.468Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e92",
+    "name": "Zakat",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.742Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.469Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e93",
+    "name": "Sadka",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.833Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.470Z"
+  },
+  {
+    "_id": "6adb7309d86fb0bfcce54e94",
+    "name": "Send to dubai",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:29.947Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.471Z"
+  },
+  {
+    "_id": "6adb730ad86fb0bfcce54e96",
+    "name": "Donations",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:30.052Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.473Z"
+  },
+  {
+    "_id": "6adb730ad86fb0bfcce54e97",
+    "name": "Miscellaneous",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:30.775Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.474Z"
+  },
+  {
+    "_id": "6adb730ad86fb0bfcce54e9a",
+    "name": "Akbar",
+    "__v": 0,
+    "createdAt": "2026-10-23T14:45:30.829Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.478Z"
+  },
+  {
+    "_id": "6adc85b09b4f7c8779f615ab",
+    "name": "Micelleneous",
+    "headType": "Property",
+    "description": "",
+    "isDefault": false,
+    "createdAt": "2026-10-24T10:17:20.906Z",
+    "updatedAt": "2026-10-24T10:17:20.906Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adc93809b4f7c8779f615af",
+    "name": "Loan",
+    "headType": "Other",
+    "description": "",
+    "isDefault": false,
+    "createdAt": "2026-10-24T11:16:16.894Z",
+    "updatedAt": "2026-10-25T16:39:10.479Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ade30aed86fb0bfcce54ed8",
+    "name": "IT Fees",
+    "__v": 0,
+    "createdAt": "2026-10-25T16:39:10.472Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.472Z"
+  },
+  {
+    "_id": "6ade30aed86fb0bfcce54ed9",
+    "name": "Miscellaneous exp",
+    "__v": 0,
+    "createdAt": "2026-10-25T16:39:10.476Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.476Z"
+  },
+  {
+    "_id": "6ade30aed86fb0bfcce54eda",
+    "name": "Micellaneous Expenses",
+    "__v": 0,
+    "createdAt": "2026-10-25T16:39:10.477Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.477Z"
+  },
+  {
+    "_id": "6ade30aed86fb0bfcce54edb",
+    "name": "Loan asgar Bhati",
+    "__v": 0,
+    "createdAt": "2026-10-25T16:39:10.480Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.480Z"
+  },
+  {
+    "_id": "6ade30aed86fb0bfcce54edc",
+    "name": "Loan give to Gafoor",
+    "__v": 0,
+    "createdAt": "2026-10-25T16:39:10.481Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.481Z"
+  },
+  {
+    "_id": "6ade30aed86fb0bfcce54edd",
+    "name": "Other",
+    "__v": 0,
+    "createdAt": "2026-10-25T16:39:10.482Z",
+    "description": "",
+    "headType": "Other",
+    "isDefault": true,
+    "updatedAt": "2026-10-25T16:39:10.482Z"
+  }
+]
