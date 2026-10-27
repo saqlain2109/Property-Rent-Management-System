@@ -16,7 +16,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.407Z",
     "updatedAt": "2026-10-23T06:58:48.407Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-01"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa99",
@@ -35,7 +36,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.409Z",
     "updatedAt": "2026-10-23T06:58:48.409Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-01"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9a",
@@ -54,7 +56,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.409Z",
     "updatedAt": "2026-10-23T06:58:48.409Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-01"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9b",
@@ -73,7 +76,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.411Z",
     "updatedAt": "2026-10-23T06:58:48.411Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-01"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9c",
@@ -92,7 +96,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.412Z",
     "updatedAt": "2026-10-23T06:58:48.412Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-01"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9d",
@@ -111,7 +116,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.414Z",
     "updatedAt": "2026-10-23T06:58:48.414Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-02"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9e",
@@ -130,7 +136,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.417Z",
     "updatedAt": "2026-10-23T06:58:48.417Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9f",
@@ -149,7 +156,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.419Z",
     "updatedAt": "2026-10-23T06:58:48.419Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa0",
@@ -168,7 +176,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.420Z",
     "updatedAt": "2026-10-23T06:58:48.420Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa1",
@@ -187,7 +196,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.421Z",
     "updatedAt": "2026-10-23T06:58:48.421Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa2",
@@ -206,7 +216,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.422Z",
     "updatedAt": "2026-10-23T06:58:48.422Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa3",
@@ -225,7 +236,8 @@
     "reversalReason": "",
     "createdAt": "2026-10-23T06:58:48.423Z",
     "updatedAt": "2026-10-23T06:58:48.423Z",
-    "__v": 0
+    "__v": 0,
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb14208783148b24ac163a",

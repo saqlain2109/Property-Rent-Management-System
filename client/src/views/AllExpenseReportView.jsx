@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import * as XLSX from 'xlsx';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import ApexToolbar from '../components/ApexToolbar';
 import {
   getHeaderDragProps,
@@ -112,8 +112,11 @@ const getExpenseFieldVal = (e, colId) => {
   switch (colId) {
     case 'index': return '';
     case 'expenseDate': return e.expenseDate ? formatDate(e.expenseDate) : '';
-    case 'expenseMonthYear': return e.expenseMonthYear || '';
-    case 'expenseCode': return e.expenseCode || '';
+    case 'expenseMonthYear': {
+      const rawM = e.expenseMonth || e.expenseMonthYear || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : '');
+      return rawM ? formatMonthYear(rawM) : '';
+    }
+    case 'expenseCode': return e.expenseCode || e.legacyCode || '';
     case 'headType': return isOther ? 'Other' : 'Property';
     case 'property': return e.propertyId?.name || (isOther ? 'Other / General' : '');
     case 'propertyCode': return e.propertyId?.propertyCode || '';
@@ -225,8 +228,11 @@ export default function AllExpenseReportView() {
 
   const filterSuggestions = useMemo(() => {
     return {
-      expenseCode: extractUniqueValues(expenses, e => e.expenseCode),
-      expenseMonthYear: extractUniqueValues(expenses, e => e.expenseMonthYear),
+      expenseCode: extractUniqueValues(expenses, e => e.expenseCode || e.legacyCode),
+      expenseMonthYear: extractUniqueValues(expenses, e => {
+        const rawM = e.expenseMonth || e.expenseMonthYear || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : '');
+        return rawM ? formatMonthYear(rawM) : '';
+      }),
       headType: ['Property', 'Other'],
       property: extractUniqueValues(expenses, e => e.propertyId?.name || (e.headType === 'Other' || e.headType === 'Common' ? 'Other / General' : '')),
       propertyCode: extractUniqueValues(expenses, e => e.propertyId?.propertyCode),
@@ -253,10 +259,11 @@ export default function AllExpenseReportView() {
     if (search.trim()) {
       const q = search.toLowerCase().trim();
       rows = rows.filter(e => {
-        const code = (e.expenseCode || '').toLowerCase();
-        const m = (e.expenseMonthYear || '').toLowerCase();
+        const code = (e.expenseCode || e.legacyCode || '').toLowerCase();
+        const rawM = e.expenseMonth || e.expenseMonthYear || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : '');
+        const m = (rawM ? `${rawM} ${formatMonthYear(rawM)}` : '').toLowerCase();
         const hType = (e.headType || '').toLowerCase();
-        const prop = (e.propertyId?.name || (e.headType === 'Common' ? 'Common / All' : '')).toLowerCase();
+        const prop = (e.propertyId?.name || (e.headType === 'Other' || e.headType === 'Common' ? 'Other / General' : '')).toLowerCase();
         const unit = (e.unitId?.subUnitPartition || e.unitId?.unitName || '').toLowerCase();
         const cat = (e.category || '').toLowerCase();
         const payee = (e.vendorOrPayee || '').toLowerCase();
@@ -273,7 +280,6 @@ export default function AllExpenseReportView() {
           cat.includes(q) ||
           payee.includes(q) ||
           mode.includes(q) ||
-          ref.includes(q) ||
           desc.includes(q) ||
           amt.includes(q)
         );
@@ -296,6 +302,9 @@ export default function AllExpenseReportView() {
         if (key === 'amount') return Number(item.amount) || 0;
         if (['expenseDate', 'createdAt', 'updatedAt'].includes(key)) {
           return item[key] ? new Date(item[key]).getTime() : 0;
+        }
+        if (key === 'expenseMonthYear') {
+          return item.expenseMonth || item.expenseMonthYear || (item.expenseDate ? new Date(item.expenseDate).toISOString().slice(0, 7) : '');
         }
         return getExpenseFieldVal(item, key);
       });
@@ -342,7 +351,7 @@ export default function AllExpenseReportView() {
     setEditForm({
       expenseCode: e.expenseCode || '',
       expenseDate: e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      expenseMonth: e.expenseMonthYear || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : ''),
+      expenseMonth: e.expenseMonth || e.expenseMonthYear || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : ''),
       headType: e.headType || (e.propertyId ? 'Property' : 'Common'),
       propertyId: e.propertyId?._id || e.propertyId || '',
       unitId: e.unitId?._id || e.unitId || '',
@@ -367,7 +376,7 @@ export default function AllExpenseReportView() {
       const payload = {
         expenseCode: editForm.expenseCode ? editForm.expenseCode.trim() : undefined,
         expenseDate: editForm.expenseDate,
-        expenseMonth: editForm.expenseMonth || editForm.expenseDate.slice(0, 7),
+        expenseMonth: editForm.expenseMonth || (editForm.expenseDate ? editForm.expenseDate.slice(0, 7) : ''),
         headType: isOther ? 'Other' : 'Property',
         propertyId: isOther ? null : (editForm.propertyId || null),
         unitId: isOther ? null : (editForm.unitId || null),
@@ -586,9 +595,13 @@ export default function AllExpenseReportView() {
                         }
 
                         if (colId === 'expenseMonthYear') {
+                          const m = e.expenseMonth || e.expenseMonthYear || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : '');
                           return (
-                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 whitespace-nowrap font-mono font-semibold text-slate-800">
-                              {e.expenseMonthYear || '—'}
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 whitespace-nowrap text-xs font-semibold text-slate-800 text-center">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 text-rose-800 border border-rose-200/60 font-bold">
+                                <Calendar className="w-3 h-3 text-rose-600" />
+                                {m ? formatMonthYear(m) : '—'}
+                              </span>
                             </td>
                           );
                         }

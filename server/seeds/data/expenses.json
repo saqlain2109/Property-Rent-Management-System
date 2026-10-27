@@ -14,7 +14,8 @@
     "createdAt": "2026-10-23T06:58:48.417Z",
     "updatedAt": "2026-10-25T16:39:10.492Z",
     "__v": 0,
-    "headType": "Property"
+    "headType": "Property",
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfa9f",
@@ -31,7 +32,8 @@
     "createdAt": "2026-10-23T06:58:48.419Z",
     "updatedAt": "2026-10-25T16:39:10.492Z",
     "__v": 0,
-    "headType": "Property"
+    "headType": "Property",
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa0",
@@ -48,7 +50,8 @@
     "createdAt": "2026-10-23T06:58:48.420Z",
     "updatedAt": "2026-10-25T16:39:10.492Z",
     "__v": 0,
-    "headType": "Property"
+    "headType": "Property",
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa1",
@@ -65,7 +68,8 @@
     "createdAt": "2026-10-23T06:58:48.421Z",
     "updatedAt": "2026-10-25T16:39:10.497Z",
     "__v": 0,
-    "headType": "Other"
+    "headType": "Other",
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa2",
@@ -82,7 +86,8 @@
     "createdAt": "2026-10-23T06:58:48.422Z",
     "updatedAt": "2026-10-25T16:39:10.497Z",
     "__v": 0,
-    "headType": "Other"
+    "headType": "Other",
+    "expenseMonth": "2026-03"
   },
   {
     "_id": "6adb05a80fc1b8508a9dfaa3",

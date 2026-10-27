@@ -43,11 +43,21 @@ router.get('/', protect, async (req, res) => {
     const expenses = await Expense.find(query)
       .populate('propertyId')
       .populate('unitId')
-      .sort({ expenseDate: -1 });
+      .sort({ expenseDate: -1 })
+      .lean();
 
-    const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const formattedExpenses = expenses.map(e => {
+      const expMonth = e.expenseMonth || (e.expenseDate ? new Date(e.expenseDate).toISOString().slice(0, 7) : '');
+      return {
+        ...e,
+        expenseMonth: expMonth,
+        expenseMonthYear: expMonth
+      };
+    });
 
-    res.json({ success: true, count: expenses.length, totalAmount, data: expenses });
+    const totalAmount = formattedExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    res.json({ success: true, count: formattedExpenses.length, totalAmount, data: formattedExpenses });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
