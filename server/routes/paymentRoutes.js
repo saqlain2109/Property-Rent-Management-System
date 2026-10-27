@@ -416,7 +416,13 @@ router.post('/', protect, authorize('admin', 'manager'), [
   body('unitId').isMongoId().withMessage('Valid unit ID is required'),
   body('receiptDate').isISO8601().withMessage('Valid receipt date is required'),
   body('totalAmount').isNumeric().withMessage('Total amount must be a number'),
-  body('allocations').isArray({ min: 1 }).withMessage('At least one month allocation is required')
+  body('allocations').custom((val, { req }) => {
+    if (Number(req.body.totalAmount || 0) === 0) return true;
+    if (!Array.isArray(val) || val.length === 0) {
+      throw new Error('At least one month allocation is required when amount is greater than 0');
+    }
+    return true;
+  })
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -497,7 +503,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
 
       await PaymentAllocation.deleteMany({ receiptId: existingReceipt._id });
       const createdAllocations = [];
-      for (const alloc of allocations) {
+      for (const alloc of (allocations || [])) {
         const created = await PaymentAllocation.create({
           receiptId: existingReceipt._id,
           tenantId: finalTenantId,
@@ -562,7 +568,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
     });
 
     const createdAllocations = [];
-    for (const alloc of allocations) {
+    for (const alloc of (allocations || [])) {
       const created = await PaymentAllocation.create({
         receiptId: receipt._id,
         tenantId: finalTenantId,
@@ -602,7 +608,13 @@ router.post('/', protect, authorize('admin', 'manager'), [
 router.put('/:id', protect, authorize('admin', 'manager'), [
   body('receiptDate').optional().isISO8601().withMessage('Valid receipt date is required'),
   body('totalAmount').optional().isNumeric().withMessage('Total amount must be a number'),
-    body('allocations').optional().isArray({ min: 1 }).withMessage('At least one month allocation is required')
+  body('allocations').optional().custom((val, { req }) => {
+    if (Number(req.body.totalAmount || 0) === 0) return true;
+    if (!Array.isArray(val)) {
+      throw new Error('Allocations must be an array');
+    }
+    return true;
+  })
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

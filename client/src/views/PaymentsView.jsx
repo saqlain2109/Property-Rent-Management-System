@@ -415,6 +415,12 @@ export default function PaymentsView() {
       }
     }
 
+    // If payment amount is zero or payment was removed, no month is paid for
+    const paidAmt = Number(rec?.totalAmount ?? rec?.rentAmount ?? item?.rentAmountPaid ?? item?.actualPaidForMonth ?? 0);
+    if (paidAmt === 0 && (!rec || Number(rec.totalAmount) === 0)) {
+      return [];
+    }
+
     return [targetMonth];
   };
 
@@ -423,7 +429,7 @@ export default function PaymentsView() {
       accountingMonth: [formatMonthYear(selectedMonth)],
       paidForMonth: extractUniqueValues(outstandingData, d => {
         const mList = resolveSelectedMonthsForItem(d, selectedMonth);
-        return mList.map(m => formatMonthYear(m)).join(', ');
+        return mList.length > 0 ? mList.map(m => formatMonthYear(m)).join(', ') : 'None';
       }),
       tenant: extractUniqueValues(outstandingData, d => d.tenant?.name),
       property: extractUniqueValues(outstandingData, d => d.property?.name),
@@ -720,11 +726,11 @@ export default function PaymentsView() {
       ? Number(existingReceipt.depositAmount)
       : 0;
 
-    const defaultTotal = paidThisMonth > 0 ? String(paidThisMonth) : '';
+    const defaultTotal = paidThisMonth > 0 ? String(paidThisMonth) : '0';
     const defaultDeposit = existingDeposit > 0 ? String(existingDeposit) : '0';
     const defaultRent = existingRent !== null
-      ? (existingRent > 0 ? String(existingRent) : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : ''))
-      : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : '');
+      ? String(existingRent)
+      : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : '0');
 
     const rowStatus = existingReceipt?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
     const initialSelectedMonths = resolveSelectedMonthsForItem(item, selectedMonth, existingReceipt);
@@ -813,7 +819,6 @@ export default function PaymentsView() {
     const currentMonths = current.selectedMonths || [];
     let nextMonths;
     if (currentMonths.includes(monthStr)) {
-      if (currentMonths.length === 1) return; // keep at least 1 month
       nextMonths = currentMonths.filter(m => m !== monthStr);
     } else {
       nextMonths = [...currentMonths, monthStr].sort();
@@ -832,10 +837,12 @@ export default function PaymentsView() {
       }
     });
 
+    const depNum = Number(current.depositAmount) || 0;
     updateRowDraft(rowKey, {
       ...current,
       selectedMonths: nextMonths,
-      amount: totalAmt
+      rentAmount: String(totalAmt),
+      amount: String(totalAmt + depNum)
     }, item);
   };
 
@@ -2544,11 +2551,15 @@ export default function PaymentsView() {
                                       <div className="flex items-center gap-1.5 truncate">
                                         <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 shrink-0" />
                                         <span className="truncate font-bold text-slate-800">
-                                          {selMonths.map((m) => {
-                                            const isAct = m === selectedMonth;
-                                            const isAdv = m > selectedMonth;
-                                            return `${formatMonthYear(m)}${isAdv ? ' (Adv)' : !isAct ? ' (Due)' : ''}`;
-                                          }).join(', ')}
+                                          {selMonths.length === 0 ? (
+                                            <span className="text-slate-400 font-normal italic">— (None)</span>
+                                          ) : (
+                                            selMonths.map((m) => {
+                                              const isAct = m === selectedMonth;
+                                              const isAdv = m > selectedMonth;
+                                              return `${formatMonthYear(m)}${isAdv ? ' (Adv)' : !isAct ? ' (Due)' : ''}`;
+                                            }).join(', ')
+                                          )}
                                         </span>
                                       </div>
                                       <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-slate-700 shrink-0 ml-1" />
@@ -4267,6 +4278,16 @@ export default function PaymentsView() {
           assignments={assignments}
           backButtonLabel="Back to Rent & Payment"
           onSuccess={async () => {
+            const rowKey = paymentModalItem ? getRowKey(paymentModalItem) : null;
+            if (rowKey) {
+              setRowDrafts(prev => {
+                const next = { ...prev };
+                delete next[rowKey];
+                return next;
+              });
+            } else {
+              setRowDrafts({});
+            }
             handleClosePaymentModal();
             await fetchData(selectedMonth, { silent: true });
           }}

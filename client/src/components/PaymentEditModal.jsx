@@ -272,8 +272,8 @@ export default function PaymentEditModal({
           }
         }
 
-        // If no prior allocations found, default to activeMonth
-        if (Object.keys(initialMap).length === 0) {
+        // If no prior allocations found, default to activeMonth only if rent paid is greater than 0
+        if (Object.keys(initialMap).length === 0 && recRent > 0) {
           initialMap[activeMonth] = recRent;
         }
 
@@ -442,6 +442,10 @@ export default function PaymentEditModal({
   // Helper to distribute rent amount across active selected months
   const distributeRentAcrossMonths = (enteredRentNum) => {
     if (isNaN(enteredRentNum) || enteredRentNum < 0) return;
+    if (enteredRentNum === 0) {
+      setSelectedMonthsMap({});
+      return;
+    }
     const activeMonths = Object.keys(selectedMonthsMap).sort();
     if (activeMonths.length === 1) {
       setSelectedMonthsMap({ [activeMonths[0]]: enteredRentNum });
@@ -623,6 +627,26 @@ export default function PaymentEditModal({
         if (receipt?._id && receipt._id !== targetReceiptId) {
           try {
             await API.delete(`/payments/${receipt._id}`);
+          } catch (e) {}
+        }
+
+        // Also check if any existing receipt for this unit & month is in the system and delete it
+        if (unitId) {
+          try {
+            const checkRes = await API.get(`/payments?unitId=${unitId}`);
+            if (checkRes.data?.success && Array.isArray(checkRes.data.data)) {
+              const matched = checkRes.data.data.filter(r =>
+                !r.isReversed &&
+                (r.accountingMonth === targetMonth ||
+                 (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) ||
+                 r.allocations?.some(a => a.rentMonthYear === targetMonth))
+              );
+              for (const m of matched) {
+                try {
+                  await API.delete(`/payments/${m._id}`);
+                } catch (e) {}
+              }
+            }
           } catch (e) {}
         }
 
@@ -1355,6 +1379,16 @@ export default function PaymentEditModal({
                         title="Select All Unpaid Months"
                       >
                         Select All
+                      </button>
+                    )}
+                    {Object.keys(selectedMonthsMap).length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearMonthSelection}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer transition-all"
+                        title="Deselect All Months (Set to ₹0)"
+                      >
+                        Deselect All
                       </button>
                     )}
                   </div>
