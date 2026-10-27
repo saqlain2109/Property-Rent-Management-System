@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PropertyMonthlyMatrixReport from './PropertyMonthlyMatrixReport';
 import MonthWiseReportView from './MonthWiseReportView';
+import RentReportView from './RentReportView';
 import AllIncomeReportView from './AllIncomeReportView';
 import AllExpenseReportView from './AllExpenseReportView';
 import LedgerView from './LedgerView';
@@ -17,7 +18,16 @@ const REPORT_OPTIONS = [
     label: 'Month wise Report', 
     shortLabel: 'Month wise Report',
     icon: Table, 
-    desc: 'Property-wise earnings matrix with monthly columns, drilldown edit, batch entries, and Excel export' 
+    desc: 'Property-wise earnings matrix based on accounting month, with monthly columns, drilldown edit, batch entries, and Excel export' 
+  },
+  { 
+    id: 'rent_report', 
+    sidebarId: 'reports_rent',
+    label: 'Rent report', 
+    shortLabel: 'Rent report',
+    icon: Table, 
+    badge: 'Month Paid For',
+    desc: 'Property-wise rent matrix based on month paid for, with monthly columns, drilldown edit, and Excel export' 
   },
   { 
     id: 'all_income', 
@@ -196,6 +206,7 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
       {/* Render Active Report */}
       <div>
         {activeTab === 'month_wise' && <MonthWiseReportView />}
+        {activeTab === 'rent_report' && <RentReportView />}
         {activeTab === 'all_income' && <AllIncomeReportView />}
         {activeTab === 'all_expense' && <AllExpenseReportView />}
         {activeTab === 'property_matrix' && <PropertyMonthlyMatrixReport />}

@@ -21,7 +21,7 @@ export default function Sidebar({
 }) {
   const sidebarRef = useRef(null);
   const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'contracts', 'expense_heads', 'pg'].includes(currentTab);
-  const isReportsTab = ['ledger_reports', 'month_wise_report', 'monthly', 'reports_month_wise', 'reports_all_income', 'reports_all_expense', 'reports_matrix', 'reports_summary', 'reports_statement', 'reports_ledger', 'reports_export'].includes(currentTab);
+  const isReportsTab = ['ledger_reports', 'month_wise_report', 'monthly', 'reports_month_wise', 'rent_report', 'reports_rent', 'reports_all_income', 'reports_all_expense', 'reports_matrix', 'reports_summary', 'reports_statement', 'reports_ledger', 'reports_export'].includes(currentTab);
   
   const [mastersExpanded, setMastersExpanded] = useState(true);
   const [reportsExpanded, setReportsExpanded] = useState(true);
@@ -112,7 +112,8 @@ export default function Sidebar({
   ];
 
   const reportsSubItems = [
-    { id: 'reports_month_wise', label: 'Month wise Report', icon: Table, badge: 'New' },
+    { id: 'reports_month_wise', label: 'Month wise Report', icon: Table },
+    { id: 'reports_rent',       label: 'Rent report', icon: Table, badge: 'Paid For' },
     { id: 'reports_all_income', label: 'All Income', icon: TrendingUp },
     { id: 'reports_all_expense', label: 'All Expense', icon: TrendingDown },
     { id: 'reports_matrix',     label: 'Property Monthly Matrix', icon: FileSpreadsheet, badge: 'Sheet 1' },
@@ -368,7 +369,7 @@ export default function Sidebar({
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="text-[10px] bg-slate-700/60 text-slate-300 px-1.5 py-0.5 rounded-full font-medium">
-                      4
+                      {reportsSubItems.length}
                     </span>
                     {reportsExpanded ? (
                       <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -384,6 +385,7 @@ export default function Sidebar({
                     {reportsSubItems.map((sub) => {
                       const isSubActive = currentTab === sub.id || 
                         (sub.id === 'reports_month_wise' && (currentTab === 'month_wise_report' || currentTab === 'monthly')) ||
+                        (sub.id === 'reports_rent' && currentTab === 'rent_report') ||
                         (sub.id === 'reports_matrix' && currentTab === 'ledger_reports');
                       const SubIcon = sub.icon;
                       return (
@@ -418,7 +420,7 @@ export default function Sidebar({
                 <button
                   type="button"
                   onClick={() => setShowReportsFlyout(!showReportsFlyout)}
-                  title="Reports (Month wise, Property Matrix, Ledger, Export)"
+                  title="Reports (Month wise, Rent Report, Property Matrix, Ledger, Export)"
                   className={`w-full flex items-center justify-center px-2 py-2.5 rounded-2xl transition-all group ${
                     isReportsTab
                       ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/25'
@@ -436,6 +438,7 @@ export default function Sidebar({
                     {reportsSubItems.map((sub) => {
                       const isSubActive = currentTab === sub.id || 
                         (sub.id === 'reports_month_wise' && (currentTab === 'month_wise_report' || currentTab === 'monthly')) ||
+                        (sub.id === 'reports_rent' && currentTab === 'rent_report') ||
                         (sub.id === 'reports_matrix' && currentTab === 'ledger_reports');
                       const SubIcon = sub.icon;
                       return (

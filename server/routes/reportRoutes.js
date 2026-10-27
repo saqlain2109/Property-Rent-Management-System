@@ -570,14 +570,20 @@ router.get('/monthly-property-earnings', protect, async (req, res) => {
         }
       });
     } else {
-      // Default: basis === 'receiptDate'
+      // Month Wise Report: populated based on accountingMonth (with fallback to receiptDate)
       const receipts = await PaymentReceipt.find({
         isReversed: false
       }).lean();
 
       receipts.forEach(r => {
-        const d = new Date(r.receiptDate);
-        const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        let m = r.accountingMonth;
+        if (!m && r.receiptDate) {
+          const d = new Date(r.receiptDate);
+          if (!isNaN(d.getTime())) {
+            m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          }
+        }
+        if (!m) return;
         allEverMonthsSet.add(m);
 
         const uid = r.unitId?.toString();
@@ -877,8 +883,14 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
     } else {
       const receipts = await PaymentReceipt.find({ isReversed: false }).lean();
       receipts.forEach(r => {
-        const d = new Date(r.receiptDate);
-        const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        let m = r.accountingMonth;
+        if (!m && r.receiptDate) {
+          const d = new Date(r.receiptDate);
+          if (!isNaN(d.getTime())) {
+            m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          }
+        }
+        if (!m) return;
         allMonthsSet.add(m);
         const u = unitMap[r.unitId?.toString()];
         if (u && u.propertyId && propertyEarnings[u.propertyId.toString()]) {
@@ -925,7 +937,7 @@ router.get('/export-monthly-property-matrix', protect, async (req, res) => {
     const header = ['#', 'Property / Partition', ...monthHeaderLabels, 'Total'];
     const rangeInfo = (startMonth || endMonth) ? ` (Range: ${startMonth || 'Earliest'} to ${endMonth || 'Latest'})` : '';
     const sheetRows = [
-      [`MONTHLY PROPERTY MATRIX - EARNINGS & EXPENSES (${basis === 'allocatedMonth' ? 'Rent Month Allocated' : 'Collection Month'})${rangeInfo}`],
+      [`${basis === 'allocatedMonth' ? 'RENT REPORT (Month Paid For)' : 'MONTH WISE REPORT (Accounting Month)'} - EARNINGS & EXPENSES${rangeInfo}`],
       [`Generated: ${new Date().toISOString().split('T')[0]}`],
       [''],
       ['', '1. RENT INCOME & EARNINGS', ...sortedMonths.map(() => ''), ''],
@@ -1206,7 +1218,7 @@ router.get('/monthly-drilldown', protect, async (req, res) => {
         });
       }
     } else {
-      // Basis: receiptDate
+      // Basis: accountingMonth / receiptDate
       const receiptQuery = {
         isReversed: false
       };
@@ -1217,29 +1229,54 @@ router.get('/monthly-drilldown', protect, async (req, res) => {
         const [y, m] = month.split('-').map(Number);
         const dStart = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
         const dEnd = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
-        receiptQuery.receiptDate = { $gte: dStart, $lte: dEnd };
+        receiptQuery.$or = [
+          { accountingMonth: month },
+          {
+            $and: [
+              { accountingMonth: { $in: [null, ''] } },
+              { receiptDate: { $gte: dStart, $lte: dEnd } }
+            ]
+          }
+        ];
       } else if (startMonth || endMonth) {
         let dStart, dEnd;
+        const conds = [];
         if (startMonth) {
           const [sy, sm] = startMonth.split('-').map(Number);
           dStart = new Date(Date.UTC(sy, sm - 1, 1, 0, 0, 0));
+          conds.push({
+            $or: [
+              { accountingMonth: { $gte: startMonth } },
+              { $and: [{ accountingMonth: { $in: [null, ''] } }, { receiptDate: { $gte: dStart } }] }
+            ]
+          });
         }
         if (endMonth) {
           const [ey, em] = endMonth.split('-').map(Number);
           dEnd = new Date(Date.UTC(ey, em, 0, 23, 59, 59, 999));
+          conds.push({
+            $or: [
+              { accountingMonth: { $lte: endMonth } },
+              { $and: [{ accountingMonth: { $in: [null, ''] } }, { receiptDate: { $lte: dEnd } }] }
+            ]
+          });
         }
-        if (dStart && dEnd) {
-          receiptQuery.receiptDate = { $gte: dStart, $lte: dEnd };
-        } else if (dStart) {
-          receiptQuery.receiptDate = { $gte: dStart };
-        } else if (dEnd) {
-          receiptQuery.receiptDate = { $lte: dEnd };
+        if (conds.length > 0) {
+          receiptQuery.$and = conds;
         }
       } else if (year && year !== 'all') {
         const y = Number(year);
         const dStart = new Date(Date.UTC(y, 0, 1, 0, 0, 0));
         const dEnd = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
-        receiptQuery.receiptDate = { $gte: dStart, $lte: dEnd };
+        receiptQuery.$or = [
+          { accountingMonth: { $regex: `^${year}-` } },
+          {
+            $and: [
+              { accountingMonth: { $in: [null, ''] } },
+              { receiptDate: { $gte: dStart, $lte: dEnd } }
+            ]
+          }
+        ];
       }
 
       const receipts = await PaymentReceipt.find(receiptQuery)
@@ -1304,9 +1341,9 @@ router.get('/monthly-drilldown', protect, async (req, res) => {
       const [y, mm] = month.split('-');
       const d = new Date(Date.UTC(Number(y), Number(mm) - 1, 1));
       const mLabel = d.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-      subtitle = `${mLabel} · ${basis === 'allocatedMonth' ? 'Rent Month (Allocated)' : 'Collection Month (Receipt Date)'}`;
+      subtitle = `${mLabel} · ${basis === 'allocatedMonth' ? 'Month Paid For (Rent Month)' : 'Accounting Month'}`;
     } else {
-      subtitle = `All Months · ${basis === 'allocatedMonth' ? 'Rent Month (Allocated)' : 'Collection Month (Receipt Date)'}`;
+      subtitle = `All Months · ${basis === 'allocatedMonth' ? 'Month Paid For (Rent Month)' : 'Accounting Month'}`;
     }
 
     res.json({

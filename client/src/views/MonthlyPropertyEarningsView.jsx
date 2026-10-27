@@ -20,8 +20,26 @@ import {
   useTableAutoWrap 
 } from '../components/ColumnManager';
 
-export default function MonthlyPropertyEarningsView() {
-  const [basis, setBasis] = useState('receiptDate'); // 'receiptDate' | 'allocatedMonth'
+export default function MonthlyPropertyEarningsView({
+  mode = 'month_wise', // 'month_wise' | 'rent_report'
+  initialBasis,        // optional override: 'receiptDate' | 'allocatedMonth'
+  reportTitle,
+  reportSubtitle,
+  storagePrefix,
+  excelFilenamePrefix
+} = {}) {
+  const defaultBasis = initialBasis || (mode === 'rent_report' ? 'allocatedMonth' : 'receiptDate');
+  const [basis, setBasis] = useState(defaultBasis);
+
+  useEffect(() => {
+    if (initialBasis) {
+      setBasis(initialBasis);
+    } else {
+      setBasis(mode === 'rent_report' ? 'allocatedMonth' : 'receiptDate');
+    }
+  }, [mode, initialBasis]);
+
+  const prefix = storagePrefix || (mode === 'rent_report' ? 'rent_report' : 'month_wise_report');
   const [selectedYear, setSelectedYear] = useState('2026');
   const [startMonth, setStartMonth] = useState('');
   const [endMonth, setEndMonth] = useState('');
@@ -46,7 +64,7 @@ export default function MonthlyPropertyEarningsView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
-  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('month_wise_report_freeze_v2', 0);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns(`${prefix}_freeze_v2`, 0);
   const [activeViewId, setActiveViewId] = useState(null);
   const [reportFilters, setReportFilters] = useState([]);
   const [visibleColumns, setVisibleColumns] = useState([]);
@@ -89,7 +107,7 @@ export default function MonthlyPropertyEarningsView() {
     handleResizeStart,
     resetColumnWidths,
     hasCustomWidths
-  } = useResizableColumns('month_wise_report_widths_v2', defaultWidths);
+  } = useResizableColumns(`${prefix}_widths_v2`, defaultWidths);
 
   const { autoWrap } = useTableAutoWrap();
   const [columnFilters, setColumnFilters] = useState({});
@@ -212,7 +230,8 @@ export default function MonthlyPropertyEarningsView() {
       const link = document.createElement('a');
       link.href = url;
       const fileSuffix = (startMonth || endMonth) ? `${startMonth || 'start'}_to_${endMonth || 'end'}` : selectedYear;
-      link.setAttribute('download', `Monthly_Property_Matrix_${basis}_${fileSuffix}.xlsx`);
+      const fileBase = excelFilenamePrefix || (mode === 'rent_report' ? 'Rent_Report_Month_Paid_For' : 'Month_Wise_Report_Accounting_Month');
+      link.setAttribute('download', `${fileBase}_${fileSuffix}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -546,9 +565,9 @@ export default function MonthlyPropertyEarningsView() {
 
         <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Accounting Basis</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Basis</span>
             <span className="text-xs font-black text-slate-800">
-              {basis === 'receiptDate' ? 'Cash Received' : 'Rent Accrual'}
+              {basis === 'allocatedMonth' || mode === 'rent_report' ? 'Month Paid For' : 'Accounting Month'}
             </span>
           </div>
           <span className="p-1.5 rounded-lg bg-purple-50 text-purple-600">
@@ -562,7 +581,7 @@ export default function MonthlyPropertyEarningsView() {
         {loading ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 py-20 text-center">
             <RefreshCw className="w-8 h-8 text-teal-600 animate-spin mx-auto mb-3" />
-            <p className="text-sm font-semibold text-slate-600">Loading Month wise Report Matrix...</p>
+            <p className="text-sm font-semibold text-slate-600">Loading {reportTitle || (mode === 'rent_report' ? 'Rent Report' : 'Month wise Report')} Matrix...</p>
           </div>
         ) : !data || !data.rows || data.rows.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 py-16 text-center text-slate-400 space-y-2">
@@ -593,7 +612,7 @@ export default function MonthlyPropertyEarningsView() {
               activeViewName={activeViewId}
               onViewChange={setActiveViewId}
               onExport={handleDownloadExcel}
-              storageKey="month_wise_report_v2"
+              storageKey={`${prefix}_v2`}
             />
 
           {/* Table Container with Freeze Header Scroll Constraint */}
