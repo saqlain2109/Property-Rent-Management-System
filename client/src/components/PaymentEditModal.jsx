@@ -50,6 +50,7 @@ export default function PaymentEditModal({
     tenantId: '',
     unitId: '',
     contractNo: '',
+    receiptNumber: '',
     receiptDate: new Date().toISOString().split('T')[0],
     accountingMonth: activeMonth,
     rentAmount: '',
@@ -242,6 +243,7 @@ export default function PaymentEditModal({
           tenantId: tenantId || '',
           unitId: unitId || '',
           contractNo: recData?.contractNo || activeContract,
+          receiptNumber: recData?.receiptNumber || item?.receiptNumber || '',
           receiptDate: receiptDateStr,
           accountingMonth: recData?.accountingMonth || activeMonth,
           rentAmount: String(recRent),
@@ -729,6 +731,7 @@ export default function PaymentEditModal({
         tenantId: isVacant ? null : paymentForm.tenantId,
         unitId: paymentForm.unitId || selectedTenantInfo?.unitId,
         contractNo: isVacant ? '' : (paymentForm.contractNo || ''),
+        receiptNumber: paymentForm.receiptNumber !== undefined ? paymentForm.receiptNumber.trim() : undefined,
         receiptDate: paymentForm.receiptDate,
         accountingMonth: paymentForm.accountingMonth || activeMonth,
         monthPaidFor: allocations.map(a => a.rentMonthYear).join(', ') || paymentForm.accountingMonth || activeMonth,
@@ -1109,6 +1112,20 @@ export default function PaymentEditModal({
                     </div>
                   );
                 })()}
+              </div>
+
+              {/* RECEIPT NUMBER */}
+              <div className="pt-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Receipt Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="Receipt # (e.g. REC-2026-00012 or Leave empty for auto)"
+                  value={paymentForm.receiptNumber || ''}
+                  onChange={(e) => setPaymentForm(f => ({ ...f, receiptNumber: e.target.value }))}
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-mono font-bold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 shadow-2xs"
+                />
               </div>
 
               {/* PAYMENT DATE */}

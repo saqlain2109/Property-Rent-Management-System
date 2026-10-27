@@ -497,6 +497,9 @@ router.post('/', protect, authorize('admin', 'manager'), [
       if (comments !== undefined) existingReceipt.comments = comments;
       existingReceipt.accountingMonth = targetAccountingMonth;
       existingReceipt.monthPaidFor = finalMonthPaidFor;
+      if (req.body.receiptNumber && req.body.receiptNumber.trim()) {
+        existingReceipt.receiptNumber = req.body.receiptNumber.trim();
+      }
       if (req.body.adjustmentAmount !== undefined) existingReceipt.adjustmentAmount = Number(req.body.adjustmentAmount) || 0;
       if (req.body.adjustmentDescription !== undefined) existingReceipt.adjustmentDescription = req.body.adjustmentDescription || '';
       await existingReceipt.save();
@@ -547,7 +550,9 @@ router.post('/', protect, authorize('admin', 'manager'), [
     }
 
     // No existing receipt: create new with collision-proof receipt number
-    const receiptNumber = await getNextReceiptNumber(receiptDate);
+    const receiptNumber = (req.body.receiptNumber && req.body.receiptNumber.trim()) 
+      ? req.body.receiptNumber.trim() 
+      : await getNextReceiptNumber(receiptDate);
 
     const receipt = await PaymentReceipt.create({
       receiptNumber,
