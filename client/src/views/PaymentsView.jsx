@@ -13,8 +13,29 @@ import {
   RotateCcw, CheckCircle2, Eye, Sparkles, Clock, X,
   Edit2, Filter, Layers, ListFilter, Trash2,
   Calendar, ChevronLeft, ChevronRight, Download, Check,
-  IndianRupee, ArrowRight, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Building2
+  IndianRupee, ArrowRight, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Building2,
+  Tag, TrendingUp, Wallet
 } from 'lucide-react';
+
+const EXPENSE_CATEGORY_COLORS = {
+  'Maintenance': 'bg-blue-100 text-blue-700 border-blue-200',
+  'Electricity & Utilities': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'Repairs & Renovation': 'bg-orange-100 text-orange-700 border-orange-200',
+  'Sweeper & Cleaning': 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  'Property Rent Paid': 'bg-purple-100 text-purple-700 border-purple-200',
+  'Deposit Refund': 'bg-teal-100 text-teal-700 border-teal-200',
+  'Water Charges': 'bg-sky-100 text-sky-700 border-sky-200',
+  'Property Tax': 'bg-rose-100 text-rose-700 border-rose-200',
+  'MOM': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  'Miscellaneous': 'bg-slate-100 text-slate-700 border-slate-200',
+  'Zakat': 'bg-amber-100 text-amber-800 border-amber-200',
+  'Sadka': 'bg-lime-100 text-lime-800 border-lime-200',
+  'Margaret': 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200',
+  'Other': 'bg-gray-100 text-gray-700 border-gray-200',
+  'Repair': 'bg-orange-100 text-orange-700 border-orange-200',
+  'Cleaning': 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  'Security': 'bg-indigo-100 text-indigo-700 border-indigo-200',
+};
 
 const RENT_SHEET_COLUMNS_DEF = [
   { id: 'index', label: '#', defaultVisible: true },
@@ -263,6 +284,22 @@ export default function PaymentsView() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [expandedPropertyExpenses, setExpandedPropertyExpenses] = useState({});
   const [expandedCommonExpenses, setExpandedCommonExpenses] = useState({});
+
+  // Dedicated Lower Section Expense Table State
+  const [expenseRowDrafts, setExpenseRowDrafts] = useState({});
+  const [savingExpenseRows, setSavingExpenseRows] = useState({});
+  const [savedExpenseFeedback, setSavedExpenseFeedback] = useState({});
+  const [editingExpenseLineId, setEditingExpenseLineId] = useState(null);
+  const [editingExpenseLineData, setEditingExpenseLineData] = useState({});
+  const [expenseSectionPropFilter, setExpenseSectionPropFilter] = useState('');
+  const [expenseSectionSearch, setExpenseSectionSearch] = useState('');
+
+  // Clear expense drafts on month change
+  useEffect(() => {
+    setExpenseRowDrafts({});
+    setEditingExpenseLineId(null);
+    setEditingExpenseLineData({});
+  }, [selectedMonth]);
 
   // Filters with localStorage persistence
   const [search, setSearch] = useState(() => {
@@ -1795,6 +1832,231 @@ export default function PaymentsView() {
     return (prevMonthBalance || 0) + monthDifference;
   }, [prevMonthBalance, monthDifference]);
 
+  // Dedicated Lower Section Expense Helpers & Data
+  const isGeneralCommonProperty = (propId) => {
+    if (propId === '__COMMON__' || propId === '__OTHER_EXPENSES__') return true;
+    if (!propId) return true;
+    const prop = properties.find(p => String(p._id) === String(propId));
+    if (!prop) return false;
+    return prop.propertyCode === 'PROP-COMMON' || prop.propertyType === 'General / Common' || prop.name?.toLowerCase().includes('general common');
+  };
+
+  const isExpenseOther = (expense) => {
+    if (!expense) return false;
+    if (expense.headType === 'Other' || expense.headType === 'Common') return true;
+    if (expense.headType === 'Property') return false;
+    if (!expense.propertyId) return true;
+    const pId = expense.propertyId?._id || expense.propertyId;
+    return isGeneralCommonProperty(pId);
+  };
+
+  const propertyCategories = React.useMemo(() => {
+    const cats = expenseCategories
+      .filter(c => c.headType !== 'Common' && c.headType !== 'Other')
+      .map(c => c.name);
+    return cats.length > 0 ? cats : [
+      'Maintenance',
+      'Electricity & Utilities',
+      'Repairs & Renovation',
+      'Sweeper & Cleaning',
+      'Property Rent Paid',
+      'Deposit Refund',
+      'Water Charges',
+      'Property Tax',
+      'Other'
+    ];
+  }, [expenseCategories]);
+
+  const commonCategories = React.useMemo(() => {
+    const cats = expenseCategories
+      .filter(c => c.headType === 'Common' || c.headType === 'Other')
+      .map(c => c.name);
+    return cats.length > 0 ? cats : [
+      'MOM',
+      'Miscellaneous',
+      'Zakat',
+      'Sadka',
+      'Margaret',
+      'Other'
+    ];
+  }, [expenseCategories]);
+
+  const orderedExpenseGridProperties = React.useMemo(() => {
+    const regularProps = properties
+      .filter(p => !isGeneralCommonProperty(p._id))
+      .slice()
+      .sort((a, b) => {
+        const ordA = a.displayOrder !== undefined && a.displayOrder !== null ? a.displayOrder : 9999;
+        const ordB = b.displayOrder !== undefined && b.displayOrder !== null ? b.displayOrder : 9999;
+        if (ordA !== ordB) return ordA - ordB;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+    const commonProp = properties.find(p => isGeneralCommonProperty(p._id));
+    const commonItem = commonProp || {
+      _id: '__COMMON__',
+      name: 'General & Common Expenses',
+      propertyCode: 'PROP-COMMON',
+      displayOrder: 99
+    };
+
+    return [...regularProps, commonItem];
+  }, [properties]);
+
+  const filteredExpenseProperties = React.useMemo(() => {
+    return orderedExpenseGridProperties.filter(prop => {
+      const propKey = String(prop._id || '__COMMON__');
+      const isCommon = isGeneralCommonProperty(propKey);
+
+      if (expenseSectionPropFilter) {
+        if (expenseSectionPropFilter === '__COMMON__' && !isCommon) return false;
+        if (expenseSectionPropFilter !== '__COMMON__' && propKey !== expenseSectionPropFilter) return false;
+      }
+
+      if (expenseSectionSearch?.trim()) {
+        const q = expenseSectionSearch.trim().toLowerCase();
+        const pName = (isCommon ? 'General & Common Expenses' : prop.name || '').toLowerCase();
+        const pCode = (prop.propertyCode || '').toLowerCase();
+        const matchesProp = pName.includes(q) || pCode.includes(q);
+
+        const propExpenses = monthExpenses.filter(e => {
+          if (isCommon) return isExpenseOther(e);
+          return String(e.propertyId?._id || e.propertyId) === String(prop._id);
+        });
+
+        const matchesExpense = propExpenses.some(e =>
+          (e.description || '').toLowerCase().includes(q) ||
+          (e.category || '').toLowerCase().includes(q) ||
+          (e.vendorOrPayee || '').toLowerCase().includes(q) ||
+          String(e.amount || '').includes(q)
+        );
+
+        if (!matchesProp && !matchesExpense) return false;
+      }
+
+      return true;
+    });
+  }, [orderedExpenseGridProperties, expenseSectionPropFilter, expenseSectionSearch, monthExpenses]);
+
+  const getExpenseRowDraft = (propKey) => {
+    if (expenseRowDrafts[propKey]) return expenseRowDrafts[propKey];
+    const isCommon = propKey === '__COMMON__' || isGeneralCommonProperty(propKey);
+    const today = new Date().toISOString().split('T')[0];
+    const defaultDate = (selectedMonth && today.startsWith(selectedMonth)) ? today : `${selectedMonth}-01`;
+    return {
+      unitId: '',
+      category: isCommon ? (commonCategories[0] || 'MOM') : (propertyCategories[0] || 'Maintenance'),
+      description: '',
+      expenseDate: defaultDate,
+      amount: ''
+    };
+  };
+
+  const updateExpenseRowDraft = (propKey, patch) => {
+    setExpenseRowDrafts(prev => {
+      const current = prev[propKey] || getExpenseRowDraft(propKey);
+      return {
+        ...prev,
+        [propKey]: {
+          ...current,
+          ...patch
+        }
+      };
+    });
+  };
+
+  const handleSaveExpenseRow = async (prop) => {
+    const propKey = String(prop._id || '__COMMON__');
+    if (savingExpenseRows[propKey]) return;
+
+    const draft = getExpenseRowDraft(propKey);
+    const amountNum = Number(draft.amount);
+
+    if (!amountNum || amountNum <= 0) {
+      alert('Please enter a valid expense amount greater than 0.');
+      return;
+    }
+
+    const isCommon = isGeneralCommonProperty(propKey);
+    const targetPropId = isCommon ? null : prop._id;
+
+    try {
+      setSavingExpenseRows(prev => ({ ...prev, [propKey]: true }));
+      const payload = {
+        headType: isCommon ? 'Other' : 'Property',
+        propertyId: targetPropId,
+        unitId: (!isCommon && draft.unitId) ? draft.unitId : null,
+        category: draft.category || (isCommon ? (commonCategories[0] || 'MOM') : (propertyCategories[0] || 'Maintenance')),
+        description: draft.description?.trim() || '',
+        amount: amountNum,
+        expenseMonth: selectedMonth,
+        expenseDate: draft.expenseDate ? new Date(draft.expenseDate) : new Date(`${selectedMonth}-01`)
+      };
+
+      await API.post('/expenses', payload);
+
+      setExpenseRowDrafts(prev => ({
+        ...prev,
+        [propKey]: {
+          ...draft,
+          amount: '',
+          description: '',
+          unitId: ''
+        }
+      }));
+
+      setSavedExpenseFeedback(prev => ({ ...prev, [propKey]: true }));
+      setTimeout(() => {
+        setSavedExpenseFeedback(prev => ({ ...prev, [propKey]: false }));
+      }, 2500);
+
+      await fetchData(selectedMonth, { silent: true });
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to save expense');
+    } finally {
+      setSavingExpenseRows(prev => ({ ...prev, [propKey]: false }));
+    }
+  };
+
+  const startEditingExpenseLine = (exp) => {
+    setEditingExpenseLineId(exp._id);
+    setEditingExpenseLineData({
+      unitId: exp.unitId?._id || exp.unitId || '',
+      category: exp.category || 'Maintenance',
+      description: exp.description || '',
+      expenseDate: exp.expenseDate ? String(exp.expenseDate).substring(0, 10) : `${selectedMonth}-01`,
+      amount: String(exp.amount || '')
+    });
+  };
+
+  const cancelEditingExpenseLine = () => {
+    setEditingExpenseLineId(null);
+    setEditingExpenseLineData({});
+  };
+
+  const handleSaveEditedExpenseLine = async (expId) => {
+    const amt = Number(editingExpenseLineData.amount);
+    if (!amt || amt <= 0) {
+      alert('Please enter a valid amount greater than 0.');
+      return;
+    }
+
+    try {
+      await API.put(`/expenses/${expId}`, {
+        unitId: editingExpenseLineData.unitId || null,
+        category: editingExpenseLineData.category,
+        description: editingExpenseLineData.description?.trim() || '',
+        expenseDate: editingExpenseLineData.expenseDate ? new Date(editingExpenseLineData.expenseDate) : new Date(`${selectedMonth}-01`),
+        amount: amt
+      });
+      setEditingExpenseLineId(null);
+      setEditingExpenseLineData({});
+      await fetchData(selectedMonth, { silent: true });
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update expense');
+    }
+  };
+
   // Sorted rows for Sheet
   const sortedSheetRows = React.useMemo(() => {
     if (!sheetSortConfig.key || !sheetSortConfig.direction) {
@@ -3060,555 +3322,6 @@ export default function PaymentsView() {
                       })}
                     </tr>
 
-                    {/* 2A. Property-Wise Expenses Header Divider */}
-                    <tr className="bg-amber-100/70 text-amber-950 font-black text-xs border-t-2 border-amber-300 select-none">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'index') content = <span className="font-mono text-amber-700">P</span>;
-                        else if (colId === 'tenant') {
-                          content = (
-                            <div className="flex items-center justify-between gap-1.5 py-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <Building2 className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                                <span className="uppercase tracking-wider text-[11px]">2A. Property-Wise Expenses ({propertyExpensesList.length} Properties)</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => openAddExpenseModal('Property')}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-[11px] font-bold shadow-2xs transition-all cursor-pointer shrink-0"
-                                title="Add New Property Expense"
-                              >
-                                <Plus className="w-3 h-3" />
-                                <span>Add Expense</span>
-                              </button>
-                            </div>
-                          );
-                        } else if (colId === 'amount') {
-                          content = <span className="font-mono font-bold text-amber-900">{formatCurrency(totalPropertyExpenses)}</span>;
-                        }
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-2 px-3 border-r border-amber-200/70 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* Property-Wise Expense Rows */}
-                    {propertyExpensesList.map((p, idx) => {
-                      const isExpanded = !!expandedPropertyExpenses[p.propertyId];
-                      const items = p.items || [];
-                      const catSummary = Object.keys(p.categories).map(c => `${c}: ${formatCurrency(p.categories[c])}`).join(' · ');
-
-                      return (
-                        <React.Fragment key={`prop-exp-${p.propertyId}-${idx}`}>
-                          <tr className="bg-white/95 hover:bg-amber-50/50 text-slate-800 text-xs border-b border-slate-100 transition-colors">
-                            {visibleSheetColumns.map((colId, colIndex) => {
-                              const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                              const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                              let content = null;
-                              if (colId === 'index') {
-                                content = (
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedPropertyExpenses(prev => ({ ...prev, [p.propertyId]: !prev[p.propertyId] }))}
-                                    className="p-1 rounded text-amber-700 hover:bg-amber-100 transition-colors cursor-pointer"
-                                    title={isExpanded ? "Collapse items" : "Expand items"}
-                                  >
-                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                                  </button>
-                                );
-                              } else if (colId === 'tenant') {
-                                content = (
-                                  <div 
-                                    className="cursor-pointer"
-                                    onClick={() => setExpandedPropertyExpenses(prev => ({ ...prev, [p.propertyId]: !prev[p.propertyId] }))}
-                                  >
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-bold text-slate-900 block">{p.propertyName}</span>
-                                      <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.2 rounded-full font-bold">
-                                        {items.length} {items.length === 1 ? 'record' : 'records'}
-                                      </span>
-                                    </div>
-                                    <span className="text-[10px] text-slate-500 block truncate" title={catSummary}>
-                                      {catSummary}
-                                    </span>
-                                  </div>
-                                );
-                              } else if (colId === 'amount') {
-                                content = <span className="font-mono font-bold text-rose-600">{formatCurrency(p.total)}</span>;
-                              } else if (colId === 'actions') {
-                                content = (
-                                  <div className="flex items-center justify-end gap-1.5">
-                                    {items.length === 1 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditExpenseModal(items[0])}
-                                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-amber-400 text-slate-700 hover:text-amber-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                                        title="Edit Expense Record"
-                                      >
-                                        <Edit2 className="w-3 h-3 text-amber-600" />
-                                        <span>Edit</span>
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => openAddExpenseModal('Property', p.propertyId)}
-                                      className="flex items-center gap-0.5 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                                      title="Add another expense for this property"
-                                    >
-                                      <Plus className="w-3 h-3 text-amber-700" />
-                                      <span>Add</span>
-                                    </button>
-                                  </div>
-                                );
-                              }
-
-                              return (
-                                <td
-                                  key={colId}
-                                  style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                                  className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
-                                >
-                                  {content}
-                                </td>
-                              );
-                            })}
-                          </tr>
-
-                          {/* Expanded Expense Items for Property */}
-                          {isExpanded && items.map((expItem, itemIdx) => (
-                            <tr key={`prop-exp-item-${expItem._id || itemIdx}`} className="bg-amber-50/20 hover:bg-amber-50/50 text-[11px] border-b border-amber-100/60 transition-colors">
-                              {visibleSheetColumns.map((colId, colIndex) => {
-                                const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                                const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                                let itemContent = null;
-                                if (colId === 'index') itemContent = <span className="text-amber-400 pl-2">↳</span>;
-                                else if (colId === 'tenant') {
-                                  itemContent = (
-                                    <div className="pl-4">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-bold text-slate-800">{expItem.category}</span>
-
-                                      </div>
-                                      <span className="text-slate-500 text-[10px] block truncate">{expItem.description}</span>
-                                    </div>
-                                  );
-                                } else if (colId === 'contractNo' || colId === 'property') {
-                                  itemContent = <span className="text-slate-400 text-[10px]">{formatDate(expItem.expenseDate)}</span>;
-                                } else if (colId === 'amount') {
-                                  itemContent = <span className="font-mono font-bold text-rose-600">{formatCurrency(expItem.amount)}</span>;
-                                } else if (colId === 'actions') {
-                                  itemContent = (
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditExpenseModal(expItem)}
-                                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-amber-800 hover:border-amber-300 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                                        title="Edit Expense Record"
-                                      >
-                                        <Edit2 className="w-3 h-3 text-amber-600" />
-                                        <span>Edit</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteExpense(expItem._id, expItem.category, expItem.amount)}
-                                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                        title="Reverse / Remove Expense Record"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                      </button>
-                                    </div>
-                                  );
-                                }
-
-                                return (
-                                  <td
-                                    key={colId}
-                                    style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                                    className={`py-1.5 px-3 border-r border-amber-100/60 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
-                                  >
-                                    {itemContent}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </React.Fragment>
-                      );
-                    })}
-
-                    {propertyExpensesList.length === 0 && (
-                      <tr className="bg-white text-slate-400 text-xs italic border-b border-slate-100">
-                        {visibleSheetColumns.map((colId, colIndex) => {
-                          const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                          const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                          return (
-                            <td
-                              key={colId}
-                              style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                              className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right font-mono' : 'text-left'}`}
-                            >
-                              {colId === 'tenant' ? `No property-specific expenses recorded for ${formatMonthYear(selectedMonth)}` : colId === 'amount' ? '₹0' : null}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    )}
-
-                    {/* Subtotal Property Expenses */}
-                    <tr className="bg-amber-50/60 text-amber-950 font-bold text-xs border-b border-amber-200/80 select-none">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'tenant') content = <span className="font-extrabold text-[11px] text-amber-900">Subtotal: Property-Wise Expenses</span>;
-                        else if (colId === 'amount') content = <span className="font-mono font-black text-amber-950">{formatCurrency(totalPropertyExpenses)}</span>;
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-1.5 px-3 border-r border-amber-200/50 ${colId === 'amount' ? 'text-right' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* 2B. General & Common Expenses Header Divider */}
-                    <tr className="bg-purple-100/70 text-purple-950 font-black text-xs border-t-2 border-purple-300 select-none">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'index') content = <span className="font-mono text-purple-700">C</span>;
-                        else if (colId === 'tenant') {
-                          content = (
-                            <div className="flex items-center justify-between gap-1.5 py-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <Receipt className="w-3.5 h-3.5 text-purple-700 shrink-0" />
-                                <span className="uppercase tracking-wider text-[11px]">2B. General & Common Expenses ({commonExpensesList.length} Categories)</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => openAddExpenseModal('Common')}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-800 text-white text-[11px] font-bold shadow-2xs transition-all cursor-pointer shrink-0"
-                                title="Add New Common Expense"
-                              >
-                                <Plus className="w-3 h-3" />
-                                <span>Add Expense</span>
-                              </button>
-                            </div>
-                          );
-                        } else if (colId === 'amount') {
-                          content = <span className="font-mono font-bold text-purple-900">{formatCurrency(totalCommonExpenses)}</span>;
-                        }
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-2 px-3 border-r border-purple-200/70 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* Common Expense Rows */}
-                    {commonExpensesList.map((cat, idx) => {
-                      const isExpanded = !!expandedCommonExpenses[cat.category];
-                      const items = cat.items || [];
-
-                      return (
-                        <React.Fragment key={`common-exp-${cat.category}-${idx}`}>
-                          <tr className="bg-white/95 hover:bg-purple-50/50 text-slate-800 text-xs border-b border-slate-100 transition-colors">
-                            {visibleSheetColumns.map((colId, colIndex) => {
-                              const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                              const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                              let content = null;
-                              if (colId === 'index') {
-                                content = (
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedCommonExpenses(prev => ({ ...prev, [cat.category]: !prev[cat.category] }))}
-                                    className="p-1 rounded text-purple-700 hover:bg-purple-100 transition-colors cursor-pointer"
-                                    title={isExpanded ? "Collapse items" : "Expand items"}
-                                  >
-                                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                                  </button>
-                                );
-                              } else if (colId === 'tenant') {
-                                content = (
-                                  <div 
-                                    className="cursor-pointer"
-                                    onClick={() => setExpandedCommonExpenses(prev => ({ ...prev, [cat.category]: !prev[cat.category] }))}
-                                  >
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-semibold text-slate-900">Common: {cat.category}</span>
-                                      <span className="text-[10px] bg-purple-50 text-purple-800 border border-purple-200 px-1.5 py-0.2 rounded-full font-bold">
-                                        {items.length} {items.length === 1 ? 'record' : 'records'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                );
-                              } else if (colId === 'amount') {
-                                content = <span className="font-mono font-bold text-rose-600">{formatCurrency(cat.sum)}</span>;
-                              } else if (colId === 'actions') {
-                                content = (
-                                  <div className="flex items-center justify-end gap-1.5">
-                                    {items.length === 1 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditExpenseModal(items[0])}
-                                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-purple-400 text-slate-700 hover:text-purple-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                                        title="Edit Expense Record"
-                                      >
-                                        <Edit2 className="w-3 h-3 text-purple-600" />
-                                        <span>Edit</span>
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => openAddExpenseModal('Common')}
-                                      className="flex items-center gap-0.5 px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                                      title="Add another expense under this category"
-                                    >
-                                      <Plus className="w-3 h-3 text-purple-700" />
-                                      <span>Add</span>
-                                    </button>
-                                  </div>
-                                );
-                              }
-
-                              return (
-                                <td
-                                  key={colId}
-                                  style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                                  className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
-                                >
-                                  {content}
-                                </td>
-                              );
-                            })}
-                          </tr>
-
-                          {/* Expanded Expense Items for Common Category */}
-                          {isExpanded && items.map((expItem, itemIdx) => (
-                            <tr key={`common-exp-item-${expItem._id || itemIdx}`} className="bg-purple-50/20 hover:bg-purple-50/50 text-[11px] border-b border-purple-100/60 transition-colors">
-                              {visibleSheetColumns.map((colId, colIndex) => {
-                                const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                                const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                                let itemContent = null;
-                                if (colId === 'index') itemContent = <span className="text-purple-400 pl-2">↳</span>;
-                                else if (colId === 'tenant') {
-                                  itemContent = (
-                                    <div className="pl-4">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-bold text-slate-800">{expItem.description || expItem.category}</span>
-                                        {expItem.vendorOrPayee && (
-                                          <span className="text-slate-400 text-[10px]">· Payee: {expItem.vendorOrPayee}</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                } else if (colId === 'contractNo' || colId === 'property') {
-                                  itemContent = <span className="text-slate-400 text-[10px]">{formatDate(expItem.expenseDate)}</span>;
-                                } else if (colId === 'amount') {
-                                  itemContent = <span className="font-mono font-bold text-rose-600">{formatCurrency(expItem.amount)}</span>;
-                                } else if (colId === 'actions') {
-                                  itemContent = (
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditExpenseModal(expItem)}
-                                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-purple-800 hover:border-purple-300 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                                        title="Edit Expense Record"
-                                      >
-                                        <Edit2 className="w-3 h-3 text-purple-600" />
-                                        <span>Edit</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteExpense(expItem._id, expItem.category, expItem.amount)}
-                                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                        title="Reverse / Remove Expense Record"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                      </button>
-                                    </div>
-                                  );
-                                }
-
-                                return (
-                                  <td
-                                    key={colId}
-                                    style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                                    className={`py-1.5 px-3 border-r border-purple-100/60 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
-                                  >
-                                    {itemContent}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </React.Fragment>
-                      );
-                    })}
-
-                    {commonExpensesList.length === 0 && (
-                      <tr className="bg-white text-slate-400 text-xs italic border-b border-slate-100">
-                        {visibleSheetColumns.map((colId, colIndex) => {
-                          const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                          const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                          return (
-                            <td
-                              key={colId}
-                              style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                              className={`py-2 px-3 border-r border-slate-100 ${colId === 'amount' ? 'text-right font-mono' : 'text-left'}`}
-                            >
-                              {colId === 'tenant' ? `No general or common expenses recorded for ${formatMonthYear(selectedMonth)}` : colId === 'amount' ? '₹0' : null}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    )}
-
-                    {/* Subtotal Common Expenses */}
-                    <tr className="bg-purple-50/60 text-purple-950 font-bold text-xs border-b border-purple-200/80 select-none">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'tenant') content = <span className="font-extrabold text-[11px] text-purple-900">Subtotal: General & Common Expenses</span>;
-                        else if (colId === 'amount') content = <span className="font-mono font-black text-purple-950">{formatCurrency(totalCommonExpenses)}</span>;
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-1.5 px-3 border-r border-purple-200/50 ${colId === 'amount' ? 'text-right' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* 2C. Total Expenses Row (Combined: Property + Common) */}
-                    <tr className="bg-rose-50/90 text-rose-950 font-black text-xs border-t-2 border-rose-300 select-none shadow-2xs">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'index') content = <span className="font-mono text-rose-600">Σ</span>;
-                        else if (colId === 'tenant') content = <span>Total Expenses ({formatMonthYear(selectedMonth)}: Property + Common)</span>;
-                        else if (colId === 'amount') content = <span className="font-mono font-black text-rose-700">{formatCurrency(activeTotalExpenses)}</span>;
-                        else if (colId === 'actions') content = <span className="text-[10px] uppercase font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">Total Paid</span>;
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-2.5 px-3 border-r border-rose-200/60 ${colId === 'amount' ? 'text-right' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* 5. Difference Row (Total Earning - Total Expenses) */}
-                    <tr className="bg-slate-900 text-white font-black text-xs border-t-2 border-slate-950 select-none shadow-md">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'index') content = <span className="text-emerald-400 font-bold">Δ</span>;
-                        else if (colId === 'tenant') content = <span className="uppercase tracking-wider">Difference (Earnings − Expenses)</span>;
-                        else if (colId === 'amount') {
-                          content = (
-                            <span className={`inline-block px-2.5 py-0.5 rounded-md font-mono font-black ${
-                              monthDifference >= 0 ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'
-                            }`}>
-                              {monthDifference >= 0 ? `+ ${formatCurrency(monthDifference)}` : `- ${formatCurrency(Math.abs(monthDifference))}`}
-                            </span>
-                          );
-                        }
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-3 px-3 border-r border-slate-800 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* 6. Previous Month Balance Row */}
-                    <tr className="bg-slate-800 text-slate-200 font-bold text-xs border-t border-slate-700 select-none">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'index') content = <span className="text-slate-400">⏮</span>;
-                        else if (colId === 'tenant') content = <span>Previous Month Balance</span>;
-                        else if (colId === 'amount') content = <span className="font-mono font-bold text-amber-300">{formatCurrency(prevMonthBalance)}</span>;
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-2.5 px-3 border-r border-slate-700 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
-
-                    {/* 7. Cumulative Row (Previous Balance + Difference) */}
-                    <tr className="bg-teal-950 text-white font-black text-xs border-t-2 border-teal-800 select-none shadow-md">
-                      {visibleSheetColumns.map((colId, colIndex) => {
-                        const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
-                        const width = columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120;
-                        let content = null;
-                        if (colId === 'index') content = <span className="text-teal-400">⚑</span>;
-                        else if (colId === 'tenant') content = <span className="uppercase tracking-wider">Cumulative (Prev Balance + Difference)</span>;
-                        else if (colId === 'amount') {
-                          content = (
-                            <span className={`inline-block px-2.5 py-0.5 rounded-md font-mono font-black ${
-                              monthCumulative >= 0 ? 'bg-teal-400 text-slate-950' : 'bg-rose-500 text-white'
-                            }`}>
-                              {monthCumulative >= 0 ? formatCurrency(monthCumulative) : `- ${formatCurrency(Math.abs(monthCumulative))}`}
-                            </span>
-                          );
-                        }
-
-                        return (
-                          <td
-                            key={colId}
-                            style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                            className={`py-3 px-3 border-r border-teal-900 ${colId === 'amount' ? 'text-right' : colId === 'index' ? 'text-center' : 'text-left'}`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
-                    </tr>
                   </tfoot>
                 </table>
               </div>
@@ -3656,6 +3369,578 @@ export default function PaymentsView() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* ======================================================== */}
+          {/* LOWER SECTION: DEDICATED MONTHLY EXPENSES TABLE          */}
+          {/* ======================================================== */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Header & Quick Filter Bar */}
+            <div className="px-5 py-4 bg-gradient-to-r from-slate-50 via-white to-amber-50/30 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black text-slate-900 tracking-wide uppercase">
+                      Monthly Property & Common Expenses
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                      {formatMonthYear(selectedMonth)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Record and manage expenses line-by-line per property and common categories with instant inline entry.
+                  </p>
+                </div>
+              </div>
+
+              {/* Summary Stats Badges */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-1.5 shadow-2xs">
+                  <span className="text-[11px] text-amber-700 font-semibold">Property Expenses:</span>
+                  <span className="text-xs font-black text-amber-900 font-mono">{formatCurrency(totalPropertyExpenses)}</span>
+                </div>
+                <div className="px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center gap-1.5 shadow-2xs">
+                  <span className="text-[11px] text-purple-700 font-semibold">Common Expenses:</span>
+                  <span className="text-xs font-black text-purple-900 font-mono">{formatCurrency(totalCommonExpenses)}</span>
+                </div>
+                <div className="px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center gap-1.5 shadow-2xs">
+                  <span className="text-[11px] text-rose-700 font-semibold">Total Expenses:</span>
+                  <span className="text-xs font-black text-rose-900 font-mono">{formatCurrency(activeTotalExpenses)}</span>
+                </div>
+              </div>
+
+              {/* Action Controls: Property Selector, Search, Modal Button */}
+              <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+                {/* Search */}
+                <div className="relative flex-1 sm:w-56">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={expenseSectionSearch}
+                    onChange={(e) => setExpenseSectionSearch(e.target.value)}
+                    placeholder="Search expenses..."
+                    className="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 text-slate-800 placeholder:text-slate-400"
+                  />
+                  {expenseSectionSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setExpenseSectionSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                {/* Property Dropdown Filter */}
+                <select
+                  value={expenseSectionPropFilter}
+                  onChange={(e) => setExpenseSectionPropFilter(e.target.value)}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer"
+                >
+                  <option value="">All Properties & Common</option>
+                  {orderedExpenseGridProperties.map(p => (
+                    <option key={p._id} value={p._id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Open Modal Button */}
+                <button
+                  type="button"
+                  onClick={() => openAddExpenseModal('Property')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer"
+                  title="Open Add Expense Dialog"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add Expense</span>
+                </button>
+              </div>
+            </div>
+
+            {/* The Fast Entry Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse table-fixed" style={{ minWidth: '1180px' }}>
+                <colgroup>
+                  <col style={{ width: '55px' }} />
+                  <col style={{ width: '105px' }} />
+                  <col style={{ width: '175px' }} />
+                  <col style={{ width: '150px' }} />
+                  <col style={{ width: '160px' }} />
+                  <col style={{ width: '230px' }} />
+                  <col style={{ width: '125px' }} />
+                  <col style={{ width: '130px' }} />
+                  <col style={{ width: '90px' }} />
+                </colgroup>
+                <thead className="bg-slate-100/95 border-b border-slate-200 text-[11px] text-slate-700 uppercase font-extrabold tracking-wider select-none">
+                  <tr>
+                    <th className="py-2.5 px-3 text-center border-r border-slate-200">#</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">Head Type</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">Property</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">Partition (Unit)</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">Expense Head</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">Description</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">Date</th>
+                    <th className="py-2.5 px-3 text-right border-r border-slate-200">Amount (₹)</th>
+                    <th className="py-2.5 px-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {filteredExpenseProperties.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-400 text-xs">
+                        No matching properties or expenses found for {formatMonthYear(selectedMonth)}.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredExpenseProperties.map((prop, propIdx) => {
+                      const propKey = String(prop._id || '__COMMON__');
+                      const isCommon = isGeneralCommonProperty(propKey);
+                      const propUnits = units.filter(u => String(u.propertyId?._id || u.propertyId) === String(prop._id));
+
+                      const recordedExpenses = monthExpenses.filter(e => {
+                        if (isCommon) return isExpenseOther(e);
+                        return String(e.propertyId?._id || e.propertyId) === String(prop._id);
+                      });
+
+                      const propTotal = recordedExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+                      const draft = getExpenseRowDraft(propKey);
+                      const isSaving = savingExpenseRows[propKey];
+                      const isSaved = savedExpenseFeedback[propKey];
+
+                      return (
+                        <React.Fragment key={propKey}>
+                          {/* 1. Recorded Expense Rows for this property */}
+                          {recordedExpenses.map((re, lineIdx) => {
+                            const isEditingThisLine = editingExpenseLineId === re._id;
+                            const isAlt = lineIdx % 2 === 1;
+
+                            if (isEditingThisLine) {
+                              return (
+                                <tr key={re._id} className="bg-amber-50/80 ring-2 ring-amber-300 border-b border-amber-200 text-xs">
+                                  <td className="py-2 px-2.5 text-center font-mono font-bold text-slate-600 border-r border-amber-200">
+                                    {isCommon ? '★' : (prop.displayOrder || propIdx + 1)}.{lineIdx + 1}
+                                  </td>
+                                  <td className="py-2 px-2.5 border-r border-amber-200 whitespace-nowrap">
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${isCommon ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                      {isCommon ? <Tag className="w-2.5 h-2.5" /> : <Building2 className="w-2.5 h-2.5" />}
+                                      {isCommon ? 'Common' : 'Property'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-2.5 border-r border-amber-200 font-bold text-slate-900 truncate">
+                                    {isCommon ? 'General & Common' : prop.name}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-amber-200">
+                                    {isCommon ? (
+                                      <span className="text-slate-400 text-xs italic">N/A</span>
+                                    ) : propUnits.length === 0 ? (
+                                      <span className="text-slate-500 text-xs">Entire Property</span>
+                                    ) : (
+                                      <select
+                                        value={editingExpenseLineData.unitId || ''}
+                                        onChange={(e) => setEditingExpenseLineData(prev => ({ ...prev, unitId: e.target.value }))}
+                                        className="text-xs font-semibold px-2 py-1 rounded border border-amber-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                      >
+                                        <option value="">Entire Property</option>
+                                        {propUnits.map(u => (
+                                          <option key={u._id} value={u._id}>{u.subUnitPartition || u.unitName}</option>
+                                        ))}
+                                      </select>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-amber-200">
+                                    <select
+                                      value={editingExpenseLineData.category || ''}
+                                      onChange={(e) => setEditingExpenseLineData(prev => ({ ...prev, category: e.target.value }))}
+                                      className="text-xs font-semibold px-2 py-1 rounded border border-amber-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                    >
+                                      {(isCommon ? commonCategories : propertyCategories).map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-amber-200">
+                                    <input
+                                      type="text"
+                                      value={editingExpenseLineData.description || ''}
+                                      onChange={(e) => setEditingExpenseLineData(prev => ({ ...prev, description: e.target.value }))}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEditedExpenseLine(re._id); }}
+                                      className="text-xs px-2 py-1 rounded border border-amber-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                      placeholder="Description"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-amber-200">
+                                    <input
+                                      type="date"
+                                      value={editingExpenseLineData.expenseDate || ''}
+                                      onChange={(e) => setEditingExpenseLineData(prev => ({ ...prev, expenseDate: e.target.value }))}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEditedExpenseLine(re._id); }}
+                                      className="text-xs px-2 py-1 rounded border border-amber-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                    />
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-amber-200">
+                                    <div className="relative flex items-center">
+                                      <span className="absolute left-1.5 text-amber-600 text-xs font-semibold">₹</span>
+                                      <input
+                                        type="number"
+                                        value={editingExpenseLineData.amount || ''}
+                                        onChange={(e) => setEditingExpenseLineData(prev => ({ ...prev, amount: e.target.value }))}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEditedExpenseLine(re._id); }}
+                                        className="w-full pl-4 pr-1.5 py-1 text-xs font-bold text-slate-900 bg-white border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        autoFocus
+                                      />
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-2 text-center">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSaveEditedExpenseLine(re._id)}
+                                        className="p-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-2xs"
+                                        title="Save Changes"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={cancelEditingExpenseLine}
+                                        className="p-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 cursor-pointer shadow-2xs"
+                                        title="Cancel"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            return (
+                              <tr
+                                key={re._id}
+                                className={`border-b border-slate-200 hover:bg-amber-50/40 transition-colors ${
+                                  isAlt ? 'bg-slate-50/60' : 'bg-white'
+                                }`}
+                              >
+                                <td className="py-2 px-2.5 text-center font-mono font-bold text-slate-600 border-r border-slate-200 text-xs">
+                                  {isCommon ? '★' : (prop.displayOrder || propIdx + 1)}.{lineIdx + 1}
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200 whitespace-nowrap">
+                                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${
+                                    isCommon ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  }`}>
+                                    {isCommon ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                                    {isCommon ? 'Common' : 'Property'}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200">
+                                  <div className="font-bold text-slate-900 text-xs truncate" title={isCommon ? 'General & Common Expenses' : prop.name}>
+                                    {isCommon ? 'General & Common' : prop.name}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-mono">
+                                    {isCommon ? 'PROP-COMMON' : (prop.propertyCode || '—')}
+                                  </div>
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200">
+                                  <span className="text-xs font-semibold text-slate-700">
+                                    {re.unitId?.subUnitPartition || re.unitId?.unitName || (isCommon ? 'Common' : 'Entire Property')}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200">
+                                  <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                                    EXPENSE_CATEGORY_COLORS[re.category] || 'bg-slate-100 text-slate-700 border-slate-200'
+                                  }`}>
+                                    {re.category}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200">
+                                  <span className="text-xs text-slate-700 block truncate" title={re.description || '—'}>
+                                    {re.description || '—'}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200 whitespace-nowrap text-xs text-slate-600 font-mono">
+                                  {re.expenseDate ? String(re.expenseDate).substring(0, 10) : `${selectedMonth}-01`}
+                                </td>
+                                <td className="py-2 px-2.5 border-r border-slate-200 text-right">
+                                  <span className="font-mono font-extrabold text-xs text-slate-900">
+                                    ₹{(re.amount || 0).toLocaleString('en-IN')}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2.5 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditingExpenseLine(re)}
+                                      className="p-1 rounded hover:bg-amber-100 text-slate-500 hover:text-amber-700 transition-colors cursor-pointer"
+                                      title="Edit this expense line"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteExpense(re._id, re.category, re.amount)}
+                                      className="p-1 rounded hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                      title="Delete / Reverse expense line"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+
+                          {/* 2. Fast Inline Entry Row (+ Add Line) for this property */}
+                          <tr className="border-b-2 border-slate-300 bg-emerald-50/20 hover:bg-emerald-50/40 transition-colors">
+                            <td className="py-2 px-2.5 text-center font-mono font-bold text-emerald-700 border-r border-slate-200 text-xs">
+                              {isCommon ? '★' : (prop.displayOrder || propIdx + 1)}
+                              {recordedExpenses.length > 0 ? '.+' : ''}
+                            </td>
+                            <td className="py-2 px-2.5 border-r border-slate-200 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                isCommon ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {isCommon ? <Tag className="w-2.5 h-2.5" /> : <Building2 className="w-2.5 h-2.5" />}
+                                {isCommon ? 'Common' : 'Property'}
+                              </span>
+                            </td>
+                            <td className="py-2 px-2.5 border-r border-slate-200">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="font-bold text-slate-900 text-xs truncate" title={isCommon ? 'General & Common Expenses' : prop.name}>
+                                  {isCommon ? 'General & Common' : prop.name}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                                  + Add
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono truncate">
+                                {isCommon ? 'Common / Other' : (prop.propertyCode || '—')}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2 border-r border-slate-200">
+                              {isCommon ? (
+                                <span className="text-slate-400 text-xs italic">N/A (Common)</span>
+                              ) : propUnits.length === 0 ? (
+                                <span className="text-slate-500 text-xs font-medium">Entire Property</span>
+                              ) : (
+                                <select
+                                  value={draft.unitId}
+                                  onChange={(e) => updateExpenseRowDraft(propKey, { unitId: e.target.value })}
+                                  className="text-xs font-semibold px-2 py-1 rounded border border-slate-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs"
+                                >
+                                  <option value="">Entire Property</option>
+                                  {propUnits.map(u => (
+                                    <option key={u._id} value={u._id}>{u.subUnitPartition || u.unitName}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </td>
+                            <td className="py-2 px-2 border-r border-slate-200">
+                              <select
+                                value={draft.category}
+                                onChange={(e) => updateExpenseRowDraft(propKey, { category: e.target.value })}
+                                className="text-xs font-semibold px-2 py-1 rounded border border-slate-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs"
+                              >
+                                {(isCommon ? commonCategories : propertyCategories).map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 px-2 border-r border-slate-200">
+                              <input
+                                type="text"
+                                placeholder="Description / note"
+                                value={draft.description}
+                                onChange={(e) => updateExpenseRowDraft(propKey, { description: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveExpenseRow(prop); }}
+                                className="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-800 w-full placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs"
+                              />
+                            </td>
+                            <td className="py-2 px-2 border-r border-slate-200">
+                              <input
+                                type="date"
+                                value={draft.expenseDate}
+                                onChange={(e) => updateExpenseRowDraft(propKey, { expenseDate: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveExpenseRow(prop); }}
+                                className="text-xs px-2 py-1 rounded border border-slate-300 bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-2xs"
+                              />
+                            </td>
+                            <td className="py-2 px-2 border-r border-slate-200">
+                              <div className="relative flex items-center">
+                                <span className="absolute left-2 text-slate-400 text-xs font-semibold">₹</span>
+                                <input
+                                  type="number"
+                                  placeholder="Amount"
+                                  value={draft.amount}
+                                  onChange={(e) => updateExpenseRowDraft(propKey, { amount: e.target.value })}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveExpenseRow(prop); }}
+                                  id={`expense-row-amount-${propKey}`}
+                                  className="w-full pl-5 pr-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono shadow-2xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                              </div>
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <button
+                                type="button"
+                                disabled={isSaving}
+                                onClick={() => handleSaveExpenseRow(prop)}
+                                className="w-full flex items-center justify-center gap-1 px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                                title="Save this expense line"
+                              >
+                                {isSaving ? '...' : (isSaved ? <Check className="w-3.5 h-3.5 text-white" /> : '+ Add')}
+                              </button>
+                            </td>
+                          </tr>
+
+                          {/* Subtotal row if property has recorded expenses */}
+                          {recordedExpenses.length > 0 && (
+                            <tr className="bg-slate-50/80 text-slate-700 font-bold text-xs border-b-2 border-slate-300">
+                              <td colSpan={7} className="py-1.5 px-3 text-right border-r border-slate-200">
+                                <span className="text-slate-500 text-[11px] font-semibold">
+                                  Total {isCommon ? 'Common Expenses' : prop.name} ({recordedExpenses.length} record{recordedExpenses.length === 1 ? '' : 's'}):
+                                </span>
+                              </td>
+                              <td className="py-1.5 px-3 text-right font-mono font-black text-rose-700 border-r border-slate-200">
+                                ₹{propTotal.toLocaleString('en-IN')}
+                              </td>
+                              <td className="py-1.5 px-2 text-center text-[10px] text-slate-400">
+                                Subtotal
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+                <tfoot className="bg-slate-100 border-t-2 border-slate-300 text-xs font-bold select-none">
+                  <tr>
+                    <td colSpan={7} className="py-2.5 px-4 text-right border-r border-slate-200 uppercase tracking-wider text-slate-700 font-black">
+                      Total Month Expenses ({formatMonthYear(selectedMonth)})
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono font-black text-rose-700 text-sm border-r border-slate-200">
+                      ₹{activeTotalExpenses.toLocaleString('en-IN')}
+                    </td>
+                    <td className="py-2.5 px-2 text-center text-[10px] text-rose-700 uppercase font-black">
+                      Total Paid
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* ======================================================== */}
+          {/* NET CASH FLOW & FINANCIAL RECONCILIATION CARD            */}
+          {/* ======================================================== */}
+          <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-950 rounded-2xl p-5 text-white shadow-lg border border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black tracking-wide uppercase text-slate-100">
+                    Monthly Net Cash Flow & Reconciliation
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Accounting Month: {formatMonthYear(selectedMonth)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Status:</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                  monthDifference >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                }`}>
+                  {monthDifference >= 0 ? 'Net Surplus' : 'Net Deficit'}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {/* 1. Total Rent Collected */}
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/60">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span>Rent Collected</span>
+                  <span className="text-emerald-400 text-xs">▲</span>
+                </div>
+                <div className="text-lg font-black font-mono text-emerald-400">
+                  {formatCurrency(totalPaidSum)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  Total earnings for {formatMonthYear(selectedMonth)}
+                </div>
+              </div>
+
+              {/* 2. Total Expenses */}
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/60">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span>Total Expenses</span>
+                  <span className="text-rose-400 text-xs">▼</span>
+                </div>
+                <div className="text-lg font-black font-mono text-rose-400">
+                  {formatCurrency(activeTotalExpenses)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate" title={`Property: ${formatCurrency(totalPropertyExpenses)} · Common: ${formatCurrency(totalCommonExpenses)}`}>
+                  Prop: {formatCurrency(totalPropertyExpenses)} · Comm: {formatCurrency(totalCommonExpenses)}
+                </div>
+              </div>
+
+              {/* 3. Net Difference */}
+              <div className={`rounded-xl p-3 border ${
+                monthDifference >= 0 
+                  ? 'bg-emerald-950/40 border-emerald-700/60' 
+                  : 'bg-rose-950/40 border-rose-700/60'
+              }`}>
+                <div className="text-[11px] font-bold uppercase tracking-wider mb-1 flex items-center justify-between text-slate-300">
+                  <span>Net Difference</span>
+                  <span className={monthDifference >= 0 ? 'text-emerald-400' : 'text-rose-400'}>Δ</span>
+                </div>
+                <div className={`text-lg font-black font-mono ${
+                  monthDifference >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                }`}>
+                  {monthDifference >= 0 ? `+ ${formatCurrency(monthDifference)}` : `- ${formatCurrency(Math.abs(monthDifference))}`}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  Earnings minus expenses
+                </div>
+              </div>
+
+              {/* 4. Previous Month Balance */}
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/60">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span>Prev Month Balance</span>
+                  <span className="text-amber-400 text-xs">⏮</span>
+                </div>
+                <div className="text-lg font-black font-mono text-amber-300">
+                  {formatCurrency(prevMonthBalance)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  Opening balance carried fwd
+                </div>
+              </div>
+
+              {/* 5. Cumulative Balance */}
+              <div className="bg-teal-950/50 rounded-xl p-3 border border-teal-700/60 col-span-2 sm:col-span-1">
+                <div className="text-[11px] font-bold uppercase tracking-wider mb-1 flex items-center justify-between text-teal-300">
+                  <span>Cumulative Balance</span>
+                  <span className="text-teal-400">⚑</span>
+                </div>
+                <div className={`text-lg font-black font-mono ${
+                  monthCumulative >= 0 ? 'text-teal-300' : 'text-rose-300'
+                }`}>
+                  {monthCumulative >= 0 ? formatCurrency(monthCumulative) : `- ${formatCurrency(Math.abs(monthCumulative))}`}
+                </div>
+                <div className="text-[10px] text-teal-400/80 mt-0.5">
+                  Prev balance + difference
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
