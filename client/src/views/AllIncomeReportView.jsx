@@ -29,7 +29,8 @@ import {
   Hash,
   Layers,
   Phone,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Filter
 } from 'lucide-react';
 
 const ALL_INCOME_COLUMNS_DEF = [
@@ -220,6 +221,49 @@ export default function AllIncomeReportView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
 
+  // Top Filter Panel State (From/To Accounting Month, Property, Sub-Property, Tenant)
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [incomeFilters, setIncomeFilters] = useState(() => {
+    try {
+      const saved = localStorage.getItem('income_top_filters_v2');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      fromAccountingMonth: '',
+      toAccountingMonth: '',
+      propertyId: '',
+      unitId: '',
+      tenantId: ''
+    };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('income_top_filters_v2', JSON.stringify(incomeFilters));
+    } catch {}
+  }, [incomeFilters]);
+
+  const clearAllFilters = () => {
+    setIncomeFilters({
+      fromAccountingMonth: '',
+      toAccountingMonth: '',
+      propertyId: '',
+      unitId: '',
+      tenantId: ''
+    });
+    setCurrentPage(1);
+  };
+
+  const activeCustomFilterCount = useMemo(() => {
+    return [
+      incomeFilters.fromAccountingMonth,
+      incomeFilters.toAccountingMonth,
+      incomeFilters.propertyId,
+      incomeFilters.unitId,
+      incomeFilters.tenantId
+    ].filter(Boolean).length;
+  }, [incomeFilters]);
+
   // Column management & widths
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('cols_all_income_v2');
@@ -319,9 +363,62 @@ export default function AllIncomeReportView() {
     };
   }, [receipts]);
 
+  // Available accounting months collected from receipts & default calendar years
+  const availableAccountingMonths = useMemo(() => {
+    const set = new Set();
+    receipts.forEach(r => {
+      const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+      if (m && /^\d{4}-\d{2}$/.test(m)) set.add(m);
+    });
+    ['2024', '2025', '2026'].forEach(yr => {
+      for (let i = 1; i <= 12; i++) {
+        set.add(`${yr}-${String(i).padStart(2, '0')}`);
+      }
+    });
+    return Array.from(set).sort().reverse();
+  }, [receipts]);
+
+  // Unit options dynamically filtered by selected property (if property is chosen)
+  const filterUnitOptions = useMemo(() => {
+    if (!incomeFilters.propertyId) return units;
+    return units.filter(u => String(u.propertyId?._id || u.propertyId) === String(incomeFilters.propertyId));
+  }, [units, incomeFilters.propertyId]);
+
   // Filtering & Sorting
   const processedReceipts = useMemo(() => {
     let rows = [...receipts];
+
+    // 0. Custom Top Filter Panel (From/To Accounting Month, Property, Sub-Property/Partition, Tenant)
+    if (incomeFilters.fromAccountingMonth) {
+      rows = rows.filter(r => {
+        const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+        return m >= incomeFilters.fromAccountingMonth;
+      });
+    }
+    if (incomeFilters.toAccountingMonth) {
+      rows = rows.filter(r => {
+        const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+        return m <= incomeFilters.toAccountingMonth;
+      });
+    }
+    if (incomeFilters.propertyId) {
+      rows = rows.filter(r => {
+        const pId = String(r.unitId?.propertyId?._id || r.unitId?.propertyId || '');
+        return pId === String(incomeFilters.propertyId);
+      });
+    }
+    if (incomeFilters.unitId) {
+      rows = rows.filter(r => {
+        const uId = String(r.unitId?._id || r.unitId || '');
+        return uId === String(incomeFilters.unitId);
+      });
+    }
+    if (incomeFilters.tenantId) {
+      rows = rows.filter(r => {
+        const tId = String(r.tenantId?._id || r.tenantId || '');
+        return tId === String(incomeFilters.tenantId);
+      });
+    }
 
     // 1. Text Search across all visible data
     if (search.trim()) {
@@ -337,6 +434,7 @@ export default function AllIncomeReportView() {
         const comm = (r.comments || '').toLowerCase();
         const months = (r.monthsCovered || '').toLowerCase();
         const amt = String(r.totalAmount || '');
+        const ref = (r.referenceNumber || r.receiptNumber || '').toLowerCase();
 
         return (
           rNo.includes(q) ||
@@ -378,7 +476,7 @@ export default function AllIncomeReportView() {
     }
 
     return rows;
-  }, [receipts, search, activeFilters, sortConfig]);
+  }, [receipts, search, activeFilters, sortConfig, incomeFilters]);
 
   // Pagination
   const totalPages = rowsPerPage === 'All' ? 1 : Math.ceil(processedReceipts.length / Number(rowsPerPage));
@@ -542,49 +640,248 @@ export default function AllIncomeReportView() {
   }, [receipts]);
 
   return (
-    <div className="space-y-4">
-      {/* Header & KPI Summary */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-teal-600 text-white shadow-sm shadow-teal-600/30 shrink-0">
-              <TrendingUp className="w-5 h-5" />
+    <div className="space-y-3">
+      {/* Top Header Line with Reports Section, Quick Totals, and Filter Button */}
+      <div className="bg-white px-3.5 py-2.5 rounded-xl shadow-xs border border-slate-200">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          {/* Left: Reports Section */}
+          <div className="flex items-start sm:items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white shadow-xs shrink-0">
+              <TrendingUp className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">All Income Report</h1>
-                <span className="px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800 text-xs font-bold border border-teal-200">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reports Section</span>
+                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
                   {processedReceipts.length} Line{processedReceipts.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Comprehensive register of all rent collections, receipts, payment modes, and tenant transactions
-              </p>
+              <h2 className="text-base font-black text-slate-900 tracking-tight leading-tight">All Income</h2>
             </div>
           </div>
 
-          {/* Quick Metrics */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-200 shadow-2xs">
-              <span className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider block">
+          {/* Right: Total Income, Portfolio Grand Total, Filter Button */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200/80 shadow-2xs">
+              <span className="text-[9px] text-emerald-700 font-black uppercase tracking-wider block">
                 Total Income (Filtered)
               </span>
-              <span className="text-base sm:text-lg font-black text-emerald-800 font-mono">
+              <span className="text-xs sm:text-sm font-black text-emerald-800 font-mono">
                 {formatCurrency(totalIncome)}
               </span>
             </div>
 
-            <div className="px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 shadow-2xs">
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">
+            <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 shadow-2xs">
+              <span className="text-[9px] text-slate-500 font-black uppercase tracking-wider block">
                 Portfolio Grand Total
               </span>
-              <span className="text-base sm:text-lg font-bold text-slate-800 font-mono">
+              <span className="text-xs sm:text-sm font-black text-slate-800 font-mono">
                 {formatCurrency(grandTotalIncome)}
               </span>
             </div>
+
+            {/* Filter Button */}
+            <button
+              type="button"
+              onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs cursor-pointer ${
+                isFilterPanelOpen || activeCustomFilterCount > 0
+                  ? 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-700'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+              }`}
+              title="Toggle Filter Options"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filter</span>
+              {activeCustomFilterCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-white text-emerald-800 text-[10px] font-black">
+                  {activeCustomFilterCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Collapsible Filter Section */}
+      {isFilterPanelOpen && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm animate-in fade-in duration-150">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-emerald-600" />
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
+                Filter All Income Records
+              </h3>
+              {activeCustomFilterCount > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {activeCustomFilterCount} active filter{activeCustomFilterCount !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {activeCustomFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  className="flex items-center gap-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 px-2.5 py-1 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer border border-rose-200/60"
+                  title="Reset all filters"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Reset Filters</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsFilterPanelOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Close Filter Panel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Filter Fields Grid: From Month, To Month, Property, Sub Property, Tenant */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* 1. From Accounting Month */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                From Accounting Month
+              </label>
+              <select
+                value={incomeFilters.fromAccountingMonth}
+                onChange={(e) => {
+                  setIncomeFilters(prev => ({ ...prev, fromAccountingMonth: e.target.value }));
+                  setCurrentPage(1);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="">Any Start Month</option>
+                {availableAccountingMonths.map(m => (
+                  <option key={m} value={m}>
+                    {formatMonthYear(m)} ({m})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. To Accounting Month */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                To Accounting Month
+              </label>
+              <select
+                value={incomeFilters.toAccountingMonth}
+                onChange={(e) => {
+                  setIncomeFilters(prev => ({ ...prev, toAccountingMonth: e.target.value }));
+                  setCurrentPage(1);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="">Any End Month</option>
+                {availableAccountingMonths.map(m => (
+                  <option key={m} value={m}>
+                    {formatMonthYear(m)} ({m})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 3. Property */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Property
+              </label>
+              <select
+                value={incomeFilters.propertyId}
+                onChange={(e) => {
+                  const pId = e.target.value;
+                  setIncomeFilters(prev => {
+                    let newUnitId = prev.unitId;
+                    if (newUnitId && pId) {
+                      const u = units.find(u => String(u._id) === String(newUnitId));
+                      if (u && String(u.propertyId?._id || u.propertyId) !== String(pId)) {
+                        newUnitId = '';
+                      }
+                    }
+                    return { ...prev, propertyId: pId, unitId: newUnitId };
+                  });
+                  setCurrentPage(1);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
+              >
+                <option value="">All Properties</option>
+                {properties.map(p => (
+                  <option key={p._id} value={p._id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 4. Sub-Property / Partition */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Sub-Property / Partition
+              </label>
+              <select
+                value={incomeFilters.unitId}
+                onChange={(e) => {
+                  setIncomeFilters(prev => ({ ...prev, unitId: e.target.value }));
+                  setCurrentPage(1);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
+              >
+                <option value="">All Partitions</option>
+                {filterUnitOptions.map(u => (
+                  <option key={u._id} value={u._id}>
+                    {u.subUnitPartition || u.unitName} ({u.unitCode})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 5. Tenant */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Tenant
+              </label>
+              <select
+                value={incomeFilters.tenantId}
+                onChange={(e) => {
+                  setIncomeFilters(prev => ({ ...prev, tenantId: e.target.value }));
+                  setCurrentPage(1);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
+              >
+                <option value="">All Tenants</option>
+                {tenants.map(t => (
+                  <option key={t._id} value={t._id}>
+                    {t.name} {t.tenantCode ? `(${t.tenantCode})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Results Summary */}
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-100 text-xs text-slate-500 font-medium">
+            <div className="flex items-center gap-1.5">
+              <span>Showing</span>
+              <span className="font-extrabold text-slate-800">{processedReceipts.length}</span>
+              <span>of</span>
+              <span className="font-extrabold text-slate-800">{receipts.length}</span>
+              <span>income receipts matching filter criteria</span>
+              {activeCustomFilterCount > 0 && (
+                <span className="text-emerald-700 font-bold ml-1">
+                  (Filtered Total: {formatCurrency(totalIncome)})
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* APEX Interactive Toolbar */}
       <ApexToolbar
