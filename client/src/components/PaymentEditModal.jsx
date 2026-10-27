@@ -206,25 +206,49 @@ export default function PaymentEditModal({
           if (recData?.allocations && recData.allocations.length > 0) {
             recData.allocations.forEach(a => {
               initialMap[a.rentMonthYear] = a.allocatedAmount;
-              if (!unpaid.some(u => u.monthYear === a.rentMonthYear)) {
+              const monthBreakdownItem = breakdown.find(m => m.monthYear === a.rentMonthYear);
+              const trueExpectedRate = (monthBreakdownItem && monthBreakdownItem.expectedRate > 0)
+                ? monthBreakdownItem.expectedRate
+                : (monthlyRate || 22000);
+              const existingIdx = unpaid.findIndex(u => u.monthYear === a.rentMonthYear);
+              if (existingIdx >= 0) {
+                unpaid[existingIdx].expectedRate = trueExpectedRate;
+              } else {
                 unpaid.push({
                   monthYear: a.rentMonthYear,
                   outstandingAmount: 0,
-                  expectedRate: a.allocatedAmount || monthlyRate,
+                  expectedRate: trueExpectedRate,
                   isAdvance: a.rentMonthYear > activeMonth
                 });
               }
             });
           } else if (recData?.rentMonthYear) {
             initialMap[recData.rentMonthYear] = recData.allocatedAmount || recData.totalAmount || recData.receiptTotalAmount || 0;
-            if (!unpaid.some(u => u.monthYear === recData.rentMonthYear)) {
+            const monthBreakdownItem = breakdown.find(m => m.monthYear === recData.rentMonthYear);
+            const trueExpectedRate = (monthBreakdownItem && monthBreakdownItem.expectedRate > 0)
+              ? monthBreakdownItem.expectedRate
+              : (monthlyRate || 22000);
+            const existingIdx = unpaid.findIndex(u => u.monthYear === recData.rentMonthYear);
+            if (existingIdx >= 0) {
+              unpaid[existingIdx].expectedRate = trueExpectedRate;
+            } else {
               unpaid.push({
                 monthYear: recData.rentMonthYear,
                 outstandingAmount: 0,
-                expectedRate: initialMap[recData.rentMonthYear],
+                expectedRate: trueExpectedRate,
                 isAdvance: recData.rentMonthYear > activeMonth
               });
             }
+          }
+
+          if (activeMonth && !unpaid.some(u => u.monthYear === activeMonth)) {
+            const monthBreakdownItem = breakdown.find(m => m.monthYear === activeMonth);
+            unpaid.push({
+              monthYear: activeMonth,
+              outstandingAmount: 0,
+              expectedRate: (monthBreakdownItem && monthBreakdownItem.expectedRate > 0) ? monthBreakdownItem.expectedRate : monthlyRate,
+              isAdvance: false
+            });
           }
 
           unpaid.sort((a, b) => a.monthYear.localeCompare(b.monthYear));
@@ -1214,9 +1238,15 @@ export default function PaymentEditModal({
               {/* OUTSTANDING AMOUNT & ADJUSTMENTS */}
               {(() => {
                 const calculatedOut = unpaidMonthsList.reduce((sum, m) => {
-                  const rem = m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || selectedTenantInfo?.monthlyRate || 0);
+                  const expRate = (m.expectedRate && m.expectedRate > 0) ? m.expectedRate : (selectedTenantInfo?.monthlyRate || 0);
+                  if (selectedMonthsMap[m.monthYear] !== undefined) {
+                    const allocated = Number(selectedMonthsMap[m.monthYear]) || 0;
+                    const balanceDiff = Math.max(0, expRate - allocated);
+                    return sum + balanceDiff;
+                  }
+                  const rem = m.outstandingAmount > 0 ? m.outstandingAmount : expRate;
                   return sum + Number(rem);
-                }, 0) || selectedTenantInfo?.calculatedOutstanding || 0;
+                }, 0);
 
                 const adjNum = Number(paymentForm.adjustmentAmount) || 0;
                 const netAdjustedOut = Math.max(0, calculatedOut + adjNum);
@@ -1229,7 +1259,7 @@ export default function PaymentEditModal({
                           Outstanding Amount
                         </span>
                         <span className="text-[11px] text-slate-500">
-                          Calculated month-by-month as on date
+                          {calculatedOut > 0 ? 'Balance difference + prior unpaid dues' : 'All selected dues cleared'}
                         </span>
                       </div>
                       <span className="text-sm font-black text-rose-700 font-mono">
@@ -1407,11 +1437,19 @@ export default function PaymentEditModal({
                               )}
                             </div>
                             <p className="text-[10px] text-slate-400">
-                              {m.outstandingAmount > 0 ? (
-                                <>Due: <strong className="text-rose-600">{formatCurrency(m.outstandingAmount)}</strong></>
-                              ) : (
-                                <>Expected: <strong className="text-slate-600">{formatCurrency(m.expectedRate || selectedTenantInfo?.monthlyRate || 0)}</strong></>
-                              )}
+                              Expected: <strong className="text-slate-600">{formatCurrency(m.expectedRate || selectedTenantInfo?.monthlyRate || 0)}</strong>
+                              {isChecked && (() => {
+                                const exp = (m.expectedRate && m.expectedRate > 0) ? m.expectedRate : (selectedTenantInfo?.monthlyRate || 0);
+                                const curAlloc = Number(amount) || 0;
+                                const bal = exp - curAlloc;
+                                if (bal > 0) {
+                                  return <> &bull; <span className="text-rose-600 font-bold">Balance: {formatCurrency(bal)}</span></>;
+                                } else if (bal < 0) {
+                                  return <> &bull; <span className="text-emerald-600 font-bold">Advance: +{formatCurrency(Math.abs(bal))}</span></>;
+                                } else {
+                                  return <> &bull; <span className="text-emerald-700 font-bold">Paid Full</span></>;
+                                }
+                              })()}
                             </p>
                           </div>
                         </label>

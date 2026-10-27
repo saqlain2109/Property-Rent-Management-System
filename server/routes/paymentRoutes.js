@@ -150,7 +150,7 @@ router.get('/outstanding-summary', protect, async (req, res) => {
           { accountingMonth: targetMonth },
           { receiptDate: { $gte: monthStart, $lte: monthEnd } }
         ]
-      }).select('unitId tenantId status totalAmount contractNo accountingMonth')
+      }).select('unitId tenantId status rentAmount depositAmount totalAmount contractNo accountingMonth')
     ]);
 
     const revIdSet = new Set(reversedReceiptIds.map(String));
@@ -251,14 +251,19 @@ router.get('/outstanding-summary', protect, async (req, res) => {
         const ledger = await calculateTenantUnitLedger(unit._id, tenantActualId, targetMonth, assign, calcOptions);
         const effectiveRate = await getEffectiveRentForMonth(unit._id, tenantActualId, targetMonth, assign, calcOptions);
         const targetMonthData = ledger.monthsBreakdown.find(m => m.monthYear === targetMonth);
-        const receiptPaidInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant' && unitMonthReceipt.totalAmount !== undefined)
-          ? (Number(unitMonthReceipt.totalAmount) || 0)
+        const activeReceipt = monthReceipts.find(r => 
+          String(r.unitId?._id || r.unitId) === String(unit._id) &&
+          (r.accountingMonth === targetMonth || (r.monthPaidFor && r.monthPaidFor.includes(targetMonth))) &&
+          (!r.tenantId || String(r.tenantId?._id || r.tenantId) === String(tenantActualId))
+        ) || monthReceipts.find(r => String(r.unitId?._id || r.unitId) === String(unit._id)) || unitMonthReceipt;
+        const receiptPaidInMonth = (activeReceipt && activeReceipt.status !== 'Vacant' && activeReceipt.totalAmount !== undefined)
+          ? (Number(activeReceipt.totalAmount) || 0)
           : null;
-        const receiptRentInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant')
-          ? (unitMonthReceipt.rentAmount !== undefined ? Number(unitMonthReceipt.rentAmount) : receiptPaidInMonth)
+        const receiptRentInMonth = (activeReceipt && activeReceipt.status !== 'Vacant')
+          ? (activeReceipt.rentAmount !== undefined ? Number(activeReceipt.rentAmount) : receiptPaidInMonth)
           : null;
-        const receiptDepositInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant' && unitMonthReceipt.depositAmount !== undefined)
-          ? Number(unitMonthReceipt.depositAmount)
+        const receiptDepositInMonth = (activeReceipt && activeReceipt.status !== 'Vacant' && activeReceipt.depositAmount !== undefined)
+          ? Number(activeReceipt.depositAmount)
           : 0;
         const actualPaidForMonth = isExplicitlyVacant
           ? 0

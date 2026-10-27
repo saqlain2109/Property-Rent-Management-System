@@ -1846,7 +1846,7 @@ export default function PaymentsView() {
         'Month Paid For': formatMonthYear(selectedMonth),
         'Rent Amount Paid': item.rentAmountPaid !== undefined ? item.rentAmountPaid : paidThisMonth,
         'Deposit Amount': item.depositAmount || 0,
-        'Total Amount Paid': paidThisMonth,
+        'Total Amount Paid': item.actualPaidForMonth !== undefined ? item.actualPaidForMonth : ((item.rentAmountPaid !== undefined ? Number(item.rentAmountPaid) : paidThisMonth) + (item.depositAmount || 0)),
         'Created Date': item.createdAt ? formatDate(item.createdAt) : '',
         'Modified Date': item.updatedAt ? formatDate(item.updatedAt) : ''
       };
@@ -2129,8 +2129,19 @@ export default function PaymentsView() {
                       const expectedRate = (monthData && monthData.expectedRate > 0) ? monthData.expectedRate : (item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0);
                       const paidThisMonth = monthData ? monthData.allocatedAmount : 0;
                       const outstandingTotal = item.totalOutstanding || 0;
-                      const isFullyPaidThisMonth = paidThisMonth >= expectedRate && expectedRate > 0;
-                      const isPartial = paidThisMonth > 0 && paidThisMonth < expectedRate;
+                      
+                      const isRowEditing = Boolean(rowDrafts[rowKey]);
+                      const savedRent = (item.rentAmountPaid !== undefined ? Number(item.rentAmountPaid) : (item.actualPaidForMonth !== undefined ? Number(item.actualPaidForMonth) : paidThisMonth)) || 0;
+                      const currentRent = draft.rentAmount !== undefined && draft.rentAmount !== ''
+                        ? Number(draft.rentAmount)
+                        : (draft.amount !== undefined && draft.amount !== ''
+                            ? Math.max(0, Number(draft.amount) - (Number(draft.depositAmount) || 0))
+                            : savedRent);
+                      const rentDiff = isRowEditing ? (savedRent - (isNaN(currentRent) ? 0 : currentRent)) : 0;
+                      const effectiveOutstanding = Math.max(0, outstandingTotal + rentDiff);
+
+                      const isFullyPaidThisMonth = (isRowEditing ? currentRent : savedRent) >= expectedRate && expectedRate > 0;
+                      const isPartial = (isRowEditing ? currentRent : savedRent) > 0 && (isRowEditing ? currentRent : savedRent) < expectedRate;
                       
                       const matchedTenant = tenants.find(t => t._id === item.tenant?._id);
                       const matchedUnit = units.find(u => u._id === item.unit?._id);
@@ -2318,9 +2329,9 @@ export default function PaymentsView() {
                             if (colId === 'outstanding') {
                               return (
                                 <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right font-extrabold text-xs">
-                                  {outstandingTotal > 0 ? (
+                                  {effectiveOutstanding > 0 ? (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-black bg-rose-50 text-rose-700 border border-rose-200 font-mono">
-                                      {formatCurrency(outstandingTotal)}
+                                      {formatCurrency(effectiveOutstanding)}
                                     </span>
                                   ) : (
                                     <span className="font-semibold text-slate-700 text-xs font-mono">
@@ -2552,7 +2563,7 @@ export default function PaymentsView() {
                               );
                             }
                             if (colId === 'adjustedOutstanding') {
-                              const netDue = Math.max(0, (item.totalOutstanding || 0) + (Number(item.adjustmentAmount) || 0));
+                              const netDue = Math.max(0, effectiveOutstanding + (Number(item.adjustmentAmount) || 0));
                               return (
                                 <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right text-xs font-mono font-black">
                                   {netDue > 0 ? (
