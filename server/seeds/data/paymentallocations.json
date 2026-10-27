@@ -2334,18 +2334,6 @@
     "__v": 0
   },
   {
-    "_id": "6adcb1699bf75768909903f5",
-    "receiptId": "6adcb1699bf75768909903f4",
-    "tenantId": "6ada066dd7c483f46dca03a5",
-    "unitId": "6ada066dd7c483f46dca0382",
-    "rentMonthYear": "2025-10",
-    "allocatedAmount": 32000,
-    "notes": "Garage: Tenant No1.Snip rent for 2025-10",
-    "createdAt": "2026-10-24T13:23:53.085Z",
-    "updatedAt": "2026-10-24T13:23:53.085Z",
-    "__v": 0
-  },
-  {
     "_id": "6adcb1699bf75768909903f7",
     "receiptId": "6adcb1699bf75768909903f6",
     "tenantId": "6ada066dd7c483f46dca03a5",
@@ -2367,18 +2355,6 @@
     "notes": "Garage: Tenant No1.Snip rent for 2025-12",
     "createdAt": "2026-10-24T13:23:53.088Z",
     "updatedAt": "2026-10-24T13:23:53.088Z",
-    "__v": 0
-  },
-  {
-    "_id": "6adcb1699bf75768909903fb",
-    "receiptId": "6adcb1699bf75768909903fa",
-    "tenantId": "6ada066dd7c483f46dca03a5",
-    "unitId": "6ada066dd7c483f46dca0382",
-    "rentMonthYear": "2026-01",
-    "allocatedAmount": 32000,
-    "notes": "Garage: Tenant No1.Snip rent for 2026-01",
-    "createdAt": "2026-10-24T13:23:53.089Z",
-    "updatedAt": "2026-10-24T13:23:53.089Z",
     "__v": 0
   },
   {
@@ -8951,6 +8927,97 @@
     "notes": "Monthly rent for Feb 2026",
     "createdAt": "2026-10-27T08:43:15.942Z",
     "updatedAt": "2026-10-27T08:43:15.942Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae06fd4dafc7564c4d285d5",
+    "receiptId": "6ae06f79dafc7564c4d285d1",
+    "tenantId": "6ada066dd7c483f46dca03a2",
+    "unitId": "6ada066dd7c483f46dca0382",
+    "rentMonthYear": "2025-11",
+    "allocatedAmount": 25000,
+    "contractNo": "DG-2025",
+    "notes": "Monthly rent for Nov 2025",
+    "createdAt": "2026-10-27T09:33:08.398Z",
+    "updatedAt": "2026-10-27T09:33:08.398Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae06fd4dafc7564c4d285d6",
+    "receiptId": "6ae06f79dafc7564c4d285d1",
+    "tenantId": "6ada066dd7c483f46dca03a2",
+    "unitId": "6ada066dd7c483f46dca0382",
+    "rentMonthYear": "2025-12",
+    "allocatedAmount": 25000,
+    "contractNo": "DG-2025",
+    "notes": "Monthly rent for Dec 2025",
+    "createdAt": "2026-10-27T09:33:08.401Z",
+    "updatedAt": "2026-10-27T09:33:08.401Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae06fd4dafc7564c4d285d7",
+    "receiptId": "6ae06f79dafc7564c4d285d1",
+    "tenantId": "6ada066dd7c483f46dca03a2",
+    "unitId": "6ada066dd7c483f46dca0382",
+    "rentMonthYear": "2026-01",
+    "allocatedAmount": 25000,
+    "contractNo": "DG-2025",
+    "notes": "Monthly rent for Jan 2026",
+    "createdAt": "2026-10-27T09:33:08.403Z",
+    "updatedAt": "2026-10-27T09:33:08.403Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae06fd4dafc7564c4d285d8",
+    "receiptId": "6ae06f79dafc7564c4d285d1",
+    "tenantId": "6ada066dd7c483f46dca03a2",
+    "unitId": "6ada066dd7c483f46dca0382",
+    "rentMonthYear": "2025-10",
+    "allocatedAmount": 25000,
+    "contractNo": "DG-2025",
+    "notes": "Monthly rent for Oct 2025",
+    "createdAt": "2026-10-27T09:33:08.405Z",
+    "updatedAt": "2026-10-27T09:33:08.405Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae07093dafc7564c4d285dc",
+    "receiptId": "6adcb1699bf75768909903f4",
+    "tenantId": "6ada066dd7c483f46dca03a2",
+    "unitId": "6ada066dd7c483f46dca0382",
+    "rentMonthYear": "2026-01",
+    "allocatedAmount": 25000,
+    "contractNo": "DG-2025",
+    "notes": "Monthly rent for Jan 2026",
+    "createdAt": "2026-10-27T09:36:19.675Z",
+    "updatedAt": "2026-10-27T09:36:19.675Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae070a4dafc7564c4d285df",
+    "receiptId": "6ae070a4dafc7564c4d285de",
+    "tenantId": "6ada066dd7c483f46dca03a2",
+    "unitId": "6ada066dd7c483f46dca0382",
+    "rentMonthYear": "2026-02",
+    "allocatedAmount": 25000,
+    "contractNo": "DG-2025",
+    "notes": "Monthly rent for Feb 2026",
+    "createdAt": "2026-10-27T09:36:36.215Z",
+    "updatedAt": "2026-10-27T09:36:36.215Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ae071b6dafc7564c4d285e4",
+    "receiptId": "6ae071a8dafc7564c4d285e1",
+    "tenantId": "6ada066dd7c483f46dca0391",
+    "unitId": "6ada066dd7c483f46dca037b",
+    "rentMonthYear": "2026-05",
+    "allocatedAmount": 18000,
+    "contractNo": "TEST-CON-DIFF",
+    "notes": "",
+    "createdAt": "2026-10-27T09:41:10.226Z",
+    "updatedAt": "2026-10-27T09:41:10.226Z",
     "__v": 0
   }
 ]

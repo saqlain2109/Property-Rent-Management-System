@@ -95,7 +95,7 @@ router.get('/', protect, async (req, res) => {
         monthPaidFor: monthsPaidFor,
         monthsCovered: monthsPaidFor,
         paidForMonth: monthsPaidFor,
-        accountingMonth: r.accountingMonth || monthsPaidFor,
+        accountingMonth: r.accountingMonth || derivedAccountingMonth,
         allocations: rAlloc
       };
     }
@@ -148,9 +148,10 @@ router.get('/outstanding-summary', protect, async (req, res) => {
         isReversed: false,
         $or: [
           { accountingMonth: targetMonth },
-          { receiptDate: { $gte: monthStart, $lte: monthEnd } }
+          { receiptDate: { $gte: monthStart, $lte: monthEnd } },
+          { monthPaidFor: { $regex: targetMonth } }
         ]
-      }).select('unitId tenantId status rentAmount depositAmount totalAmount contractNo accountingMonth')
+      }).select('unitId tenantId status rentAmount depositAmount totalAmount contractNo accountingMonth monthPaidFor')
     ]);
 
     const revIdSet = new Set(reversedReceiptIds.map(String));
@@ -440,39 +441,37 @@ router.post('/', protect, authorize('admin', 'manager'), [
     const parsedTotal = parsedRent + parsedDeposit;
     const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
 
-    // Allocations allocate the rent portion across rent months (allow matching parsedRent or parsedTotal)
-    if (Math.abs(parsedRent - sumAllocated) > 0.01 && Math.abs(parsedTotal - sumAllocated) > 0.01) {
-      return res.status(400).json({
-        success: false,
-        message: `Sum of monthly allocations (₹${sumAllocated}) must equal rent amount paid (₹${parsedRent})`
-      });
+    // Auto-balance rent allocations to match parsedRent if user entered an amount so they are never blocked
+    if (allocations.length > 0 && Math.abs(parsedRent - sumAllocated) > 0.01 && Math.abs(parsedTotal - sumAllocated) > 0.01) {
+      allocations[allocations.length - 1].allocatedAmount += (parsedRent - sumAllocated);
     }
 
     const allocMonthsList = (allocations || []).map(a => a.rentMonthYear).filter(Boolean);
-    const targetMonth = allocMonthsList[0] || req.body.accountingMonth || req.body.monthPaidFor || (receiptDate ? new Date(receiptDate).toISOString().slice(0, 7) : getCurrentMonthYear());
-    const finalMonthPaidFor = allocMonthsList.join(', ') || targetMonth;
+    const targetAccountingMonth = req.body.accountingMonth || (receiptDate ? new Date(receiptDate).toISOString().slice(0, 7) : getCurrentMonthYear());
+    const finalMonthPaidFor = allocMonthsList.join(', ') || req.body.monthPaidFor || targetAccountingMonth;
 
-    // RULE: Only one receipt per property unit per month.
-    // If an active receipt already exists for this unit & month, update it in place!
+    // RULE: Only one receipt per property unit per accounting month.
+    // If an active receipt already exists for this unit & accounting month, update it in place!
     let existingReceipt = null;
 
-    const existingAlloc = await PaymentAllocation.findOne({
-      unitId,
-      rentMonthYear: targetMonth
-    });
-    if (existingAlloc && existingAlloc.receiptId) {
-      existingReceipt = await PaymentReceipt.findById(existingAlloc.receiptId);
+    if (req.body.receiptId) {
+      existingReceipt = await PaymentReceipt.findById(req.body.receiptId);
       if (existingReceipt && existingReceipt.isReversed) existingReceipt = null;
     }
 
     if (!existingReceipt) {
       existingReceipt = await PaymentReceipt.findOne({
         unitId,
-        isReversed: false,
-        $or: [
-          { accountingMonth: targetMonth },
-          { monthPaidFor: { $regex: targetMonth } }
-        ]
+        accountingMonth: targetAccountingMonth,
+        isReversed: false
+      });
+    }
+
+    if (!existingReceipt && finalMonthPaidFor) {
+      existingReceipt = await PaymentReceipt.findOne({
+        unitId,
+        monthPaidFor: finalMonthPaidFor,
+        isReversed: false
       });
     }
 
@@ -486,7 +485,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       existingReceipt.totalAmount = parsedTotal;
       if (receiptDate) existingReceipt.receiptDate = receiptDate;
       if (comments !== undefined) existingReceipt.comments = comments;
-      existingReceipt.accountingMonth = targetMonth;
+      existingReceipt.accountingMonth = targetAccountingMonth;
       existingReceipt.monthPaidFor = finalMonthPaidFor;
       if (req.body.adjustmentAmount !== undefined) existingReceipt.adjustmentAmount = Number(req.body.adjustmentAmount) || 0;
       if (req.body.adjustmentDescription !== undefined) existingReceipt.adjustmentDescription = req.body.adjustmentDescription || '';
@@ -501,21 +500,18 @@ router.post('/', protect, authorize('admin', 'manager'), [
           unitId,
           rentMonthYear: alloc.rentMonthYear,
           allocatedAmount: Number(alloc.allocatedAmount),
-          contractNo: finalContractNo,
+          contractNo: alloc.contractNo || finalContractNo,
           notes: alloc.notes || ''
         });
         createdAllocations.push(created);
       }
 
-      // Clean up any extra duplicate receipts for this unit & month
+      // Clean up any extra duplicate receipts for this unit & accounting month
       const duplicates = await PaymentReceipt.find({
         _id: { $ne: existingReceipt._id },
         unitId,
-        isReversed: false,
-        $or: [
-          { accountingMonth: targetMonth },
-          { monthPaidFor: targetMonth }
-        ]
+        accountingMonth: targetAccountingMonth,
+        isReversed: false
       });
       for (const dup of duplicates) {
         await PaymentAllocation.deleteMany({ receiptId: dup._id });
@@ -527,7 +523,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
         action: 'UPDATE_PAYMENT',
         entityType: 'PaymentReceipt',
         entityId: existingReceipt._id,
-        description: `Updated single monthly receipt ${existingReceipt.receiptNumber} of ₹${parsedTotal} for ${targetMonth}`,
+        description: `Updated single monthly receipt ${existingReceipt.receiptNumber} of ₹${parsedTotal} for ${targetAccountingMonth}`,
         req
       });
 
@@ -547,7 +543,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       receiptNumber,
       receiptDate,
       monthPaidFor: finalMonthPaidFor,
-      accountingMonth: targetMonth,
+      accountingMonth: targetAccountingMonth,
       status,
       tenantId: finalTenantId,
       unitId,
@@ -659,11 +655,8 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
 
     if (allocations && Array.isArray(allocations)) {
       const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
-      if (Math.abs(parsedRent - sumAllocated) > 0.01 && Math.abs(parsedTotal - sumAllocated) > 0.01) {
-        return res.status(400).json({
-          success: false,
-          message: `Sum of monthly allocations (₹${sumAllocated}) must equal rent amount paid (₹${parsedRent})`
-        });
+      if (allocations.length > 0 && Math.abs(parsedRent - sumAllocated) > 0.01 && Math.abs(parsedTotal - sumAllocated) > 0.01) {
+        allocations[allocations.length - 1].allocatedAmount += (parsedRent - sumAllocated);
       }
 
       // Remove previous allocations and create new ones
@@ -675,7 +668,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
           unitId: targetUnitId,
           rentMonthYear: alloc.rentMonthYear,
           allocatedAmount: Number(alloc.allocatedAmount),
-          contractNo: targetContractNo,
+          contractNo: alloc.contractNo || targetContractNo,
           notes: alloc.notes || ''
         });
       }
@@ -699,37 +692,31 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     receipt.totalAmount = parsedTotal;
     if (comments !== undefined) receipt.comments = comments;
     receipt.contractNo = targetContractNo;
-    if (allocations && Array.isArray(allocations)) {
-      const allocMonths = allocations.map(a => a.rentMonthYear).filter(Boolean).join(', ');
-      receipt.monthPaidFor = allocMonths;
-      receipt.accountingMonth = allocMonths;
-    } else if (req.body.monthPaidFor !== undefined) {
-      receipt.monthPaidFor = req.body.monthPaidFor;
-      receipt.accountingMonth = req.body.monthPaidFor;
-    } else if (req.body.accountingMonth !== undefined) {
-      receipt.monthPaidFor = req.body.accountingMonth;
+
+    const allocMonthsList = (allocations || []).map(a => a.rentMonthYear).filter(Boolean);
+    const finalMonthPaidFor = allocMonthsList.join(', ') || req.body.monthPaidFor || receipt.monthPaidFor || receipt.accountingMonth;
+    receipt.monthPaidFor = finalMonthPaidFor;
+
+    // PRESERVE accountingMonth: do NOT overwrite accountingMonth with allocMonths!
+    if (req.body.accountingMonth) {
       receipt.accountingMonth = req.body.accountingMonth;
-    } else if (receiptDate) {
-      const dMonth = new Date(receiptDate).toISOString().slice(0, 7);
-      receipt.monthPaidFor = dMonth;
-      receipt.accountingMonth = dMonth;
+    } else if (!receipt.accountingMonth) {
+      receipt.accountingMonth = receiptDate ? new Date(receiptDate).toISOString().slice(0, 7) : finalMonthPaidFor;
     }
+
     if (req.body.adjustmentAmount !== undefined) receipt.adjustmentAmount = Number(req.body.adjustmentAmount) || 0;
     if (req.body.adjustmentDescription !== undefined) receipt.adjustmentDescription = req.body.adjustmentDescription;
 
     await receipt.save();
 
-    // Clean up any other duplicate receipts for this unit & month to guarantee single receipt
-    const targetMonth = receipt.accountingMonth || receipt.monthPaidFor;
+    // Clean up any other duplicate receipts for this unit & accounting month to guarantee single receipt
+    const targetMonth = receipt.accountingMonth;
     if (targetMonth && targetUnitId) {
       const duplicates = await PaymentReceipt.find({
         _id: { $ne: receipt._id },
         unitId: targetUnitId,
-        isReversed: false,
-        $or: [
-          { accountingMonth: targetMonth },
-          { monthPaidFor: targetMonth }
-        ]
+        accountingMonth: targetMonth,
+        isReversed: false
       });
       for (const dup of duplicates) {
         await PaymentAllocation.deleteMany({ receiptId: dup._id });

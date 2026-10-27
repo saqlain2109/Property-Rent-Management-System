@@ -3,141 +3,141 @@
     "_id": "6ada06f3d86fb0bfcce54e66",
     "monthYear": "2026-01",
     "__v": 0,
-    "closingBalance": 6210568.74,
+    "closingBalance": 6178568.74,
     "createdAt": "2026-10-22T12:52:03.956Z",
     "isReconciled": true,
-    "netCashFlow": 567380,
+    "netCashFlow": 535380,
     "notes": "",
     "openingBalance": 5643188.74,
     "totalExpensesPaid": 13670,
-    "totalIncomeReceived": 581050,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "totalIncomeReceived": 549050,
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e67",
     "monthYear": "2026-02",
     "__v": 0,
-    "closingBalance": 6205768.74,
+    "closingBalance": 6173768.74,
     "createdAt": "2026-10-22T12:52:03.958Z",
     "isReconciled": true,
     "netCashFlow": -4800,
     "notes": "",
-    "openingBalance": 6210568.74,
+    "openingBalance": 6178568.74,
     "totalExpensesPaid": 4800,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e68",
     "monthYear": "2026-03",
     "__v": 0,
-    "closingBalance": 3571418.74,
+    "closingBalance": 3557418.74,
     "createdAt": "2026-10-22T12:52:03.959Z",
     "isReconciled": true,
-    "netCashFlow": -2634350,
+    "netCashFlow": -2616350,
     "notes": "",
-    "openingBalance": 6205768.74,
+    "openingBalance": 6173768.74,
     "totalExpensesPaid": 2874350,
-    "totalIncomeReceived": 240000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "totalIncomeReceived": 258000,
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e69",
     "monthYear": "2026-04",
     "__v": 0,
-    "closingBalance": 3399918.74,
+    "closingBalance": 3385918.74,
     "createdAt": "2026-10-22T12:52:03.960Z",
     "isReconciled": true,
     "netCashFlow": -171500,
     "notes": "",
-    "openingBalance": 3571418.74,
+    "openingBalance": 3557418.74,
     "totalExpensesPaid": 200000,
     "totalIncomeReceived": 28500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e6a",
     "monthYear": "2026-05",
     "__v": 0,
-    "closingBalance": 3419918.74,
+    "closingBalance": 3385918.74,
     "createdAt": "2026-10-22T12:52:03.961Z",
     "isReconciled": true,
-    "netCashFlow": 20000,
+    "netCashFlow": 0,
     "notes": "",
-    "openingBalance": 3399918.74,
+    "openingBalance": 3385918.74,
     "totalExpensesPaid": 0,
-    "totalIncomeReceived": 20000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "totalIncomeReceived": 0,
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e6b",
     "monthYear": "2026-06",
     "__v": 0,
-    "closingBalance": 3419918.74,
+    "closingBalance": 3385918.74,
     "createdAt": "2026-10-22T12:52:03.963Z",
     "isReconciled": true,
     "netCashFlow": 0,
     "notes": "",
-    "openingBalance": 3419918.74,
+    "openingBalance": 3385918.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e6c",
     "monthYear": "2026-07",
     "__v": 0,
-    "closingBalance": 3419918.74,
+    "closingBalance": 3385918.74,
     "createdAt": "2026-10-22T12:52:03.964Z",
     "isReconciled": true,
     "netCashFlow": 0,
     "notes": "",
-    "openingBalance": 3419918.74,
+    "openingBalance": 3385918.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e6d",
     "monthYear": "2026-08",
     "__v": 0,
-    "closingBalance": 3419918.74,
+    "closingBalance": 3385918.74,
     "createdAt": "2026-10-22T12:52:03.965Z",
     "isReconciled": true,
     "netCashFlow": 0,
     "notes": "",
-    "openingBalance": 3419918.74,
+    "openingBalance": 3385918.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e6e",
     "monthYear": "2026-09",
     "__v": 0,
-    "closingBalance": 3419918.74,
+    "closingBalance": 3385918.74,
     "createdAt": "2026-10-22T12:52:03.966Z",
     "isReconciled": true,
     "netCashFlow": 0,
     "notes": "",
-    "openingBalance": 3419918.74,
+    "openingBalance": 3385918.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ada06f3d86fb0bfcce54e6f",
     "monthYear": "2026-10",
     "__v": 0,
-    "closingBalance": 6682344.74,
+    "closingBalance": 6798344.74,
     "createdAt": "2026-10-22T12:52:03.967Z",
     "isReconciled": true,
-    "netCashFlow": 3262426,
+    "netCashFlow": 3412426,
     "notes": "",
-    "openingBalance": 3419918.74,
+    "openingBalance": 3385918.74,
     "totalExpensesPaid": 0,
-    "totalIncomeReceived": 3262426,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "totalIncomeReceived": 3412426,
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e70",
@@ -151,7 +151,7 @@
     "openingBalance": 5305950,
     "totalExpensesPaid": 164338,
     "totalIncomeReceived": 468461,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e71",
@@ -165,7 +165,7 @@
     "openingBalance": 5610073,
     "totalExpensesPaid": 2526000,
     "totalIncomeReceived": 1829712,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e72",
@@ -179,7 +179,7 @@
     "openingBalance": 4913785,
     "totalExpensesPaid": 2163001,
     "totalIncomeReceived": 391500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e73",
@@ -193,7 +193,7 @@
     "openingBalance": 3142284,
     "totalExpensesPaid": 67990,
     "totalIncomeReceived": 475000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e74",
@@ -207,7 +207,7 @@
     "openingBalance": 3549294,
     "totalExpensesPaid": 16132,
     "totalIncomeReceived": 614823,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e75",
@@ -221,7 +221,7 @@
     "openingBalance": 4147985,
     "totalExpensesPaid": 416663,
     "totalIncomeReceived": 522702,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e76",
@@ -235,7 +235,7 @@
     "openingBalance": 4254024,
     "totalExpensesPaid": 1550120,
     "totalIncomeReceived": 966000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e77",
@@ -249,7 +249,7 @@
     "openingBalance": 3669904,
     "totalExpensesPaid": 1428176,
     "totalIncomeReceived": 212500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e78",
@@ -263,7 +263,7 @@
     "openingBalance": 2454228,
     "totalExpensesPaid": 46620,
     "totalIncomeReceived": 221000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e79",
@@ -277,7 +277,7 @@
     "openingBalance": 2628608,
     "totalExpensesPaid": 252284,
     "totalIncomeReceived": 662000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e7a",
@@ -291,7 +291,7 @@
     "openingBalance": 3038324,
     "totalExpensesPaid": 575330,
     "totalIncomeReceived": 1126000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e7b",
@@ -305,7 +305,7 @@
     "openingBalance": 3588994,
     "totalExpensesPaid": 283475,
     "totalIncomeReceived": 537826,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e7c",
@@ -319,7 +319,7 @@
     "openingBalance": 3843345,
     "totalExpensesPaid": 2270884,
     "totalIncomeReceived": 732437,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e7d",
@@ -333,7 +333,7 @@
     "openingBalance": 2304898,
     "totalExpensesPaid": 224414.26,
     "totalIncomeReceived": 210000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e7e",
@@ -347,7 +347,7 @@
     "openingBalance": 2290483.74,
     "totalExpensesPaid": 15400,
     "totalIncomeReceived": 148500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e7f",
@@ -361,7 +361,7 @@
     "openingBalance": 2423583.74,
     "totalExpensesPaid": 48500,
     "totalIncomeReceived": 1285338,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e80",
@@ -375,7 +375,7 @@
     "openingBalance": 3660421.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e81",
@@ -389,7 +389,7 @@
     "openingBalance": 3660421.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 1093000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e82",
@@ -403,49 +403,49 @@
     "openingBalance": 4753421.74,
     "totalExpensesPaid": 2704400,
     "totalIncomeReceived": 496000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e83",
     "monthYear": "2025-10",
     "__v": 0,
-    "closingBalance": 2821489.74,
+    "closingBalance": 2789489.74,
     "createdAt": "2026-10-23T08:00:32.938Z",
     "isReconciled": true,
-    "netCashFlow": 276468,
+    "netCashFlow": 244468,
     "notes": "",
     "openingBalance": 2545021.74,
     "totalExpensesPaid": 71548,
-    "totalIncomeReceived": 348016,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "totalIncomeReceived": 316016,
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e84",
     "monthYear": "2025-11",
     "__v": 0,
-    "closingBalance": 2939989.74,
+    "closingBalance": 2907989.74,
     "createdAt": "2026-10-23T08:00:32.939Z",
     "isReconciled": true,
     "netCashFlow": 118500,
     "notes": "",
-    "openingBalance": 2821489.74,
+    "openingBalance": 2789489.74,
     "totalExpensesPaid": 66500,
     "totalIncomeReceived": 185000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adb1420d86fb0bfcce54e85",
     "monthYear": "2025-12",
     "__v": 0,
-    "closingBalance": 3610188.74,
+    "closingBalance": 3578188.74,
     "createdAt": "2026-10-23T08:00:32.940Z",
     "isReconciled": true,
     "netCashFlow": 670199,
     "notes": "",
-    "openingBalance": 2939989.74,
+    "openingBalance": 2907989.74,
     "totalExpensesPaid": 44801,
     "totalIncomeReceived": 715000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54e9e",
@@ -459,7 +459,7 @@
     "openingBalance": 2775488.74,
     "totalExpensesPaid": 2084040,
     "totalIncomeReceived": 669000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54e9f",
@@ -473,7 +473,7 @@
     "openingBalance": 1360448.7400000002,
     "totalExpensesPaid": 26400,
     "totalIncomeReceived": 315002,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea0",
@@ -487,7 +487,7 @@
     "openingBalance": 1649050.7400000002,
     "totalExpensesPaid": 28000,
     "totalIncomeReceived": 198000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea1",
@@ -501,7 +501,7 @@
     "openingBalance": 1819050.7400000002,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 259000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea2",
@@ -515,7 +515,7 @@
     "openingBalance": 2078050.7400000002,
     "totalExpensesPaid": 500000,
     "totalIncomeReceived": 136000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea3",
@@ -529,7 +529,7 @@
     "openingBalance": 1714050.7400000002,
     "totalExpensesPaid": 361368,
     "totalIncomeReceived": 177500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea4",
@@ -543,7 +543,7 @@
     "openingBalance": 1530182.7400000002,
     "totalExpensesPaid": 76370,
     "totalIncomeReceived": 1120774,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea5",
@@ -557,7 +557,7 @@
     "openingBalance": 2574586.74,
     "totalExpensesPaid": 47158,
     "totalIncomeReceived": 420500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea6",
@@ -571,7 +571,7 @@
     "openingBalance": 2947928.74,
     "totalExpensesPaid": 144187,
     "totalIncomeReceived": 913136,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea7",
@@ -585,7 +585,7 @@
     "openingBalance": 3716877.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 450000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde1c3d86fb0bfcce54ea8",
@@ -599,7 +599,7 @@
     "openingBalance": 4166877.74,
     "totalExpensesPaid": 383200,
     "totalIncomeReceived": 448725,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ea9",
@@ -613,7 +613,7 @@
     "openingBalance": 5643188.74,
     "totalExpensesPaid": 29400,
     "totalIncomeReceived": 204000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eaa",
@@ -627,7 +627,7 @@
     "openingBalance": 5817788.74,
     "totalExpensesPaid": 1299700,
     "totalIncomeReceived": 1374277,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eab",
@@ -641,7 +641,7 @@
     "openingBalance": 5892365.74,
     "totalExpensesPaid": 10000,
     "totalIncomeReceived": 189750,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eac",
@@ -655,7 +655,7 @@
     "openingBalance": 6072115.74,
     "totalExpensesPaid": 271700,
     "totalIncomeReceived": 388000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ead",
@@ -669,7 +669,7 @@
     "openingBalance": 6188415.74,
     "totalExpensesPaid": 10000,
     "totalIncomeReceived": 697860,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eae",
@@ -683,7 +683,7 @@
     "openingBalance": 6876275.74,
     "totalExpensesPaid": 2270000,
     "totalIncomeReceived": 483000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eaf",
@@ -697,7 +697,7 @@
     "openingBalance": 5089275.74,
     "totalExpensesPaid": 46251,
     "totalIncomeReceived": 222605,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb0",
@@ -711,7 +711,7 @@
     "openingBalance": 5265629.74,
     "totalExpensesPaid": 62182,
     "totalIncomeReceived": 494500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb1",
@@ -725,7 +725,7 @@
     "openingBalance": 5697947.74,
     "totalExpensesPaid": 178900,
     "totalIncomeReceived": 409608,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb2",
@@ -739,7 +739,7 @@
     "openingBalance": 5928655.74,
     "totalExpensesPaid": 295100,
     "totalIncomeReceived": 487590,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb3",
@@ -753,7 +753,7 @@
     "openingBalance": 6121145.74,
     "totalExpensesPaid": 292934,
     "totalIncomeReceived": 290000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb4",
@@ -767,7 +767,7 @@
     "openingBalance": 6118211.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb5",
@@ -781,7 +781,7 @@
     "openingBalance": 6118211.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb6",
@@ -795,7 +795,7 @@
     "openingBalance": 6118211.74,
     "totalExpensesPaid": 855000,
     "totalIncomeReceived": 230000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb7",
@@ -809,7 +809,7 @@
     "openingBalance": 5493211.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb8",
@@ -823,7 +823,7 @@
     "openingBalance": 5493211.74,
     "totalExpensesPaid": 693470,
     "totalIncomeReceived": 1210163,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eb9",
@@ -837,7 +837,7 @@
     "openingBalance": 6009904.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54eba",
@@ -851,7 +851,7 @@
     "openingBalance": 6009904.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ebb",
@@ -865,7 +865,7 @@
     "openingBalance": 6009904.74,
     "totalExpensesPaid": 289992,
     "totalIncomeReceived": 1500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ebc",
@@ -879,7 +879,7 @@
     "openingBalance": 5721412.74,
     "totalExpensesPaid": 3583560,
     "totalIncomeReceived": 428000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ebd",
@@ -893,7 +893,7 @@
     "openingBalance": 2565852.74,
     "totalExpensesPaid": 42900,
     "totalIncomeReceived": 118500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ebe",
@@ -907,7 +907,7 @@
     "openingBalance": 2641452.74,
     "totalExpensesPaid": 298596,
     "totalIncomeReceived": 671121,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde794d86fb0bfcce54ebf",
@@ -921,7 +921,7 @@
     "openingBalance": 3013977.74,
     "totalExpensesPaid": 255550,
     "totalIncomeReceived": 172800,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec0",
@@ -935,7 +935,7 @@
     "openingBalance": 2931227.74,
     "totalExpensesPaid": 45300,
     "totalIncomeReceived": 250000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec1",
@@ -949,7 +949,7 @@
     "openingBalance": 3135927.74,
     "totalExpensesPaid": 1814038,
     "totalIncomeReceived": 112000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec2",
@@ -963,7 +963,7 @@
     "openingBalance": 1433889.7400000002,
     "totalExpensesPaid": 9281,
     "totalIncomeReceived": 122100,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec3",
@@ -977,7 +977,7 @@
     "openingBalance": 1546708.7400000002,
     "totalExpensesPaid": 99329,
     "totalIncomeReceived": 205000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec4",
@@ -991,7 +991,7 @@
     "openingBalance": 1652379.7400000002,
     "totalExpensesPaid": 276300,
     "totalIncomeReceived": 160500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec5",
@@ -1005,7 +1005,7 @@
     "openingBalance": 1536579.7400000002,
     "totalExpensesPaid": 147709,
     "totalIncomeReceived": 456000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec6",
@@ -1019,7 +1019,7 @@
     "openingBalance": 1844870.7400000002,
     "totalExpensesPaid": 14485,
     "totalIncomeReceived": 298267,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec7",
@@ -1033,7 +1033,7 @@
     "openingBalance": 2128652.74,
     "totalExpensesPaid": 31700,
     "totalIncomeReceived": 299455,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec8",
@@ -1047,7 +1047,7 @@
     "openingBalance": 2396407.74,
     "totalExpensesPaid": 187851,
     "totalIncomeReceived": 134500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ec9",
@@ -1061,7 +1061,7 @@
     "openingBalance": 2343056.74,
     "totalExpensesPaid": 217210,
     "totalIncomeReceived": 679424,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54eca",
@@ -1075,7 +1075,7 @@
     "openingBalance": 2805270.74,
     "totalExpensesPaid": 58750,
     "totalIncomeReceived": 423000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ecb",
@@ -1089,7 +1089,7 @@
     "openingBalance": 3169520.74,
     "totalExpensesPaid": 321200,
     "totalIncomeReceived": 304500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ecc",
@@ -1103,7 +1103,7 @@
     "openingBalance": 3152820.74,
     "totalExpensesPaid": 2372129,
     "totalIncomeReceived": 531734,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ecd",
@@ -1117,7 +1117,7 @@
     "openingBalance": 1312425.7400000002,
     "totalExpensesPaid": 213700,
     "totalIncomeReceived": 230000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ece",
@@ -1131,7 +1131,7 @@
     "openingBalance": 1328725.7400000002,
     "totalExpensesPaid": 199900,
     "totalIncomeReceived": 421500,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ecf",
@@ -1145,7 +1145,7 @@
     "openingBalance": 1550325.7400000002,
     "totalExpensesPaid": 350700,
     "totalIncomeReceived": 413740,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed0",
@@ -1159,7 +1159,7 @@
     "openingBalance": 1613365.7400000002,
     "totalExpensesPaid": 141082,
     "totalIncomeReceived": 417000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed1",
@@ -1173,7 +1173,7 @@
     "openingBalance": 1889283.7400000002,
     "totalExpensesPaid": 439322,
     "totalIncomeReceived": 344250,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed2",
@@ -1187,7 +1187,7 @@
     "openingBalance": 1794211.7400000002,
     "totalExpensesPaid": 107290,
     "totalIncomeReceived": 278935,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed3",
@@ -1201,7 +1201,7 @@
     "openingBalance": 1965856.7400000002,
     "totalExpensesPaid": 73593,
     "totalIncomeReceived": 303174,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed4",
@@ -1215,7 +1215,7 @@
     "openingBalance": 2195437.74,
     "totalExpensesPaid": 843690,
     "totalIncomeReceived": 869794,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed5",
@@ -1229,7 +1229,7 @@
     "openingBalance": 2221541.74,
     "totalExpensesPaid": 182093,
     "totalIncomeReceived": 501000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed6",
@@ -1243,7 +1243,7 @@
     "openingBalance": 2540448.74,
     "totalExpensesPaid": 93960,
     "totalIncomeReceived": 329000,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6adde795d86fb0bfcce54ed7",
@@ -1257,7 +1257,7 @@
     "openingBalance": 2775488.74,
     "totalExpensesPaid": 0,
     "totalIncomeReceived": 0,
-    "updatedAt": "2026-10-27T09:22:49.028Z"
+    "updatedAt": "2026-10-27T10:02:36.672Z"
   },
   {
     "_id": "6ae05df3d86fb0bfcce54ede",

@@ -252,16 +252,91 @@ export default function PaymentEditModal({
           adjustmentDescription: recData?.adjustmentDescription || ''
         });
 
-        // Strict Rule: Exactly ONE line of payment for the active month
-        const initialMap = { [activeMonth]: recRent };
+        // 1. Build initialMap: priority to existing allocations on this receipt
+        const initialMap = {};
+        if (recData?.allocations && Array.isArray(recData.allocations) && recData.allocations.length > 0) {
+          recData.allocations.forEach(a => {
+            if (a.rentMonthYear) {
+              initialMap[a.rentMonthYear] = Number(a.allocatedAmount !== undefined ? a.allocatedAmount : 0);
+            }
+          });
+        } else if (recData?.monthPaidFor) {
+          const mList = String(recData.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
+          if (mList.length === 1) {
+            initialMap[mList[0]] = recRent;
+          } else if (mList.length > 1) {
+            const splitAmt = Math.round(recRent / mList.length);
+            mList.forEach((m, idx) => {
+              initialMap[m] = idx === mList.length - 1 ? (recRent - splitAmt * (mList.length - 1)) : splitAmt;
+            });
+          }
+        }
+
+        // If no prior allocations found, default to activeMonth
+        if (Object.keys(initialMap).length === 0) {
+          initialMap[activeMonth] = recRent;
+        }
+
         setSelectedMonthsMap(initialMap);
 
-        setUnpaidMonthsList([{
+        // 2. Fetch tenant-unit ledger to discover all payable/unpaid months
+        let ledgerBreakdown = [];
+        if (tenantId && unitId) {
+          try {
+            const lRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${tenantId}&unitId=${unitId}&upToMonthYear=${activeMonth}`);
+            if (lRes.data?.success && Array.isArray(lRes.data.data?.monthsBreakdown)) {
+              ledgerBreakdown = lRes.data.data.monthsBreakdown;
+            }
+          } catch (lErr) {
+            console.warn('Could not fetch tenant-unit ledger on modal open:', lErr);
+          }
+        }
+
+        // 3. Build unpaidMonthsList:
+        // Include:
+        // - All past months from ledger that are Unpaid or Partially Paid
+        // - activeMonth
+        // - Any months already allocated in initialMap
+        const unpaidMap = new Map();
+
+        // Add past unpaid / partially paid months from ledger
+        ledgerBreakdown.forEach(m => {
+          if (m.monthYear < activeMonth && (m.status === 'Unpaid' || m.status === 'Partially Paid')) {
+            unpaidMap.set(m.monthYear, {
+              monthYear: m.monthYear,
+              outstandingAmount: m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || monthlyRate),
+              expectedRate: m.expectedRate || monthlyRate,
+              isAdvance: false
+            });
+          }
+        });
+
+        // Add activeMonth
+        const activeMonthData = ledgerBreakdown.find(m => m.monthYear === activeMonth);
+        const activeExp = activeMonthData?.expectedRate || monthlyRate;
+        const activeOut = activeMonthData ? (activeMonthData.outstandingAmount > 0 ? activeMonthData.outstandingAmount : Math.max(0, activeExp - (initialMap[activeMonth] || 0))) : Math.max(0, monthlyRate - recRent);
+        unpaidMap.set(activeMonth, {
           monthYear: activeMonth,
-          outstandingAmount: Math.max(0, monthlyRate - recRent),
-          expectedRate: monthlyRate,
+          outstandingAmount: activeOut,
+          expectedRate: activeExp,
           isAdvance: false
-        }]);
+        });
+
+        // Add all months present in initialMap (e.g. future or past months selected on this receipt)
+        Object.keys(initialMap).forEach(mYear => {
+          if (!unpaidMap.has(mYear)) {
+            const mData = ledgerBreakdown.find(b => b.monthYear === mYear);
+            unpaidMap.set(mYear, {
+              monthYear: mYear,
+              outstandingAmount: mData ? mData.outstandingAmount : 0,
+              expectedRate: mData ? mData.expectedRate : monthlyRate,
+              isAdvance: mYear > activeMonth
+            });
+          }
+        });
+
+        const sortedUnpaidList = Array.from(unpaidMap.values()).sort((a, b) => a.monthYear.localeCompare(b.monthYear));
+        setUnpaidMonthsList(sortedUnpaidList);
       } catch (err) {
         console.error('Failed to initialize payment edit modal:', err);
         setErrorMsg(err.response?.data?.message || err.message || 'Failed to initialize payment details');
@@ -465,7 +540,7 @@ export default function PaymentEditModal({
         monthYear: targetMonth,
         outstandingAmount: 0,
         expectedRate: defaultRate,
-        isAdvance: true
+        isAdvance: targetMonth > activeMonth
       };
       setUnpaidMonthsList(prev => [...prev, newMonthItem].sort((a, b) => a.monthYear.localeCompare(b.monthYear)));
     }
@@ -480,6 +555,7 @@ export default function PaymentEditModal({
   };
 
   const handleRemoveMonthFromList = (monthYear) => {
+    if (monthYear === activeMonth) return;
     setUnpaidMonthsList(prev => prev.filter(m => m.monthYear !== monthYear));
     const updated = { ...selectedMonthsMap };
     delete updated[monthYear];
@@ -631,6 +707,7 @@ export default function PaymentEditModal({
         contractNo: isVacant ? '' : (paymentForm.contractNo || ''),
         receiptDate: paymentForm.receiptDate,
         accountingMonth: paymentForm.accountingMonth || activeMonth,
+        monthPaidFor: allocations.map(a => a.rentMonthYear).join(', ') || paymentForm.accountingMonth || activeMonth,
         rentAmount: enteredRent,
         depositAmount: enteredDeposit,
         totalAmount: enteredTotal,
@@ -898,9 +975,26 @@ export default function PaymentEditModal({
                         try {
                           const lRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${newTenantId}&unitId=${selectedTenantInfo.unitId}&upToMonthYear=${activeMonth}`);
                           const breakdown = lRes.data?.data?.monthsBreakdown || [];
-                          const unpaid = breakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid');
-                          setUnpaidMonthsList(unpaid);
+                          const unpaidMap = new Map();
+                          breakdown.forEach(m => {
+                            if (m.monthYear < activeMonth && (m.status === 'Unpaid' || m.status === 'Partially Paid')) {
+                              unpaidMap.set(m.monthYear, {
+                                monthYear: m.monthYear,
+                                outstandingAmount: m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || selectedTenantInfo?.monthlyRate || 0),
+                                expectedRate: m.expectedRate || selectedTenantInfo?.monthlyRate || 0,
+                                isAdvance: false
+                              });
+                            }
+                          });
                           const targetMonthData = breakdown.find(m => m.monthYear === activeMonth);
+                          const defaultRate = targetMonthData?.expectedRate || selectedTenantInfo?.monthlyRate || 22000;
+                          unpaidMap.set(activeMonth, {
+                            monthYear: activeMonth,
+                            outstandingAmount: targetMonthData ? (targetMonthData.outstandingAmount > 0 ? targetMonthData.outstandingAmount : defaultRate) : defaultRate,
+                            expectedRate: defaultRate,
+                            isAdvance: false
+                          });
+                          setUnpaidMonthsList(Array.from(unpaidMap.values()).sort((a, b) => a.monthYear.localeCompare(b.monthYear)));
                           const defaultAmt = targetMonthData?.outstandingAmount || targetMonthData?.expectedRate || selectedTenantInfo?.monthlyRate || 0;
                           syncPaymentState(defaultAmt > 0 ? { [activeMonth]: defaultAmt } : {}, newTenantId, selectedTenantInfo.unitId);
                         } catch(err) {
@@ -1248,9 +1342,10 @@ export default function PaymentEditModal({
                       type="button"
                       onClick={() => setShowAddAdvancePicker(prev => !prev)}
                       className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1 cursor-pointer transition-all"
+                      title="Select any month to add to Month Paid For"
                     >
                       <Plus className="w-3 h-3" />
-                      <span>Add Advance Month</span>
+                      <span>Add Month Paid For</span>
                     </button>
                     {unpaidMonthsList.length > 1 && (
                       <button
@@ -1266,11 +1361,11 @@ export default function PaymentEditModal({
                 )}
               </div>
 
-              {/* INLINE ADVANCE MONTH PICKER (When user clicks "+ Add Advance Month") */}
+              {/* INLINE MONTH PICKER (When user clicks "+ Add Month Paid For") */}
               {showAddAdvancePicker && (
                 <div className="p-2.5 bg-purple-50/70 border border-purple-200 rounded-xl space-y-2 shrink-0">
                   <div className="flex items-center justify-between text-[11px] font-bold text-purple-900">
-                    <span>Select Future / Advance Month</span>
+                    <span>Select Any Month Paid For (Past / Future)</span>
                     <button
                       type="button"
                       onClick={() => setShowAddAdvancePicker(false)}
@@ -1292,7 +1387,7 @@ export default function PaymentEditModal({
                       disabled={!advancePickerMonth}
                       className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs font-bold transition-all shrink-0 cursor-pointer"
                     >
-                      Add Month Paid For
+                      Add Month
                     </button>
                   </div>
                 </div>
@@ -1312,7 +1407,7 @@ export default function PaymentEditModal({
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>No past dues found. Click &quot;Add Advance Month&quot; to record upcoming rent.</span>
+                    <span>No pending dues found. Click &quot;Add Month Paid For&quot; to select any month.</span>
                   </div>
                 </div>
               ) : (
@@ -1377,7 +1472,7 @@ export default function PaymentEditModal({
                               />
                             </div>
                           )}
-                          {isFutureOrAdvance && (
+                          {m.monthYear !== activeMonth && (
                             <button
                               type="button"
                               onClick={() => handleRemoveMonthFromList(m.monthYear)}
