@@ -352,7 +352,10 @@ export default function PaymentsView() {
   const sheetFilterSuggestions = React.useMemo(() => {
     return {
       accountingMonth: [formatMonthYear(selectedMonth)],
-      paidForMonth: [formatMonthYear(selectedMonth)],
+      paidForMonth: extractUniqueValues(outstandingData, d => {
+        const mList = resolveSelectedMonthsForItem(d, selectedMonth);
+        return mList.map(m => formatMonthYear(m)).join(', ');
+      }),
       tenant: extractUniqueValues(outstandingData, d => d.tenant?.name),
       property: extractUniqueValues(outstandingData, d => d.property?.name),
       subUnit: extractUniqueValues(outstandingData, d => d.unit?.subUnitPartition || d.unit?.unitName),
@@ -535,9 +538,42 @@ export default function PaymentsView() {
     };
   };
 
+  // Resolve accurate month(s) paid for a unit/item from existing receipt or allocations
+  const resolveSelectedMonthsForItem = (item, targetMonth = selectedMonth, existingReceipt = null) => {
+    const rec = existingReceipt || findReceiptForUnitAndMonth(item, targetMonth);
+    if (rec?.allocations && Array.isArray(rec.allocations) && rec.allocations.length > 0) {
+      const positiveAllocMonths = rec.allocations
+        .filter(a => Number(a.allocatedAmount ?? a.actualAllocated ?? 0) > 0 && a.rentMonthYear)
+        .map(a => a.rentMonthYear);
+      if (positiveAllocMonths.length > 0) {
+        return [...new Set(positiveAllocMonths)];
+      }
+      const allAllocMonths = rec.allocations.filter(a => a.rentMonthYear).map(a => a.rentMonthYear);
+      if (allAllocMonths.length > 0) {
+        return [...new Set(allAllocMonths)];
+      }
+    }
+
+    if (rec?.monthPaidFor) {
+      const mList = String(rec.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
+      if (mList.length > 0) {
+        return [...new Set(mList)];
+      }
+    }
+
+    if (item?.monthPaidFor) {
+      const mList = String(item.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
+      if (mList.length > 0) {
+        return [...new Set(mList)];
+      }
+    }
+
+    return [targetMonth];
+  };
+
   // Get all payable months for a tenant (unpaid overdue months + active month if unpaid + upcoming advance months)
-  // CRITICAL: NEVER include any month that is ALREADY FULLY PAID!
-  const getPayableMonthsList = (item, activeMonth) => {
+  // CRITICAL: NEVER include any month that is ALREADY FULLY PAID (unless currently selected on this receipt)
+  const getPayableMonthsList = (item, activeMonth, currentSelectedMonths = []) => {
     const defaultRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0;
     const list = [];
 
@@ -556,13 +592,13 @@ export default function PaymentsView() {
       }
     });
 
-    // 2. Active month (ONLY IF NOT FULLY PAID!)
+    // 2. Active month (ONLY IF NOT FULLY PAID or IF CURRENTLY SELECTED!)
     const activeData = item.monthsBreakdown?.find(m => m.monthYear === activeMonth);
     const activePaid = activeData ? activeData.allocatedAmount : 0;
     const activeExpected = activeData ? activeData.expectedRate : defaultRate;
     const isActivePaid = activePaid >= activeExpected && activeExpected > 0;
 
-    if (!isActivePaid) {
+    if (!isActivePaid || currentSelectedMonths.includes(activeMonth)) {
       const remaining = Math.max(0, activeExpected - activePaid);
       list.push({
         monthYear: activeMonth,
@@ -571,14 +607,14 @@ export default function PaymentsView() {
       });
     }
 
-    // 3. Upcoming advance months (ONLY UNPAID ONES!)
+    // 3. Upcoming advance months
     const upcoming = getUpcomingMonths(activeMonth, 6);
     upcoming.forEach(mStr => {
       const fData = item.monthsBreakdown?.find(bm => bm.monthYear === mStr);
       const fPaid = fData ? fData.allocatedAmount : 0;
       const fExp = fData ? fData.expectedRate : defaultRate;
       const isFPaid = fPaid >= fExp && fExp > 0;
-      if (!isFPaid) {
+      if (!isFPaid || currentSelectedMonths.includes(mStr)) {
         list.push({
           monthYear: mStr,
           dueAmount: Math.max(0, fExp - fPaid) || defaultRate,
@@ -587,7 +623,28 @@ export default function PaymentsView() {
       }
     });
 
-    return list;
+    // 4. Any month in currentSelectedMonths not already in list
+    currentSelectedMonths.forEach(mStr => {
+      if (!list.some(x => x.monthYear === mStr)) {
+        const isAdv = mStr > activeMonth;
+        const isPast = mStr < activeMonth;
+        list.push({
+          monthYear: mStr,
+          dueAmount: defaultRate,
+          type: isAdv ? 'advance' : isPast ? 'overdue' : 'current'
+        });
+      }
+    });
+
+    // Deduplicate by monthYear
+    const uniqueMap = new Map();
+    list.forEach(mItem => {
+      if (!uniqueMap.has(mItem.monthYear)) {
+        uniqueMap.set(mItem.monthYear, mItem);
+      }
+    });
+
+    return Array.from(uniqueMap.values()).sort((a, b) => a.monthYear.localeCompare(b.monthYear));
   };
 
   const getRowDraft = (item) => {
@@ -634,13 +691,14 @@ export default function PaymentsView() {
       : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : '');
 
     const rowStatus = existingReceipt?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
+    const initialSelectedMonths = resolveSelectedMonthsForItem(item, selectedMonth, existingReceipt);
 
     return {
       status: rowStatus,
       rentAmount: rowStatus === 'Vacant' ? '0' : defaultRent,
       depositAmount: rowStatus === 'Vacant' ? '0' : defaultDeposit,
       amount: rowStatus === 'Vacant' ? '0' : defaultTotal,
-      selectedMonths: [selectedMonth],
+      selectedMonths: initialSelectedMonths,
     };
   };
 
@@ -725,7 +783,7 @@ export default function PaymentsView() {
       nextMonths = [...currentMonths, monthStr].sort();
     }
 
-    const payable = getPayableMonthsList(item, selectedMonth);
+    const payable = getPayableMonthsList(item, selectedMonth, nextMonths);
     let totalAmt = 0;
     nextMonths.forEach(m => {
       const pm = payable.find(p => p.monthYear === m);
@@ -742,7 +800,7 @@ export default function PaymentsView() {
       ...current,
       selectedMonths: nextMonths,
       amount: totalAmt
-    });
+    }, item);
   };
 
   // Locate existing receipt for a unit in a given month (strictly ONE receipt per unit per month)
@@ -950,23 +1008,6 @@ export default function PaymentsView() {
     setSavingRows(prev => ({ ...prev, [rowKey]: true }));
 
     const monthlyRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 0;
-
-    let remaining = enteredTotal;
-    const allocations = months.map((m, idx) => {
-      let allocated = 0;
-      if (idx === months.length - 1) {
-        allocated = remaining;
-      } else {
-        allocated = Math.min(remaining, monthlyRate);
-        remaining -= allocated;
-      }
-      return {
-        rentMonthYear: m,
-        allocatedAmount: allocated,
-        notes: `Rent for ${formatMonthYear(m)}`
-      };
-    });
-
     const matchingContracts = getMatchingContractsForRow(item, selectedMonth);
     const resolvedContractNo = draft.contractNo || item.contractNo || matchingContracts[0]?.contractNo || '';
 
@@ -980,40 +1021,26 @@ export default function PaymentsView() {
       ? Number(draft.rentAmount)
       : Math.max(0, enteredTotal - enteredDeposit);
 
-    try {
-      let singleAllocation = [{
-        rentMonthYear: targetMonth,
-        allocatedAmount: enteredRent,
+    const targetMonths = (draft.selectedMonths && draft.selectedMonths.length > 0)
+      ? draft.selectedMonths
+      : resolveSelectedMonthsForItem(item, targetMonth, existingReceipt);
+
+    let rem = enteredRent;
+    const singleAllocation = targetMonths.map((m, idx) => {
+      const allocated = (idx === targetMonths.length - 1)
+        ? rem
+        : Math.min(rem, monthlyRate);
+      rem = Math.max(0, rem - allocated);
+      return {
+        rentMonthYear: m,
+        allocatedAmount: allocated,
         contractNo: resolvedContractNo,
-        notes: enteredRent > 0 ? `Rent collection for ${formatMonthYear(targetMonth)}` : 'Security deposit'
-      }];
+        notes: `Rent collection for ${formatMonthYear(m)}`
+      };
+    });
 
+    try {
       if (existingReceipt) {
-        // If existing receipt has allocations for previous or advance months, preserve them
-        if (existingReceipt.allocations && existingReceipt.allocations.length > 0) {
-          const prevAlloc = existingReceipt.allocations;
-          if (prevAlloc.length === 1) {
-            singleAllocation = [{
-              rentMonthYear: prevAlloc[0].rentMonthYear,
-              allocatedAmount: enteredRent,
-              contractNo: resolvedContractNo || prevAlloc[0].contractNo || '',
-              notes: prevAlloc[0].notes || `Rent collection for ${formatMonthYear(prevAlloc[0].rentMonthYear)}`
-            }];
-          } else {
-            let rem = enteredRent;
-            singleAllocation = prevAlloc.map((a, idx) => {
-              const amt = idx === prevAlloc.length - 1 ? rem : Math.min(rem, Number(a.allocatedAmount || 0));
-              rem = Math.max(0, rem - amt);
-              return {
-                rentMonthYear: a.rentMonthYear,
-                allocatedAmount: amt,
-                contractNo: resolvedContractNo || a.contractNo || '',
-                notes: a.notes || `Rent collection for ${formatMonthYear(a.rentMonthYear)}`
-              };
-            });
-          }
-        }
-
         // EDIT EXISTING RECORD IN PLACE - NEVER ADD TO RECORD (with fallback if 404)
         try {
           await API.put(`/payments/${existingReceipt._id}`, {
@@ -1022,6 +1049,7 @@ export default function PaymentsView() {
             totalAmount: enteredTotal,
             contractNo: resolvedContractNo || existingReceipt.contractNo,
             accountingMonth: targetMonth,
+            monthPaidFor: targetMonths.join(', '),
             status: existingReceipt.status || (item.tenant ? 'Rented' : 'Vacant'),
             allocations: singleAllocation
           });
@@ -1033,6 +1061,7 @@ export default function PaymentsView() {
               contractNo: resolvedContractNo,
               receiptDate,
               accountingMonth: targetMonth,
+              monthPaidFor: targetMonths.join(', '),
               rentAmount: enteredRent,
               depositAmount: enteredDeposit,
               totalAmount: enteredTotal,
@@ -1592,7 +1621,10 @@ export default function PaymentsView() {
         else if (f.columnId === 'property') fieldVal = propName;
         else if (f.columnId === 'subUnit') fieldVal = unitName;
         else if (f.columnId === 'accountingMonth') fieldVal = `${selectedMonth} ${formatMonthYear(selectedMonth)}`;
-        else if (f.columnId === 'paidForMonth') fieldVal = `${selectedMonth} ${formatMonthYear(selectedMonth)}`;
+        else if (f.columnId === 'paidForMonth') {
+          const mList = resolveSelectedMonthsForItem(d, selectedMonth);
+          fieldVal = mList.map(m => `${m} ${formatMonthYear(m)}`).join(' ');
+        }
         else if (f.columnId === 'monthlyRent') fieldVal = monthlyRate;
         else if (f.columnId === 'outstanding') fieldVal = outstanding;
         else if (f.columnId === 'paidUpTo') fieldVal = paidUpTo;
@@ -1809,6 +1841,97 @@ export default function PaymentsView() {
     return sortedSheetRows.slice(startIndex, startIndex + effectiveSheetPageSize);
   }, [sortedSheetRows, isAllSheetRows, sheetCurrentPage, effectiveSheetPageSize]);
 
+  // Sheet Keyboard & Cell Navigation
+  const [selectedRowIndex, setSelectedRowIndex] = useState(null);
+  const [selectedColIndex, setSelectedColIndex] = useState(null);
+  const sheetTableContainerRef = useRef(null);
+  const sheetRowRefs = useRef({});
+  const sheetCellRefs = useRef({});
+
+  useEffect(() => {
+    if (selectedRowIndex !== null && selectedRowIndex >= paginatedSheetRows.length) {
+      setSelectedRowIndex(paginatedSheetRows.length > 0 ? paginatedSheetRows.length - 1 : null);
+    }
+  }, [paginatedSheetRows.length, selectedRowIndex]);
+
+  const focusCell = (rIdx, cIdx) => {
+    requestAnimationFrame(() => {
+      const key = `${rIdx}_${cIdx}`;
+      const cellEl = sheetCellRefs.current[key];
+      if (cellEl) {
+        cellEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+        const inputEl = cellEl.querySelector('input, select, button');
+        if (inputEl) {
+          inputEl.focus({ preventScroll: true });
+          if (inputEl.tagName === 'INPUT' && inputEl.type !== 'button') {
+            inputEl.select?.();
+          }
+        } else {
+          cellEl.focus?.({ preventScroll: true });
+        }
+      }
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (activeTab !== 'sheet') return;
+      if (showPaymentModal || showLedgerModal || showColumnChooser || openMonthPickerRow) return;
+      if (selectedRowIndex === null) return;
+      if (!paginatedSheetRows || paginatedSheetRows.length === 0) return;
+
+      const key = e.key;
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return;
+
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+
+      const tableContainer = sheetTableContainerRef.current;
+      if (isInput && tableContainer && !tableContainer.contains(activeEl)) {
+        return;
+      }
+
+      if (key === 'ArrowUp') {
+        e.preventDefault();
+        const nextRow = Math.max(0, selectedRowIndex - 1);
+        setSelectedRowIndex(nextRow);
+        focusCell(nextRow, selectedColIndex ?? 0);
+      } else if (key === 'ArrowDown') {
+        e.preventDefault();
+        const nextRow = Math.min(paginatedSheetRows.length - 1, selectedRowIndex + 1);
+        setSelectedRowIndex(nextRow);
+        focusCell(nextRow, selectedColIndex ?? 0);
+      } else if (key === 'ArrowLeft') {
+        if (isInput && activeEl && activeEl.tagName === 'INPUT') {
+          const atStart = activeEl.selectionStart === 0 && activeEl.selectionEnd === 0;
+          const allSelected = activeEl.selectionStart === 0 && activeEl.selectionEnd === activeEl.value.length;
+          if (!atStart && !allSelected) {
+            return;
+          }
+        }
+        e.preventDefault();
+        const nextCol = Math.max(0, (selectedColIndex ?? 0) - 1);
+        setSelectedColIndex(nextCol);
+        focusCell(selectedRowIndex, nextCol);
+      } else if (key === 'ArrowRight') {
+        if (isInput && activeEl && activeEl.tagName === 'INPUT') {
+          const atEnd = activeEl.selectionStart === activeEl.value.length && activeEl.selectionEnd === activeEl.value.length;
+          const allSelected = activeEl.selectionStart === 0 && activeEl.selectionEnd === activeEl.value.length;
+          if (!atEnd && !allSelected) {
+            return;
+          }
+        }
+        e.preventDefault();
+        const nextCol = Math.min(visibleSheetColumns.length - 1, (selectedColIndex ?? 0) + 1);
+        setSelectedColIndex(nextCol);
+        focusCell(selectedRowIndex, nextCol);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, selectedRowIndex, selectedColIndex, paginatedSheetRows, visibleSheetColumns, showPaymentModal, showLedgerModal, showColumnChooser, openMonthPickerRow]);
+
   // Excel Export of the Monthly Grid
   const exportSheetToExcel = () => {
     const exportRows = sortedSheetRows.map((item, idx) => {
@@ -1816,6 +1939,8 @@ export default function PaymentsView() {
       const monthlyExpected = monthData ? monthData.expectedRate : (item.unit?.monthlyRentExpected || 0);
       const paidThisMonth = monthData ? monthData.allocatedAmount : 0;
       const outstandingThroughMonth = item.totalOutstanding || 0;
+      const selM = resolveSelectedMonthsForItem(item, selectedMonth);
+      const monthPaidForText = selM.map(m => `${formatMonthYear(m)}${m > selectedMonth ? ' (Adv)' : m < selectedMonth ? ' (Due)' : ''}`).join(', ');
 
       return {
         '#': idx + 1,
@@ -1827,7 +1952,7 @@ export default function PaymentsView() {
         'Outstanding due': outstandingThroughMonth,
         'Paid Up To': item.paidTillMonth && item.paidTillMonth !== 'None' ? formatMonthYear(item.paidTillMonth) : 'None',
         'Accounting Month': formatMonthYear(selectedMonth),
-        'Month Paid For': formatMonthYear(selectedMonth),
+        'Month Paid For': monthPaidForText,
         'Rent Amount Paid': item.rentAmountPaid !== undefined ? item.rentAmountPaid : paidThisMonth,
         'Deposit Amount': item.depositAmount || 0,
         'Total Amount Paid': item.actualPaidForMonth !== undefined ? item.actualPaidForMonth : ((item.rentAmountPaid !== undefined ? Number(item.rentAmountPaid) : paidThisMonth) + (item.depositAmount || 0)),
@@ -2011,7 +2136,7 @@ export default function PaymentsView() {
             ) : sortedSheetRows.length === 0 ? (
               <div className="py-20 text-center text-slate-400 text-sm">No tenant records found matching your filters.</div>
             ) : (
-              <div className="overflow-x-auto max-h-[70vh] overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <div ref={sheetTableContainerRef} tabIndex={0} className="overflow-x-auto max-h-[70vh] overflow-y-auto outline-none" style={{ WebkitOverflowScrolling: 'touch' }}>
                 <table
                   className="w-full text-left text-sm border-collapse table-fixed"
                   style={{ minWidth: `${visibleSheetColumns.reduce((sum, colId) => sum + (columnWidths[colId] || DEFAULT_SHEET_COLUMN_WIDTHS[colId] || 120), 0)}px` }}
@@ -2131,229 +2256,288 @@ export default function PaymentsView() {
                       const matchedUnit = units.find(u => u._id === item.unit?._id);
                       const matchedProp = properties.find(p => p._id === item.property?._id || p._id === item.unit?.propertyId);
 
+                      const isRowSelected = selectedRowIndex === idx;
+
                       return (
-                        <tr key={item.assignmentId || idx} className="hover:bg-slate-50/80 transition-colors">
+                        <tr
+                          key={item.assignmentId || idx}
+                          ref={el => { if (el) sheetRowRefs.current[idx] = el; }}
+                          onClick={() => {
+                            setSelectedRowIndex(idx);
+                            if (selectedColIndex === null) setSelectedColIndex(0);
+                          }}
+                          className={`transition-colors cursor-pointer ${
+                            isRowSelected
+                              ? 'border-y-2 border-blue-400 bg-blue-50/70 shadow-2xs'
+                              : 'hover:bg-slate-50/80'
+                          }`}
+                        >
                           {visibleSheetColumns.map((colId, colIndex) => {
                             const frozenStyle = getFrozenColumnStyle(colIndex, frozenSheetCount, visibleSheetColumns, columnWidths, false);
+                            const isCellSelected = isRowSelected && selectedColIndex === colIndex;
+                            const isFrozen = colIndex < frozenSheetCount;
+                            const cellNavProps = {
+                              ref: el => { if (el) sheetCellRefs.current[`${idx}_${colIndex}`] = el; },
+                              tabIndex: -1,
+                              onClick: (e) => {
+                                setSelectedRowIndex(idx);
+                                setSelectedColIndex(colIndex);
+                              }
+                            };
+                            const cellHighlightClass = isCellSelected
+                              ? 'ring-2 ring-inset ring-blue-500 bg-blue-100/70 z-20'
+                              : isRowSelected
+                                ? (isFrozen ? 'bg-blue-50/95' : 'bg-blue-50/60')
+                                : (isFrozen ? 'bg-white' : '');
+
+                            const renderCellTd = (extraClass, children) => (
+                              <td
+                                key={colId}
+                                {...cellNavProps}
+                                style={frozenStyle}
+                                className={`${extraClass} ${cellHighlightClass}`}
+                              >
+                                {children}
+                              </td>
+                            );
 
                             if (colId === 'index') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-mono">
-                                  {item.property?.displayOrder ? (
-                                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 font-bold text-slate-700 text-[11px]" title={`Property Order: ${item.property.displayOrder}`}>
-                                      {item.property.displayOrder}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400">{idx + 1}</span>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-center text-xs font-mono",
+                                item.property?.displayOrder ? (
+                                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 font-bold text-slate-700 text-[11px]" title={`Property Order: ${item.property.displayOrder}`}>
+                                    {item.property.displayOrder}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">{idx + 1}</span>
+                                )
                               );
                             }
                             if (colId === 'tenant') {
                               const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
                               const rowStatus = draft.status || existingReceiptForRow?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
                               const isVacant = rowStatus === 'Vacant';
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100">
-                                  {isVacant ? (
-                                    <div>
-                                      <span className="text-amber-800 font-bold text-xs italic bg-amber-50 px-2.5 py-0.5 rounded-md border border-amber-200/70 inline-block">
-                                        — (Vacant)
-                                      </span>
-                                      <p className="text-slate-400 text-[10px] mt-0.5 italic">No tenant assigned</p>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <p className="font-bold text-slate-900 text-sm">{item.tenant?.name || 'Unknown'}</p>
-                                      <p className="text-slate-400 text-xs mt-0.5">{item.tenant?.phone || '—'}</p>
-                                    </>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100",
+                                isVacant ? (
+                                  <div>
+                                    <span className="text-amber-800 font-bold text-xs italic bg-amber-50 px-2.5 py-0.5 rounded-md border border-amber-200/70 inline-block">
+                                      — (Vacant)
+                                    </span>
+                                    <p className="text-slate-400 text-[10px] mt-0.5 italic">No tenant assigned</p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <p className="font-bold text-slate-900 text-sm">{item.tenant?.name || 'Unknown'}</p>
+                                    <p className="text-slate-400 text-xs mt-0.5">{item.tenant?.phone || '—'}</p>
+                                  </>
+                                )
                               );
                             }
                             if (colId === 'property') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100">
-                                  <div className="font-semibold text-slate-800 text-xs">
-                                    {item.property?.name || '—'}
-                                  </div>
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100",
+                                <div className="font-semibold text-slate-800 text-xs">
+                                  {item.property?.name || '—'}
+                                </div>
                               );
                             }
                             if (colId === 'subUnit') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100">
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100",
+                                <>
                                   <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs font-semibold">
                                     <Layers className="w-3 h-3 text-slate-400" />
                                     <span>{item.unit?.subUnitPartition || item.unit?.unitName || 'Partition'}</span>
                                   </div>
                                   {item.unit?.areaSqFt && <div className="text-[10px] text-slate-400 mt-0.5 font-normal">{item.unit.areaSqFt} sq ft</div>}
-                                </td>
+                                </>
                               );
                             }
                             if (colId === 'status') {
                               const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
                               const rowStatus = draft.status || existingReceiptForRow?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-2 py-2 border-r border-slate-100 text-xs">
-                                  <div className="relative inline-flex items-center">
-                                    <select
-                                      value={rowStatus}
-                                      disabled={savingRows[rowKey]}
-                                      onChange={(e) => handleRowStatusChange(item, e.target.value)}
-                                      className={`text-[11px] font-extrabold rounded-lg pl-2 pr-6 py-1 border transition-all cursor-pointer focus:outline-none focus:ring-2 appearance-none shadow-2xs ${
-                                        rowStatus === 'Vacant'
-                                          ? 'bg-amber-100/90 text-amber-900 border-amber-300 hover:bg-amber-200/80 focus:ring-amber-400'
-                                          : 'bg-emerald-100/90 text-emerald-900 border-emerald-300 hover:bg-emerald-200/80 focus:ring-emerald-400'
-                                      } ${savingRows[rowKey] ? 'opacity-50 cursor-wait' : ''}`}
-                                      title="Change status between Rented and Vacant irrespective of contract"
-                                    >
-                                      <option value="Rented">● Rented</option>
-                                      <option value="Vacant">● Vacant</option>
-                                    </select>
-                                    <ChevronDown className="w-3 h-3 absolute right-1.5 pointer-events-none opacity-60 text-slate-700" />
-                                  </div>
-                                </td>
+                              return renderCellTd(
+                                "px-2 py-2 border-r border-slate-100 text-xs",
+                                <div className="relative inline-flex items-center">
+                                  <select
+                                    value={rowStatus}
+                                    disabled={savingRows[rowKey]}
+                                    onFocus={() => {
+                                      setSelectedRowIndex(idx);
+                                      setSelectedColIndex(colIndex);
+                                    }}
+                                    onChange={(e) => handleRowStatusChange(item, e.target.value)}
+                                    className={`text-[11px] font-extrabold rounded-lg pl-2 pr-6 py-1 border transition-all cursor-pointer focus:outline-none focus:ring-2 appearance-none shadow-2xs ${
+                                      rowStatus === 'Vacant'
+                                        ? 'bg-amber-100/90 text-amber-900 border-amber-300 hover:bg-amber-200/80 focus:ring-amber-400'
+                                        : 'bg-emerald-100/90 text-emerald-900 border-emerald-300 hover:bg-emerald-200/80 focus:ring-emerald-400'
+                                    } ${savingRows[rowKey] ? 'opacity-50 cursor-wait' : ''}`}
+                                    title="Change status between Rented and Vacant irrespective of contract"
+                                  >
+                                    <option value="Rented">● Rented</option>
+                                    <option value="Vacant">● Vacant</option>
+                                  </select>
+                                  <ChevronDown className="w-3 h-3 absolute right-1.5 pointer-events-none opacity-60 text-slate-700" />
+                                </div>
                               );
                             }
                             if (colId === 'contractNo') {
                               const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
                               const rowStatus = draft.status || existingReceiptForRow?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
                               if (rowStatus === 'Vacant') {
-                                return (
-                                  <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs">
-                                    <span className="text-amber-800/80 font-mono text-xs italic bg-amber-50 px-2 py-0.5 rounded border border-amber-200/60 inline-block">
-                                      —
-                                    </span>
-                                  </td>
+                                return renderCellTd(
+                                  "px-3 py-3.5 border-r border-slate-100 text-xs",
+                                  <span className="text-amber-800/80 font-mono text-xs italic bg-amber-50 px-2 py-0.5 rounded border border-amber-200/60 inline-block">
+                                    —
+                                  </span>
                                 );
                               }
                               const matchingContracts = getMatchingContractsForRow(item, selectedMonth);
                               const activeContractNo = draft.contractNo || item.contractNo || matchingContracts[0]?.contractNo;
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs">
-                                  {matchingContracts.length > 1 ? (
-                                    <select
-                                      value={activeContractNo || ''}
-                                      onChange={(e) => updateRowDraft(rowKey, { contractNo: e.target.value }, item)}
-                                      className="text-xs font-bold text-teal-800 bg-teal-50/80 border border-teal-300 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer max-w-[130px]"
-                                      title="Select Lease Contract valid for this period"
-                                    >
-                                      {matchingContracts.map(c => (
-                                        <option key={c._id} value={c.contractNo || c.assignmentCode}>
-                                          {c.contractNo || c.assignmentCode}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  ) : activeContractNo ? (
-                                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/80 font-bold text-xs shadow-2xs font-mono">
-                                      <span>{activeContractNo}</span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-400 text-[11px] italic">No active contract</span>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-xs",
+                                matchingContracts.length > 1 ? (
+                                  <select
+                                    value={activeContractNo || ''}
+                                    onFocus={() => {
+                                      setSelectedRowIndex(idx);
+                                      setSelectedColIndex(colIndex);
+                                    }}
+                                    onChange={(e) => updateRowDraft(rowKey, { contractNo: e.target.value }, item)}
+                                    className="text-xs font-bold text-teal-800 bg-teal-50/80 border border-teal-300 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer max-w-[130px]"
+                                    title="Select Lease Contract valid for this period"
+                                  >
+                                    {matchingContracts.map(c => (
+                                      <option key={c._id} value={c.contractNo || c.assignmentCode}>
+                                        {c.contractNo || c.assignmentCode}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : activeContractNo ? (
+                                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/80 font-bold text-xs shadow-2xs font-mono">
+                                    <span>{activeContractNo}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px] italic">No active contract</span>
+                                )
                               );
                             }
                             if (colId === 'monthlyRent') {
                               const isEditingThisRent = editingRentUnitId === item.unit?._id;
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right font-semibold text-slate-700 text-xs font-mono">
-                                  {isEditingThisRent ? (
-                                    <div className="flex items-center justify-end gap-1">
-                                      <span className="text-[11px] text-slate-400 font-bold">₹</span>
-                                      <input
-                                        type="number"
-                                        autoFocus
-                                        value={editingRentValue}
-                                        onChange={(e) => setEditingRentValue(e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') handleSaveRentRate(item.unit?._id);
-                                          if (e.key === 'Escape') setEditingRentUnitId(null);
-                                        }}
-                                        className="w-20 px-1.5 py-1 text-xs font-bold font-mono border border-emerald-400 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white"
-                                      />
-                                      <button
-                                        type="button"
-                                        disabled={savingRentUnitId === item.unit?._id}
-                                        onClick={() => handleSaveRentRate(item.unit?._id)}
-                                        className="p-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
-                                        title="Save Rent Rate"
-                                      >
-                                        <Check className="w-3 h-3" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingRentUnitId(null)}
-                                        className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500"
-                                        title="Cancel"
-                                      >
-                                        <X className="w-3 h-3" />
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center justify-end gap-1.5 group">
-                                      <span>{formatCurrency(expectedRate)}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setEditingRentUnitId(item.unit?._id);
-                                          setEditingRentValue(String(expectedRate));
-                                        }}
-                                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-emerald-600 transition-opacity"
-                                        title="Click to edit expected monthly rent"
-                                      >
-                                        <Edit2 className="w-3 h-3" />
-                                      </button>
-                                    </div>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-right font-semibold text-slate-700 text-xs font-mono",
+                                isEditingThisRent ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <span className="text-[11px] text-slate-400 font-bold">₹</span>
+                                    <input
+                                      type="number"
+                                      autoFocus
+                                      value={editingRentValue}
+                                      onChange={(e) => setEditingRentValue(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleSaveRentRate(item.unit?._id);
+                                        if (e.key === 'Escape') setEditingRentUnitId(null);
+                                      }}
+                                      className="w-20 px-1.5 py-1 text-xs font-bold font-mono border border-emerald-400 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white"
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={savingRentUnitId === item.unit?._id}
+                                      onClick={() => handleSaveRentRate(item.unit?._id)}
+                                      className="p-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                                      title="Save Rent Rate"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingRentUnitId(null)}
+                                      className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500"
+                                      title="Cancel"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-end gap-1.5 group">
+                                    <span>{formatCurrency(expectedRate)}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingRentUnitId(item.unit?._id);
+                                        setEditingRentValue(String(expectedRate));
+                                      }}
+                                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-emerald-600 transition-opacity"
+                                      title="Click to edit expected monthly rent"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )
                               );
                             }
                             if (colId === 'outstanding') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right font-extrabold text-xs">
-                                  {effectiveOutstanding > 0 ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-black bg-rose-50 text-rose-700 border border-rose-200 font-mono">
-                                      {formatCurrency(effectiveOutstanding)}
-                                    </span>
-                                  ) : (
-                                    <span className="font-semibold text-slate-700 text-xs font-mono">
-                                      ₹0
-                                    </span>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-right font-extrabold text-xs",
+                                effectiveOutstanding > 0 ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-black bg-rose-50 text-rose-700 border border-rose-200 font-mono">
+                                    {formatCurrency(effectiveOutstanding)}
+                                  </span>
+                                ) : (
+                                  <span className="font-semibold text-slate-700 text-xs font-mono">
+                                    ₹0
+                                  </span>
+                                )
                               );
                             }
                             if (colId === 'paidUpTo') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-medium text-slate-600">
-                                  {item.paidTillMonth && item.paidTillMonth !== 'None' ? (
-                                    <span className="text-slate-700 font-semibold">{formatMonthYear(item.paidTillMonth)}</span>
-                                  ) : (
-                                    <span className="text-slate-400 italic">None</span>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-center text-xs font-medium text-slate-600",
+                                item.paidTillMonth && item.paidTillMonth !== 'None' ? (
+                                  <span className="text-slate-700 font-semibold">{formatMonthYear(item.paidTillMonth)}</span>
+                                ) : (
+                                  <span className="text-slate-400 italic">None</span>
+                                )
                               );
                             }
                             if (colId === 'accountingMonth') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-center text-xs font-semibold text-slate-700 whitespace-nowrap">
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/60 font-bold">
-                                    <Calendar className="w-3 h-3 text-teal-600" />
-                                    {formatMonthYear(selectedMonth)}
-                                  </span>
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-center text-xs font-semibold text-slate-700 whitespace-nowrap",
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/60 font-bold">
+                                  <Calendar className="w-3 h-3 text-teal-600" />
+                                  {formatMonthYear(selectedMonth)}
+                                </span>
                               );
                             }
                             if (colId === 'paidForMonth') {
-                              const selMonths = draft.selectedMonths && draft.selectedMonths.length > 0 ? draft.selectedMonths : [selectedMonth];
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100 relative">
+                              const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
+                              const rowStatus = draft.status || existingReceiptForRow?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
+                              const isVacant = rowStatus === 'Vacant';
+
+                              if (isVacant) {
+                                return renderCellTd(
+                                  "px-3 py-3 border-r border-slate-100 text-center",
+                                  <span className="text-amber-800/80 font-mono text-xs italic bg-amber-50 px-2 py-0.5 rounded border border-amber-200/60 inline-block">
+                                    — (Vacant) —
+                                  </span>
+                                );
+                              }
+
+                              const selMonths = (draft.selectedMonths && draft.selectedMonths.length > 0)
+                                ? draft.selectedMonths
+                                : resolveSelectedMonthsForItem(item, selectedMonth, existingReceiptForRow);
+
+                              return renderCellTd(
+                                "px-3 py-3 border-r border-slate-100 relative",
+                                <>
                                   <div className="flex items-center">
                                     <button
                                       type="button"
-                                      onClick={() => setOpenMonthPickerRow(openMonthPickerRow === rowKey ? null : rowKey)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenMonthPickerRow(openMonthPickerRow === rowKey ? null : rowKey);
+                                      }}
                                       className="w-full inline-flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-white hover:border-emerald-500 hover:shadow-xs transition-all text-slate-800 group"
                                       title="Click to select or change payment month(s)"
                                     >
@@ -2373,12 +2557,15 @@ export default function PaymentsView() {
 
                                   {/* Multi-Month Selection Popover */}
                                   {openMonthPickerRow === rowKey && (() => {
-                                    const payableMonths = getPayableMonthsList(item, selectedMonth);
+                                    const payableMonths = getPayableMonthsList(item, selectedMonth, selMonths);
                                     const dueMonths = payableMonths.filter(m => m.type !== 'advance');
                                     const advanceMonths = payableMonths.filter(m => m.type === 'advance');
 
                                     return (
-                                      <div className="absolute top-12 left-2 z-30 bg-white border border-slate-200 rounded-2xl shadow-2xl p-3.5 min-w-[280px] text-xs">
+                                      <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="absolute top-12 left-2 z-30 bg-white border border-slate-200 rounded-2xl shadow-2xl p-3.5 min-w-[280px] text-xs cursor-default text-left"
+                                      >
                                         <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
                                           <span className="font-extrabold text-slate-800">Select Month(s) to Pay</span>
                                           <button
@@ -2399,14 +2586,14 @@ export default function PaymentsView() {
                                               </span>
                                               {dueMonths.map(m => (
                                                 <label key={m.monthYear} className={`flex items-center justify-between gap-2 p-1.5 rounded-lg cursor-pointer border transition-all ${
-                                                  (draft.selectedMonths || []).includes(m.monthYear)
+                                                  selMonths.includes(m.monthYear)
                                                     ? 'bg-rose-50/70 border-rose-300'
                                                     : 'hover:bg-slate-50 border-slate-100'
                                                 }`}>
                                                   <div className="flex items-center gap-2">
                                                     <input
                                                       type="checkbox"
-                                                      checked={(draft.selectedMonths || []).includes(m.monthYear)}
+                                                      checked={selMonths.includes(m.monthYear)}
                                                       onChange={() => handleToggleMonthForRow(item, m.monthYear)}
                                                       className="rounded text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer"
                                                     />
@@ -2429,14 +2616,14 @@ export default function PaymentsView() {
                                               </span>
                                               {advanceMonths.map(m => (
                                                 <label key={m.monthYear} className={`flex items-center justify-between gap-2 p-1.5 rounded-lg cursor-pointer border transition-all ${
-                                                  (draft.selectedMonths || []).includes(m.monthYear)
+                                                  selMonths.includes(m.monthYear)
                                                     ? 'bg-blue-50/70 border-blue-300'
                                                     : 'hover:bg-slate-50 border-slate-100'
                                                 }`}>
                                                   <div className="flex items-center gap-2">
                                                     <input
                                                       type="checkbox"
-                                                      checked={(draft.selectedMonths || []).includes(m.monthYear)}
+                                                      checked={selMonths.includes(m.monthYear)}
                                                       onChange={() => handleToggleMonthForRow(item, m.monthYear)}
                                                       className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer"
                                                     />
@@ -2453,7 +2640,7 @@ export default function PaymentsView() {
 
                                         <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
                                           <span className="text-slate-600 font-bold">
-                                            {(draft.selectedMonths || []).length} month(s) • ₹{Number(draft.amount || 0).toLocaleString('en-IN')}
+                                            {selMonths.length} month(s) • ₹{Number(draft.amount || 0).toLocaleString('en-IN')}
                                           </span>
                                           <button
                                             type="button"
@@ -2466,263 +2653,247 @@ export default function PaymentsView() {
                                       </div>
                                     );
                                   })()}
-                                </td>
+                                </>
                               );
                             }
                             if (colId === 'rentAmount') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
-                                  <div className="relative flex items-center">
-                                    <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
-                                    <input
-                                      type="number"
-                                      value={draft.rentAmount ?? ''}
-                                      disabled={savingRows[rowKey]}
-                                      onChange={(e) => updateRowDraft(rowKey, { rentAmount: e.target.value }, item)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleDirectSaveRow(item);
-                                      }}
-                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-extrabold text-emerald-800 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      placeholder="Rent ₹"
-                                      title="Rent Amount Paid (Default). Press Enter to Save."
-                                    />
-                                  </div>
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3 border-r border-slate-100",
+                                <div className="relative flex items-center">
+                                  <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
+                                  <input
+                                    type="number"
+                                    value={draft.rentAmount ?? ''}
+                                    disabled={savingRows[rowKey]}
+                                    onFocus={() => {
+                                      setSelectedRowIndex(idx);
+                                      setSelectedColIndex(colIndex);
+                                    }}
+                                    onChange={(e) => updateRowDraft(rowKey, { rentAmount: e.target.value }, item)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleDirectSaveRow(item);
+                                    }}
+                                    className="w-full pl-6 pr-2 py-1.5 text-xs font-extrabold text-emerald-800 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="Rent ₹"
+                                    title="Rent Amount Paid (Default). Press Enter to Save."
+                                  />
+                                </div>
                               );
                             }
                             if (colId === 'depositAmount') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
-                                  <div className="relative flex items-center">
-                                    <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
-                                    <input
-                                      type="number"
-                                      value={draft.depositAmount ?? ''}
-                                      disabled={savingRows[rowKey]}
-                                      onChange={(e) => updateRowDraft(rowKey, { depositAmount: e.target.value }, item)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleDirectSaveRow(item);
-                                      }}
-                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-bold text-amber-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      placeholder="0"
-                                      title="Deposit Amount. Press Enter to Save."
-                                    />
-                                  </div>
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3 border-r border-slate-100",
+                                <div className="relative flex items-center">
+                                  <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
+                                  <input
+                                    type="number"
+                                    value={draft.depositAmount ?? ''}
+                                    disabled={savingRows[rowKey]}
+                                    onFocus={() => {
+                                      setSelectedRowIndex(idx);
+                                      setSelectedColIndex(colIndex);
+                                    }}
+                                    onChange={(e) => updateRowDraft(rowKey, { depositAmount: e.target.value }, item)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleDirectSaveRow(item);
+                                    }}
+                                    className="w-full pl-6 pr-2 py-1.5 text-xs font-bold text-amber-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="0"
+                                    title="Deposit Amount. Press Enter to Save."
+                                  />
+                                </div>
                               );
                             }
                             if (colId === 'amount') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
-                                  <div className="relative flex items-center">
-                                    <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
-                                    <input
-                                      type="number"
-                                      value={draft.amount ?? ''}
-                                      disabled={savingRows[rowKey]}
-                                      onChange={(e) => updateRowDraft(rowKey, { amount: e.target.value }, item)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleDirectSaveRow(item);
-                                      }}
-                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-black text-slate-900 bg-teal-50/50 border border-teal-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      placeholder="Total ₹"
-                                      title="Total Amount Paid = Rent + Deposit. Press Enter to Save."
-                                    />
-                                  </div>
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3 border-r border-slate-100",
+                                <div className="relative flex items-center">
+                                  <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
+                                  <input
+                                    type="number"
+                                    value={draft.amount ?? ''}
+                                    disabled={savingRows[rowKey]}
+                                    onFocus={() => {
+                                      setSelectedRowIndex(idx);
+                                      setSelectedColIndex(colIndex);
+                                    }}
+                                    onChange={(e) => updateRowDraft(rowKey, { amount: e.target.value }, item)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleDirectSaveRow(item);
+                                    }}
+                                    className="w-full pl-6 pr-2 py-1.5 text-xs font-black text-slate-900 bg-teal-50/50 border border-teal-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="Total ₹"
+                                    title="Total Amount Paid = Rent + Deposit. Press Enter to Save."
+                                  />
+                                </div>
                               );
                             }
                             if (colId === 'adjustmentAmount') {
                               const adj = item.adjustmentAmount || 0;
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right text-xs font-mono font-bold">
-                                  {adj !== 0 ? (
-                                    <span className={adj > 0 ? 'text-blue-700' : 'text-amber-700'}>
-                                      {adj > 0 ? `+${formatCurrency(adj)}` : `-${formatCurrency(Math.abs(adj))}`}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400">₹0</span>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-right text-xs font-mono font-bold",
+                                adj !== 0 ? (
+                                  <span className={adj > 0 ? 'text-blue-700' : 'text-amber-700'}>
+                                    {adj > 0 ? `+${formatCurrency(adj)}` : `-${formatCurrency(Math.abs(adj))}`}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">₹0</span>
+                                )
                               );
                             }
                             if (colId === 'adjustedOutstanding') {
                               const netDue = Math.max(0, effectiveOutstanding + (Number(item.adjustmentAmount) || 0));
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-right text-xs font-mono font-black">
-                                  {netDue > 0 ? (
-                                    <span className="text-rose-700">{formatCurrency(netDue)}</span>
-                                  ) : (
-                                    <span className="text-emerald-700">₹0</span>
-                                  )}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-right text-xs font-mono font-black",
+                                netDue > 0 ? (
+                                  <span className="text-rose-700">{formatCurrency(netDue)}</span>
+                                ) : (
+                                  <span className="text-emerald-700">₹0</span>
+                                )
                               );
                             }
                             if (colId === 'adjustmentDescription') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs text-slate-600 max-w-xs truncate" title={item.adjustmentDescription}>
-                                  {item.adjustmentDescription || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-xs text-slate-600 max-w-xs truncate",
+                                item.adjustmentDescription || '—'
                               );
                             }
                             if (colId === 'contractStartDate') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
-                                  {item.startDate ? formatDate(item.startDate) : '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap",
+                                item.startDate ? formatDate(item.startDate) : '—'
                               );
                             }
                             if (colId === 'contractEndDate') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
-                                  {item.endDate ? formatDate(item.endDate) : 'Ongoing'}
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap",
+                                item.endDate ? formatDate(item.endDate) : 'Ongoing'
                               );
                             }
                             if (colId === 'contractStatus') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3.5 border-r border-slate-100 text-xs text-center">
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    item.contractStatus === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                                  }`}>
-                                    {item.contractStatus || 'Active'}
-                                  </span>
-                                </td>
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-xs text-center",
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  item.contractStatus === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {item.contractStatus || 'Active'}
+                                </span>
                               );
                             }
                             if (colId === 'tenantPhone') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
-                                  {item.tenant?.phone || matchedTenant?.phone || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700",
+                                item.tenant?.phone || matchedTenant?.phone || '—'
                               );
                             }
                             if (colId === 'propertyType') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
-                                  {matchedProp?.type || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700",
+                                matchedProp?.type || '—'
                               );
                             }
                             if (colId === 'subUnitArea') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700">
-                                  {matchedUnit?.areaSqFt ? `${matchedUnit.areaSqFt} sq ft` : (item.unit?.areaSqFt ? `${item.unit.areaSqFt} sq ft` : '—')}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700",
+                                matchedUnit?.areaSqFt ? `${matchedUnit.areaSqFt} sq ft` : (item.unit?.areaSqFt ? `${item.unit.areaSqFt} sq ft` : '—')
                               );
                             }
                             if (colId === 'floor') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600">
-                                  {matchedUnit?.floor || item.unit?.floor || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600",
+                                matchedUnit?.floor || item.unit?.floor || '—'
                               );
                             }
                             if (colId === 'deposit') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700">
-                                  {matchedTenant?.securityDeposit ? formatCurrency(matchedTenant.securityDeposit) : '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-right text-xs font-semibold text-slate-700",
+                                matchedTenant?.securityDeposit ? formatCurrency(matchedTenant.securityDeposit) : '—'
                               );
                             }
                             if (colId === 'nextUnpaid') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-center text-xs font-semibold text-rose-600">
-                                  {item.nextUnpaidMonth && item.nextUnpaidMonth !== 'Up to date' ? formatMonthYear(item.nextUnpaidMonth) : 'Up to date'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-center text-xs font-semibold text-rose-600",
+                                item.nextUnpaidMonth && item.nextUnpaidMonth !== 'Up to date' ? formatMonthYear(item.nextUnpaidMonth) : 'Up to date'
                               );
                             }
                             if (colId === 'totalCollected') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-right text-xs font-extrabold text-emerald-700">
-                                  {formatCurrency(item.totalAllocated || 0)}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-right text-xs font-extrabold text-emerald-700",
+                                formatCurrency(item.totalAllocated || 0)
                               );
                             }
                             if (colId === 'createdAt' || colId === 'updatedAt') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap">
-                                  {item[colId] ? formatDate(item[colId]) : '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 whitespace-nowrap",
+                                item[colId] ? formatDate(item[colId]) : '—'
                               );
                             }
                             if (colId === 'tenantCode') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 font-mono text-xs text-slate-700">
-                                  {item.tenant?.tenantCode || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 font-mono text-xs text-slate-700",
+                                item.tenant?.tenantCode || '—'
                               );
                             }
                             if (colId === 'tenantEmail') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 truncate max-w-xs" title={item.tenant?.email}>
-                                  {item.tenant?.email || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 truncate max-w-xs",
+                                item.tenant?.email || '—'
                               );
                             }
                             if (colId === 'tenantAddress') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 truncate max-w-xs" title={item.tenant?.address}>
-                                  {item.tenant?.address || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 truncate max-w-xs",
+                                item.tenant?.address || '—'
                               );
                             }
                             if (colId === 'tenantType') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
-                                  {item.tenant?.tenantType || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700",
+                                item.tenant?.tenantType || '—'
                               );
                             }
                             if (colId === 'propertyCode') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 font-mono text-xs text-slate-700">
-                                  {item.property?.propertyCode || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 font-mono text-xs text-slate-700",
+                                item.property?.propertyCode || '—'
                               );
                             }
                             if (colId === 'propertyAddress') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 truncate max-w-xs" title={typeof item.property?.address === 'string' ? item.property.address : ''}>
-                                  {typeof item.property?.address === 'string' ? item.property.address : '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-600 truncate max-w-xs",
+                                typeof item.property?.address === 'string' ? item.property.address : '—'
                               );
                             }
                             if (colId === 'city') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
-                                  {item.property?.city || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700",
+                                item.property?.city || '—'
                               );
                             }
                             if (colId === 'unitCode') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 font-mono text-xs text-slate-700">
-                                  {item.unit?.unitCode || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 font-mono text-xs text-slate-700",
+                                item.unit?.unitCode || '—'
                               );
                             }
                             if (colId === 'unitType') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
-                                  {item.unit?.unitType || '—'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700",
+                                item.unit?.unitType || '—'
                               );
                             }
                             if (colId === 'occupancyStatus') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-center">
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
-                                    {item.unit?.occupancyStatus || 'Occupied'}
-                                  </span>
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-center",
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                                  {item.unit?.occupancyStatus || 'Occupied'}
+                                </span>
                               );
                             }
                             if (colId === 'contractType') {
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700">
-                                  {item.contractType || 'Rent'}
-                                </td>
+                              return renderCellTd(
+                                "px-4 py-3.5 border-r border-slate-100 text-xs text-slate-700",
+                                item.contractType || 'Rent'
                               );
                             }
                             if (colId === 'actions') {
@@ -2730,83 +2901,82 @@ export default function PaymentsView() {
                               const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
                               const canSaveRow = hasEnteredAmount || Boolean(existingReceiptForRow);
                               const isRowDeleting = deletingRowKey === rowKey;
-                              return (
-                                <td key={colId} style={frozenStyle} className="px-3 py-3 text-right">
-                                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                                    {/* 1-Click Direct Save Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDirectSaveRow(item)}
-                                      disabled={savingRows[rowKey] || (!canSaveRow && !savedFeedback[rowKey])}
-                                      className={`inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 shrink-0 ${
-                                        savedFeedback[rowKey]
-                                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                          : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
-                                      } ${savingRows[rowKey] ? 'opacity-70 cursor-wait' : ''}`}
-                                      title={hasEnteredAmount ? "Save Payment (Enter)" : "Enter amount to save"}
-                                    >
-                                      {savingRows[rowKey] ? (
-                                        <>
-                                          <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
-                                          <span>Saving...</span>
-                                        </>
-                                      ) : savedFeedback[rowKey] ? (
-                                        <>
-                                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                          <span>Saved ✓</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Check className="w-3.5 h-3.5" />
-                                          <span>Save</span>
-                                        </>
-                                      )}
-                                    </button>
+                              return renderCellTd(
+                                "px-3 py-3 text-right",
+                                <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                                  {/* 1-Click Direct Save Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDirectSaveRow(item)}
+                                    disabled={savingRows[rowKey] || (!canSaveRow && !savedFeedback[rowKey])}
+                                    className={`inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 shrink-0 ${
+                                      savedFeedback[rowKey]
+                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                                    } ${savingRows[rowKey] ? 'opacity-70 cursor-wait' : ''}`}
+                                    title={hasEnteredAmount ? "Save Payment (Enter)" : "Enter amount to save"}
+                                  >
+                                    {savingRows[rowKey] ? (
+                                      <>
+                                        <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                                        <span>Saving...</span>
+                                      </>
+                                    ) : savedFeedback[rowKey] ? (
+                                      <>
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>Saved ✓</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>Save</span>
+                                      </>
+                                    )}
+                                  </button>
 
-                                    {/* Row Edit Button (Edits existing single entry record) */}
-                                    <button
-                                      type="button"
-                                      onClick={() => openFastPaymentModal(item)}
-                                      className="p-1.5 rounded-lg text-slate-500 hover:text-teal-700 hover:bg-teal-50 border border-slate-200 transition-colors shrink-0 shadow-2xs cursor-pointer"
-                                      title={existingReceiptForRow ? "Edit Month / Payment Details" : "Add Month"}
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5 text-teal-600" />
-                                    </button>
+                                  {/* Row Edit Button (Edits existing single entry record) */}
+                                  <button
+                                    type="button"
+                                    onClick={() => openFastPaymentModal(item)}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-teal-700 hover:bg-teal-50 border border-slate-200 transition-colors shrink-0 shadow-2xs cursor-pointer"
+                                    title={existingReceiptForRow ? "Edit Month / Payment Details" : "Add Month"}
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5 text-teal-600" />
+                                  </button>
 
-                                    {/* Contract Ledger Eye Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedLedgerModal(item)}
-                                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
-                                      title="View Contract Ledger & Receipts"
-                                    >
-                                      <Eye className="w-4 h-4" />
-                                    </button>
+                                  {/* Contract Ledger Eye Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedLedgerModal(item)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
+                                    title="View Contract Ledger & Receipts"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
 
-                                    {/* Row Delete Button in Collection Screen Column */}
-                                    <button
-                                      type="button"
-                                      disabled={!existingReceiptForRow || isRowDeleting}
-                                      onClick={() => handleDeleteRowReceipt(item, existingReceiptForRow)}
-                                      className={`p-1.5 rounded-lg border transition-all shrink-0 shadow-2xs cursor-pointer ${
-                                        existingReceiptForRow
-                                          ? 'text-rose-500 hover:text-rose-700 hover:bg-rose-50 border-rose-200'
-                                          : 'text-slate-300 border-slate-200 opacity-30 cursor-not-allowed hover:bg-transparent'
-                                      } ${isRowDeleting ? 'opacity-50 cursor-wait' : ''}`}
-                                      title={
-                                        existingReceiptForRow
-                                          ? `Delete payment record of ₹${Number(existingReceiptForRow.totalAmount || 0).toLocaleString('en-IN')} for ${formatMonthYear(selectedMonth)}`
-                                          : `No payment record for ${formatMonthYear(selectedMonth)} to delete`
-                                      }
-                                    >
-                                      {isRowDeleting ? (
-                                        <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-rose-500 border-t-transparent rounded-full" />
-                                      ) : (
-                                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                      )}
-                                    </button>
-                                  </div>
-                                </td>
+                                  {/* Row Delete Button in Collection Screen Column */}
+                                  <button
+                                    type="button"
+                                    disabled={!existingReceiptForRow || isRowDeleting}
+                                    onClick={() => handleDeleteRowReceipt(item, existingReceiptForRow)}
+                                    className={`p-1.5 rounded-lg border transition-all shrink-0 shadow-2xs cursor-pointer ${
+                                      existingReceiptForRow
+                                        ? 'text-rose-500 hover:text-rose-700 hover:bg-rose-50 border-rose-200'
+                                        : 'text-slate-300 border-slate-200 opacity-30 cursor-not-allowed hover:bg-transparent'
+                                    } ${isRowDeleting ? 'opacity-50 cursor-wait' : ''}`}
+                                    title={
+                                      existingReceiptForRow
+                                        ? `Delete payment record of ₹${Number(existingReceiptForRow.totalAmount || 0).toLocaleString('en-IN')} for ${formatMonthYear(selectedMonth)}`
+                                        : `No payment record for ${formatMonthYear(selectedMonth)} to delete`
+                                    }
+                                  >
+                                    {isRowDeleting ? (
+                                      <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-rose-500 border-t-transparent rounded-full" />
+                                    ) : (
+                                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                    )}
+                                  </button>
+                                </div>
                               );
                             }
                             return null;
