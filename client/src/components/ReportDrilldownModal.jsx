@@ -102,7 +102,6 @@ export default function ReportDrilldownModal({
         expenseDate: defaultDate,
         description: target.category ? `${target.category} expense` : '',
 
-        referenceNumber: ''
       });
       setNewPaymentForm(null);
     } else {
@@ -124,7 +123,6 @@ export default function ReportDrilldownModal({
         status: 'Rented',
         receiptDate: defaultDate,
         rentMonthYear: defaultMonth,
-        referenceNumber: '',
         comments: `Rent collection for ${defaultMonth}`
       });
       setNewExpenseForm(null);
@@ -157,7 +155,6 @@ export default function ReportDrilldownModal({
         expenseDate: newExpenseForm.expenseDate ? new Date(newExpenseForm.expenseDate) : new Date(),
         description: newExpenseForm.description?.trim() || `${newExpenseForm.category} expense`,
 
-        referenceNumber: newExpenseForm.referenceNumber || ''
       };
 
       await API.post('/expenses', payload);
@@ -200,7 +197,6 @@ export default function ReportDrilldownModal({
         contractNo: isVacant ? '' : (newPaymentForm.contractNo || ''),
         receiptDate: newPaymentForm.receiptDate || new Date().toISOString().split('T')[0],
         totalAmount: amt,
-        referenceNumber: newPaymentForm.referenceNumber || '',
         comments: newPaymentForm.comments || `Rent payment for ${m}`,
         allocations: [{
           rentMonthYear: m,
@@ -332,7 +328,6 @@ export default function ReportDrilldownModal({
       receiptDate: dateStr,
       status: record.status || 'Rented',
       totalAmount: record.receiptTotalAmount || 0,
-      referenceNumber: record.referenceNumber || '',
       comments: record.comments || '',
       allocations: record.allocations && record.allocations.length > 0
         ? record.allocations.map(a => ({
@@ -408,7 +403,6 @@ export default function ReportDrilldownModal({
         status: editForm.status || 'Rented',
         receiptDate: editForm.receiptDate,
         totalAmount: Number(editForm.totalAmount),
-        referenceNumber: editForm.referenceNumber,
         comments: editForm.comments,
         allocations: editForm.allocations
       };
@@ -451,7 +445,6 @@ export default function ReportDrilldownModal({
       category: record.category || 'Maintenance',
       description: record.description || record.comments || '',
 
-      referenceNumber: record.referenceNumber || ''
     });
   };
 
@@ -478,7 +471,6 @@ export default function ReportDrilldownModal({
         description: editExpenseForm.description || '',
         vendorOrPayee: editExpenseForm.vendorOrPayee || '',
         paymentMode: editExpenseForm.paymentMode,
-        referenceNumber: editExpenseForm.referenceNumber || ''
       };
 
       const res = await API.put(`/expenses/${editExpenseForm.id}`, payload);
@@ -721,16 +713,7 @@ export default function ReportDrilldownModal({
 
 
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Reference / Cheque No</label>
-                      <input
-                        type="text"
-                        placeholder="Reference number"
-                        value={newExpenseForm.referenceNumber}
-                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, referenceNumber: e.target.value }))}
-                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
-                      />
-                    </div>
+                    
                   </div>
 
                   <div>
@@ -903,10 +886,10 @@ export default function ReportDrilldownModal({
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Reference / Cheque No / Notes</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Notes / Comments</label>
                       <input
                         type="text"
-                        placeholder="Transaction reference, comments..."
+                        placeholder="Notes, comments..."
                         value={newPaymentForm.comments}
                         onChange={(e) => setNewPaymentForm(prev => ({ ...prev, comments: e.target.value }))}
                         className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl"
@@ -1019,11 +1002,7 @@ export default function ReportDrilldownModal({
                                 <Building2 className="w-3.5 h-3.5 text-slate-400" />
                                 {rec.property?.name || 'Common / Other'}
                               </span>
-                              {rec.referenceNumber && (
-                                <span className="text-slate-400">
-                                  Ref: <strong className="text-slate-600">{rec.referenceNumber}</strong>
-                                </span>
-                              )}
+                              
                             </div>
 
                             {rec.description && (
@@ -1129,19 +1108,7 @@ export default function ReportDrilldownModal({
                             </div>
                           </div>
 
-                          {/* Row 2: Reference */}
-                          <div>
-                            <label className="block text-xs font-bold text-slate-700 mb-1">
-                              Bill / Reference / Cheque No
-                            </label>
-                            <input
-                              type="text"
-                              value={editExpenseForm.referenceNumber}
-                              onChange={(e) => setEditExpenseForm(prev => ({ ...prev, referenceNumber: e.target.value }))}
-                              placeholder="Optional reference"
-                              className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                            />
-                          </div>
+                          
 
                           {/* Row 3: Description / Reason */}
                           <div>

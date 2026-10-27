@@ -70,7 +70,6 @@ const ALL_INCOME_COLUMNS_DEF = [
   { id: 'totalAmount', label: 'Total Amount Paid (₹)', defaultVisible: true },
   { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
   { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
-  { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
   { id: 'comments', label: 'Notes / Comments', defaultVisible: true },
   { id: 'isReversed', label: 'Reversal Status', defaultVisible: false },
   { id: 'reversalReason', label: 'Reversal Reason', defaultVisible: false },
@@ -91,7 +90,6 @@ const DEFAULT_INCOME_COLS = [
   'tenant',
   'monthsCovered',
   'status',
-  'referenceNumber',
   'comments',
   'rentAmount',
   'depositAmount',
@@ -137,7 +135,6 @@ const DEFAULT_INCOME_COLUMN_WIDTHS = {
   totalAmount: 130,
   adjustmentAmount: 140,
   adjustmentDescription: 180,
-  referenceNumber: 130,
   comments: 180,
   isReversed: 120,
   reversalReason: 150,
@@ -195,7 +192,6 @@ const getIncomeFieldVal = (r, colId) => {
     case 'totalAmount': return Number(r.totalAmount) || 0;
     case 'adjustmentAmount': return Number(r.adjustmentAmount) || 0;
     case 'adjustmentDescription': return r.adjustmentDescription || '';
-    case 'referenceNumber': return r.referenceNumber || '';
     case 'comments': return r.comments || '';
     case 'isReversed': return r.isReversed ? 'Reversed' : 'Active';
     case 'reversalReason': return r.reversalReason || '';
@@ -259,7 +255,6 @@ export default function AllIncomeReportView() {
     isCustomContract: false,
     status: 'Rented',
     totalAmount: '',
-    referenceNumber: '',
     comments: ''
   });
   const [savingReceipt, setSavingReceipt] = useState(false);
@@ -339,7 +334,6 @@ export default function AllIncomeReportView() {
         const ten = (r.tenantId?.name || '').toLowerCase();
         const phone = (r.tenantId?.phone || '').toLowerCase();
         const stat = (r.status || 'Rented').toLowerCase();
-        const ref = (r.referenceNumber || '').toLowerCase();
         const comm = (r.comments || '').toLowerCase();
         const months = (r.monthsCovered || '').toLowerCase();
         const amt = String(r.totalAmount || '');
@@ -443,7 +437,6 @@ export default function AllIncomeReportView() {
       rentAmount: String(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount || 0),
       depositAmount: String(r.depositAmount || 0),
       totalAmount: String(r.totalAmount || 0),
-      referenceNumber: r.referenceNumber || '',
       comments: r.comments || ''
     });
   };
@@ -512,7 +505,6 @@ export default function AllIncomeReportView() {
         rentAmount: rentNum,
         depositAmount: depNum,
         totalAmount: totalNum,
-        referenceNumber: editForm.referenceNumber,
         contractNo: resolvedContractNo,
         tenantId: editForm.status === 'Vacant' ? null : (editForm.tenantId || undefined),
         unitId: editForm.unitId || undefined,
@@ -811,13 +803,7 @@ export default function AllIncomeReportView() {
                           );
                         }
 
-                        if (colId === 'referenceNumber') {
-                          return (
-                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600 whitespace-nowrap">
-                              {r.referenceNumber || '—'}
-                            </td>
-                          );
-                        }
+                        
 
                         if (colId === 'comments') {
                           return (
@@ -1271,16 +1257,7 @@ export default function AllIncomeReportView() {
                     References & Notes
                   </span>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Ref / Cheque #</label>
-                    <input
-                      type="text"
-                      placeholder="UTR / Cheque / Transaction #"
-                      value={editForm.referenceNumber}
-                      onChange={(e) => setEditForm({ ...editForm, referenceNumber: e.target.value })}
-                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
-                    />
-                  </div>
+                  
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Notes / Comments</label>

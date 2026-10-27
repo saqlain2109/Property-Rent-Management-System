@@ -108,7 +108,6 @@ const CONTRACT_RECEIPTS_COLUMNS_DEF = [
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
   { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
   { id: 'status', label: 'Status', defaultVisible: true },
-  { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
   { id: 'comments', label: 'Comments', defaultVisible: true },
   { id: 'totalAmount', label: 'Amount Received (₹)', defaultVisible: true },
   { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
@@ -119,7 +118,7 @@ const CONTRACT_RECEIPTS_COLUMNS_DEF = [
 ];
 
 const DEFAULT_CONTRACT_RECEIPTS_COLS = [
-  'receiptNumber', 'receiptDate', 'accountingMonth', 'monthsCovered', 'status', 'referenceNumber', 'comments', 'totalAmount', 'actions'
+  'receiptNumber', 'receiptDate', 'accountingMonth', 'monthsCovered', 'status', 'comments', 'totalAmount', 'actions'
 ];
 
 const DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS = {
@@ -128,7 +127,6 @@ const DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS = {
   accountingMonth: 140,
   monthsCovered: 160,
   status: 95,
-  referenceNumber: 130,
   comments: 180,
   totalAmount: 140,
   actions: 90
@@ -325,7 +323,6 @@ export default function ContractsView() {
     receiptDate: '',
     totalAmount: '',
     status: 'Rented',
-    referenceNumber: '',
     comments: ''
   });
   const [receiptSaving, setReceiptSaving] = useState(false);
@@ -341,7 +338,6 @@ export default function ContractsView() {
       receiptDate: extractUniqueValues(contractReceipts, r => r.receiptDate ? formatDate(r.receiptDate) : ''),
       monthsCovered: extractUniqueValues(contractReceipts, r => r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || ''),
       status: ['Rented', 'Vacant'],
-      referenceNumber: extractUniqueValues(contractReceipts, r => r.referenceNumber),
       comments: extractUniqueValues(contractReceipts, r => r.comments)
     };
   }, [contractReceipts]);
@@ -355,7 +351,6 @@ export default function ContractsView() {
       rows = rows.filter(r => 
         (r.receiptNumber && r.receiptNumber.toLowerCase().includes(q)) ||
         ((r.status || 'Rented').toLowerCase().includes(q)) ||
-        (r.referenceNumber && r.referenceNumber.toLowerCase().includes(q)) ||
         (r.comments && r.comments.toLowerCase().includes(q)) ||
         (r.monthsCovered && r.monthsCovered.toLowerCase().includes(q)) ||
         (r.allocations && r.allocations.some(a => a.rentMonthYear && a.rentMonthYear.toLowerCase().includes(q))) ||
@@ -372,7 +367,6 @@ export default function ContractsView() {
           else if (flt.column === 'receiptDate') cellVal = r.receiptDate ? formatDate(r.receiptDate) : '';
           else if (flt.column === 'monthsCovered') cellVal = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
           else if (flt.column === 'status') cellVal = r.status || 'Rented';
-          else if (flt.column === 'referenceNumber') cellVal = r.referenceNumber;
           else if (flt.column === 'comments') cellVal = r.comments;
           else if (flt.column === 'totalAmount') cellVal = r.totalAmount;
           return evaluateFilterRule(cellVal, flt.operator, flt.value);
@@ -408,7 +402,6 @@ export default function ContractsView() {
         'Contract No': r.contractNo || selectedContract?.contractNo || '',
         'Month(s) Covered': r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '',
         'Status': r.status || 'Rented',
-        'Ref / Cheque #': r.referenceNumber || '',
         'Comments': r.comments || '',
         'Amount Received (₹)': Number(r.totalAmount) || 0
       }));
@@ -486,7 +479,6 @@ export default function ContractsView() {
       receiptDate: r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       totalAmount: String(r.totalAmount || 0),
       status: r.status || 'Rented',
-      referenceNumber: r.referenceNumber || '',
       comments: r.comments || ''
     });
   };
@@ -500,7 +492,6 @@ export default function ContractsView() {
         receiptDate: receiptEditForm.receiptDate,
         totalAmount: Number(receiptEditForm.totalAmount),
         status: receiptEditForm.status || 'Rented',
-        referenceNumber: receiptEditForm.referenceNumber,
         comments: receiptEditForm.comments,
         allocations: (viewingReceipt.allocations || []).map(a => ({
           rentMonthYear: a.rentMonthYear,
@@ -2089,13 +2080,7 @@ export default function ContractsView() {
                                   </td>
                                 );
                               }
-                              if (colId === 'referenceNumber') {
-                                return (
-                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600 whitespace-nowrap">
-                                    {r.referenceNumber || '—'}
-                                  </td>
-                                );
-                              }
+                              
                               if (colId === 'comments') {
                                 return (
                                   <td key={colId} className="py-2 px-3 border-r border-slate-200 text-slate-600 text-[11px] max-w-xs truncate" title={r.comments}>
@@ -2287,16 +2272,7 @@ export default function ContractsView() {
                     </button>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Ref / Cheque #</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. UTR / Cheque number"
-                    value={receiptEditForm.referenceNumber}
-                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, referenceNumber: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
-                  />
-                </div>
+                
               </div>
 
               <div>

@@ -74,7 +74,6 @@ const RECEIPTS_COLUMNS_DEF = [
   { id: 'totalAmount', label: 'Total Amount Paid', defaultVisible: true },
   { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
   { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
-  { id: 'referenceNumber', label: 'Ref / Cheque / UTR #', defaultVisible: false },
   { id: 'comments', label: 'Notes / Comments', defaultVisible: false },
   { id: 'tenantCode', label: 'Tenant Code', defaultVisible: false },
   { id: 'tenantPhone', label: 'Tenant Phone', defaultVisible: false },
@@ -154,7 +153,6 @@ const DEFAULT_RECEIPTS_COLUMN_WIDTHS = {
   adjustmentAmount: 130,
   adjustmentDescription: 180,
   actions: 105,
-  referenceNumber: 120,
   comments: 150,
   tenantCode: 110,
   tenantPhone: 110,
@@ -383,7 +381,6 @@ export default function PaymentsView() {
       propertyName: extractUniqueValues(receipts, r => r.unitId?.propertyId?.name),
       subUnitName: extractUniqueValues(receipts, r => r.unitId?.subUnitPartition || r.unitId?.unitName),
       status: ['Rented', 'Vacant'],
-      referenceNumber: extractUniqueValues(receipts, r => r.referenceNumber),
       receiptDate: extractUniqueValues(receipts, r => formatDate(r.receiptDate))
     };
   }, [receipts]);
@@ -644,7 +641,6 @@ export default function PaymentsView() {
       depositAmount: rowStatus === 'Vacant' ? '0' : defaultDeposit,
       amount: rowStatus === 'Vacant' ? '0' : defaultTotal,
       selectedMonths: [selectedMonth],
-      referenceNumber: ''
     };
   };
 
@@ -655,7 +651,6 @@ export default function PaymentsView() {
         depositAmount: '0',
         amount: '',
         selectedMonths: [selectedMonth],
-        referenceNumber: ''
       });
 
       const merged = { ...current, ...patch };
@@ -1023,7 +1018,6 @@ export default function PaymentsView() {
             rentAmount: enteredRent,
             depositAmount: enteredDeposit,
             totalAmount: enteredTotal,
-            referenceNumber: draft.referenceNumber !== undefined ? draft.referenceNumber : (existingReceipt.referenceNumber || ''),
             contractNo: resolvedContractNo || existingReceipt.contractNo,
             accountingMonth: targetMonth,
             status: existingReceipt.status || (item.tenant ? 'Rented' : 'Vacant'),
@@ -1040,7 +1034,6 @@ export default function PaymentsView() {
               rentAmount: enteredRent,
               depositAmount: enteredDeposit,
               totalAmount: enteredTotal,
-              referenceNumber: draft.referenceNumber || '',
               status: item.tenant ? 'Rented' : 'Vacant',
               comments: `Direct collection for ${formatMonthYear(targetMonth)}`,
               allocations: singleAllocation
@@ -1072,7 +1065,6 @@ export default function PaymentsView() {
           rentAmount: enteredRent,
           depositAmount: enteredDeposit,
           totalAmount: enteredTotal,
-          referenceNumber: draft.referenceNumber || '',
           status: item.tenant ? 'Rented' : 'Vacant',
           comments: `Direct collection for ${formatMonthYear(targetMonth)}`,
           allocations: singleAllocation
@@ -1433,7 +1425,6 @@ export default function PaymentsView() {
       const tenantPhone = r.tenantId?.phone || '';
       const propName = r.unitId?.propertyId?.name || '';
       const unitName = r.unitId?.subUnitPartition || r.unitId?.unitName || '';
-      const refMatch = r.referenceNumber || '';
       const notesMatch = r.comments || '';
             const statusMatch = r.status || 'Rented';
       const rDate = r.receiptDate ? formatDate(r.receiptDate) : '';
@@ -1493,7 +1484,6 @@ export default function PaymentsView() {
         else if (f.columnId === 'depositAmount') fieldVal = String(r.depositAmount || 0);
         else if (f.columnId === 'totalAmount') fieldVal = amount;
         else if (f.columnId === 'status') fieldVal = statusMatch;
-        else if (f.columnId === 'referenceNumber') fieldVal = refMatch;
                 else if (f.columnId === 'comments') fieldVal = notesMatch;
         else if (f.columnId === 'tenantPhone') fieldVal = tenantPhone;
         else if (f.columnId === 'propertyName') fieldVal = propName;
@@ -1521,7 +1511,6 @@ export default function PaymentsView() {
       depositAmount: r => Number(r.depositAmount) || 0,
       totalAmount: r => Number(r.totalAmount) || 0,
       status: r => r.status || 'Rented',
-      referenceNumber: r => r.referenceNumber || '',
       comments: r => r.comments || '',
       tenantPhone: r => r.tenantId?.phone || '',
       propertyName: r => r.unitId?.propertyId?.name || '',
@@ -1562,7 +1551,6 @@ export default function PaymentsView() {
       'Deposit Amount (₹)': Number(r.depositAmount) || 0,
       'Total Amount Paid (₹)': Number(r.totalAmount) || 0,
       'Status': r.status || 'Rented',
-      'Ref / UTR #': r.referenceNumber || '—',
       'Notes': r.comments || '—',
       'Created Date': r.createdAt ? formatDate(r.createdAt) : '',
       'Modified Date': r.updatedAt ? formatDate(r.updatedAt) : ''
@@ -3701,7 +3689,6 @@ export default function PaymentsView() {
                       else if (colId === 'depositAmount') label = 'Deposit Amount';
                       else if (colId === 'totalAmount') label = 'Total Amount Paid';
                       else if (colId === 'status') label = 'Status';
-                      else if (colId === 'referenceNumber') label = 'Ref / UTR #';
                       else if (colId === 'comments') label = 'Notes';
                       else if (colId === 'tenantPhone') label = 'Tenant Phone';
                       else if (colId === 'propertyName') label = 'Property';
@@ -3871,13 +3858,7 @@ export default function PaymentsView() {
                             </td>
                           );
                         }
-                        if (colId === 'referenceNumber') {
-                          return (
-                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-700 text-xs font-mono">
-                              {r.referenceNumber || '—'}
-                            </td>
-                          );
-                        }
+                        
                         if (colId === 'comments') {
                           return (
                             <td key={colId} style={frozenStyle} className="px-5 py-4 text-slate-600 text-xs max-w-xs truncate" title={r.comments}>

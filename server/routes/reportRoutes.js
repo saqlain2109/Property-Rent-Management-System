@@ -138,7 +138,6 @@ router.get('/export-excel', protect, async (req, res) => {
       'Unit': r.unitId?.unitName || '',
       'Amount': r.totalAmount,
       'Status': r.status || 'Rented',
-      'Reference No': r.referenceNumber,
       'Comments': r.comments
     }));
     const wsRec = XLSX.utils.json_to_sheet(recRows);
@@ -1113,7 +1112,6 @@ router.get('/monthly-drilldown', protect, async (req, res) => {
         receiptTotalAmount: e.amount,
         category: e.category,
         description: e.description,
-        referenceNumber: e.referenceNumber,
         comments: e.description ? `${e.category}: ${e.description}` : e.category,
         tenant: null,
         property: e.propertyId ? { name: e.propertyId.name, _id: e.propertyId._id } : { name: 'Common / Other' },
@@ -1195,7 +1193,6 @@ router.get('/monthly-drilldown', protect, async (req, res) => {
           contractNo: r.contractNo || '',
           adjustmentAmount: r.adjustmentAmount || 0,
           adjustmentDescription: r.adjustmentDescription || '',
-          referenceNumber: r.referenceNumber || '',
           comments: a.notes || r.comments || '',
           tenant: r.tenantId,
           unit: r.unitId,
@@ -1279,7 +1276,6 @@ router.get('/monthly-drilldown', protect, async (req, res) => {
           contractNo: r.contractNo || '',
           adjustmentAmount: r.adjustmentAmount || 0,
           adjustmentDescription: r.adjustmentDescription || '',
-          referenceNumber: r.referenceNumber || '',
           comments: r.comments || '',
           tenant: r.tenantId,
           unit: r.unitId,

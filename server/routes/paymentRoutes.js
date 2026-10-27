@@ -424,7 +424,6 @@ router.post('/', protect, authorize('admin', 'manager'), [
       unitId,
       receiptDate,
       totalAmount,
-      referenceNumber,
       comments,
       allocations
     } = req.body;
@@ -486,7 +485,6 @@ router.post('/', protect, authorize('admin', 'manager'), [
       existingReceipt.depositAmount = parsedDeposit;
       existingReceipt.totalAmount = parsedTotal;
       if (receiptDate) existingReceipt.receiptDate = receiptDate;
-      if (referenceNumber !== undefined) existingReceipt.referenceNumber = referenceNumber;
       if (comments !== undefined) existingReceipt.comments = comments;
       existingReceipt.accountingMonth = targetMonth;
       existingReceipt.monthPaidFor = finalMonthPaidFor;
@@ -556,7 +554,6 @@ router.post('/', protect, authorize('admin', 'manager'), [
       rentAmount: parsedRent,
       depositAmount: parsedDeposit,
       totalAmount: parsedTotal,
-      referenceNumber: referenceNumber || '',
       comments: comments || '',
       contractNo: finalContractNo,
       adjustmentAmount: Number(req.body.adjustmentAmount) || 0,
@@ -635,7 +632,6 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       receiptNumber,
       receiptDate,
       totalAmount,
-      referenceNumber,
       comments,
       allocations,
       contractNo,
@@ -701,7 +697,6 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     receipt.rentAmount = parsedRent;
     receipt.depositAmount = parsedDeposit;
     receipt.totalAmount = parsedTotal;
-    if (referenceNumber !== undefined) receipt.referenceNumber = referenceNumber;
     if (comments !== undefined) receipt.comments = comments;
     receipt.contractNo = targetContractNo;
     if (allocations && Array.isArray(allocations)) {

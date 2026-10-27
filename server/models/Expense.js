@@ -50,11 +50,6 @@ const expenseSchema = new mongoose.Schema({
     default: '',
     trim: true,
   },
-  referenceNumber: {
-    type: String,
-    trim: true,
-    default: '',
-  },
   legacyCode: {
     type: String,
     trim: true, // e.g. "Koe1", "Bye2", "Oe3"

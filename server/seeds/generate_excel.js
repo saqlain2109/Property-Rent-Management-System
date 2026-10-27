@@ -69,7 +69,7 @@ const modelRows = [
   ['Object', 'Description', 'Key Fields', 'Linked To'],
   ['TenantAssignments', 'Links tenant to a unit with contract details', 'assignmentCode, contractNo, contractType, startDate, endDate, status, depositHeld', '→ Tenants, Units, RentAgreements'],
   ['RentAgreements', 'Rent rate applicable for an assignment period', 'rentType, monthlyRate, annualRate, cashPortion, chequePortion, effectiveFrom, effectiveTo, isCurrentRate', '→ TenantAssignments, Units, Tenants'],
-  ['PaymentReceipts', 'Actual money received (receipt header)', 'receiptNumber, receiptDate, totalAmount, paymentMode, bankName, referenceNumber, contractNo', '→ Tenants, Units, PaymentAllocations'],
+  ['PaymentReceipts', 'Actual money received (receipt header)', 'receiptNumber, receiptDate, totalAmount, paymentMode, bankName, contractNo', '→ Tenants, Units, PaymentAllocations'],
   ['PaymentAllocations', 'Maps each receipt to a rent month', 'rentMonthYear, allocatedAmount, isAdvanceOrExcess', '→ PaymentReceipts, Tenants, Units'],
   ['Expenses', 'Expenditure for property / general', 'expenseCode, expenseDate, category, amount, paymentMode, headType, vendorOrPayee', '→ Properties, Units'],
   ['MonthlyLedgers', 'Month-end summary ledger per month-year', 'monthYear, totalIncomeReceived, totalExpensesPaid, netCashFlow, openingBalance, closingBalance, isReconciled', '(summary)'],
@@ -235,14 +235,14 @@ XLSX.utils.book_append_sheet(wb, wsModel, 'Data Model');
 {
   const headers = ['ID','Receipt Number','Contract No','Receipt Date',
                    'Tenant','Tenant ID','Unit','Unit ID',
-                   'Total Amount','Payment Mode','Reference Number','Bank Name',
+                   'Total Amount','Payment Mode','Bank Name',
                    'Comments','Is Reversed','Reversal Reason','Created At','Updated At'];
   const slice = receipts.slice(0, MAX_ROWS);
   const rows = slice.map(r => [
     getId(r._id), r.receiptNumber, r.contractNo, fmtDate(r.receiptDate),
     tenantMap[getId(r.tenantId)] || '', getId(r.tenantId),
     unitMap[getId(r.unitId)] || '', getId(r.unitId),
-    fmtNum(r.totalAmount), r.paymentMode, r.referenceNumber, r.bankName,
+    fmtNum(r.totalAmount), r.paymentMode,  r.bankName,
     r.comments, fmtBool(r.isReversed), r.reversalReason,
     fmtDate(r.createdAt), fmtDate(r.updatedAt)
   ]);
@@ -299,7 +299,7 @@ XLSX.utils.book_append_sheet(wb, wsModel, 'Data Model');
 {
   const headers = ['ID','Expense Code','Expense Date','Head Type','Category',
                    'Property','Property ID','Unit','Unit ID',
-                   'Amount','Payment Mode','Reference Number',
+                   'Amount','Payment Mode',
                    'Vendor / Payee','Description','Legacy Code',
                    'Is Reversed','Reversal Reason','Created At','Updated At'];
   const slice = expenses.slice(0, MAX_ROWS);
@@ -307,7 +307,7 @@ XLSX.utils.book_append_sheet(wb, wsModel, 'Data Model');
     getId(e._id), e.expenseCode, fmtDate(e.expenseDate), e.headType, e.category,
     propMap[getId(e.propertyId)] || '', getId(e.propertyId),
     e.unitId ? (unitMap[getId(e.unitId)] || '') : '', e.unitId ? getId(e.unitId) : '',
-    fmtNum(e.amount), e.paymentMode, e.referenceNumber,
+    fmtNum(e.amount), e.paymentMode, 
     e.vendorOrPayee, e.description, e.legacyCode,
     fmtBool(e.isReversed), e.reversalReason, fmtDate(e.createdAt), fmtDate(e.updatedAt)
   ]);

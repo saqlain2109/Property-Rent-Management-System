@@ -8939,5 +8939,18 @@
     "createdAt": "2026-10-27T06:07:49.672Z",
     "updatedAt": "2026-10-27T06:07:49.672Z",
     "__v": 0
+  },
+  {
+    "_id": "6ae0642358ab17d637f6a5ce",
+    "receiptId": "6ae0642358ab17d637f6a5cd",
+    "tenantId": "6ada066dd7c483f46dca0397",
+    "unitId": "6ada066dd7c483f46dca037d",
+    "rentMonthYear": "2026-02",
+    "allocatedAmount": 75000,
+    "contractNo": "Delhiery-2025",
+    "notes": "Monthly rent for Feb 2026",
+    "createdAt": "2026-10-27T08:43:15.942Z",
+    "updatedAt": "2026-10-27T08:43:15.942Z",
+    "__v": 0
   }
 ]

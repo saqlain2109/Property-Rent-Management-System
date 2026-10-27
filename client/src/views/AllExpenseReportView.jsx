@@ -48,7 +48,6 @@ const ALL_EXPENSE_COLUMNS_DEF = [
   { id: 'unitType', label: 'Unit Type', defaultVisible: false },
   { id: 'category', label: 'Expense Head / Category', defaultVisible: true },
 
-  { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: false },
   { id: 'description', label: 'Description', defaultVisible: true },
   { id: 'amount', label: 'Amount (₹)', defaultVisible: true },
   { id: 'legacyCode', label: 'Legacy Expense Code', defaultVisible: false },
@@ -95,7 +94,6 @@ const DEFAULT_EXPENSE_COLUMN_WIDTHS = {
   category: 150,
   vendorOrPayee: 140,
   paymentMode: 120,
-  referenceNumber: 130,
   description: 180,
   amount: 130,
   legacyCode: 120,
@@ -131,7 +129,6 @@ const getExpenseFieldVal = (e, colId) => {
     case 'category': return e.category || '';
     case 'vendorOrPayee': return e.vendorOrPayee || '';
     case 'paymentMode': return e.paymentMode || 'Cash';
-    case 'referenceNumber': return e.referenceNumber || '';
     case 'description': return e.description || '';
     case 'amount': return Number(e.amount) || 0;
     case 'legacyCode': return e.legacyCode || '';
@@ -193,7 +190,6 @@ export default function AllExpenseReportView() {
     category: '',
     amount: '',
 
-    referenceNumber: '',
     description: ''
   });
   const [savingExpense, setSavingExpense] = useState(false);
@@ -243,7 +239,6 @@ export default function AllExpenseReportView() {
       category: extractUniqueValues(expenses, e => e.category),
       vendorOrPayee: extractUniqueValues(expenses, e => e.vendorOrPayee),
       paymentMode: ['Cash', 'Bank Transfer', 'Cheque', 'UPI / Online'],
-      referenceNumber: extractUniqueValues(expenses, e => e.referenceNumber),
       legacyCode: extractUniqueValues(expenses, e => e.legacyCode),
       isReversed: ['Active', 'Reversed'],
       description: extractUniqueValues(expenses, e => e.description)
@@ -266,7 +261,6 @@ export default function AllExpenseReportView() {
         const cat = (e.category || '').toLowerCase();
         const payee = (e.vendorOrPayee || '').toLowerCase();
         const mode = (e.paymentMode || '').toLowerCase();
-        const ref = (e.referenceNumber || '').toLowerCase();
         const desc = (e.description || '').toLowerCase();
         const amt = String(e.amount || '');
 
@@ -355,7 +349,6 @@ export default function AllExpenseReportView() {
       category: e.category || '',
       amount: String(e.amount || 0),
 
-      referenceNumber: e.referenceNumber || '',
       description: e.description || ''
     });
   };
@@ -381,7 +374,6 @@ export default function AllExpenseReportView() {
         category: editForm.category,
         amount: Number(editForm.amount),
 
-        referenceNumber: editForm.referenceNumber,
         description: editForm.description
       };
 
@@ -669,13 +661,7 @@ export default function AllExpenseReportView() {
                           );
                         }
 
-                        if (colId === 'referenceNumber') {
-                          return (
-                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600 whitespace-nowrap">
-                              {e.referenceNumber || '—'}
-                            </td>
-                          );
-                        }
+                        
 
                         if (colId === 'description') {
                           return (
@@ -949,20 +935,9 @@ export default function AllExpenseReportView() {
 
 
 
-              {/* Row 6: Reference / Cheque # & Description */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Ref / Cheque #</label>
-                  <input
-                    type="text"
-                    placeholder="UTR / Cheque / Bill #"
-                    value={editForm.referenceNumber}
-                    onChange={(e) => setEditForm({ ...editForm, referenceNumber: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Description / Notes</label>
+              {/* Row 6: Description */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Description / Notes</label>
                   <textarea
                     rows="2"
                     placeholder="Details of expense, work done..."
@@ -970,7 +945,6 @@ export default function AllExpenseReportView() {
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
                   />
-                </div>
               </div>
 
               {/* Modal Footer */}

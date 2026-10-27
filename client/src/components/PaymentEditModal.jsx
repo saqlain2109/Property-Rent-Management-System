@@ -54,7 +54,6 @@ export default function PaymentEditModal({
     rentAmount: '',
     depositAmount: '',
     totalAmount: '',
-    referenceNumber: '',
     comments: '',
     adjustmentAmount: '',
     adjustmentDescription: ''
@@ -270,7 +269,6 @@ export default function PaymentEditModal({
             rentAmount: String(recRent),
             depositAmount: String(recDep),
             totalAmount: String(recTotal),
-            referenceNumber: recData?.referenceNumber || '',
             comments: recData?.comments || `Rent payment for ${formatMonthYear(activeMonth)}`,
             adjustmentAmount: String(recData?.adjustmentAmount || 0),
             adjustmentDescription: recData?.adjustmentDescription || ''
@@ -331,7 +329,6 @@ export default function PaymentEditModal({
             rentAmount: String(defaultAmt),
             depositAmount: '0',
             totalAmount: String(defaultAmt),
-            referenceNumber: '',
             comments: `Rent collection for ${formatMonthYear(activeMonth)}`,
             adjustmentAmount: '0',
             adjustmentDescription: ''
@@ -708,7 +705,6 @@ export default function PaymentEditModal({
         rentAmount: enteredRent,
         depositAmount: enteredDeposit,
         totalAmount: enteredTotal,
-        referenceNumber: paymentForm.referenceNumber || '',
         comments: paymentForm.comments || '',
         adjustmentAmount: Number(paymentForm.adjustmentAmount) || 0,
         adjustmentDescription: paymentForm.adjustmentDescription || '',
@@ -1068,32 +1064,18 @@ export default function PaymentEditModal({
                 })()}
               </div>
 
-              {/* DATES: PAYMENT DATE & REFERENCE NUMBER */}
-              <div className="grid grid-cols-2 gap-2.5 pt-1">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Payment Date <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={paymentForm.receiptDate}
-                    onChange={(e) => setPaymentForm(f => ({ ...f, receiptDate: e.target.value }))}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shadow-2xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Reference / Cheque No
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. UTR / Cheque / Cash"
-                    value={paymentForm.referenceNumber || ''}
-                    onChange={(e) => setPaymentForm(f => ({ ...f, referenceNumber: e.target.value }))}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 shadow-2xs"
-                  />
-                </div>
+              {/* PAYMENT DATE */}
+              <div className="pt-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Payment Date <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={paymentForm.receiptDate}
+                  onChange={(e) => setPaymentForm(f => ({ ...f, receiptDate: e.target.value }))}
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shadow-2xs"
+                />
               </div>
 
               {/* COMMENTS / NOTES */}

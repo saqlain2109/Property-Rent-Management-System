@@ -318,7 +318,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
-    const { expenseDate, expenseMonth, propertyId, unitId, headType, category, amount, description, referenceNumber, expenseCode } = req.body;
+    const { expenseDate, expenseMonth, propertyId, unitId, headType, category, amount, description, expenseCode } = req.body;
     if (expenseMonth && !expenseDate) {
       expense.expenseMonth = expenseMonth;
       const [y, m] = expenseMonth.split('-').map(Number);
@@ -340,7 +340,6 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (category) expense.category = category;
     if (amount !== undefined) expense.amount = Number(amount);
     if (description !== undefined) expense.description = description ? description.trim() : '';
-    if (referenceNumber !== undefined) expense.referenceNumber = referenceNumber;
     if (expenseCode && expenseCode.trim()) expense.expenseCode = expenseCode.trim();
 
     await expense.save();

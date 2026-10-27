@@ -42,11 +42,6 @@ const paymentReceiptSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
-  referenceNumber: {
-    type: String,
-    trim: true,
-    default: '', // Cheque no / UTR / Transaction id
-  },
   comments: {
     type: String,
     trim: true,
