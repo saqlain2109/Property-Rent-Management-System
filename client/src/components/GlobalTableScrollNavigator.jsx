@@ -319,7 +319,8 @@ export default function GlobalTableScrollNavigator() {
 
   // Safe horizontal positions avoiding sidebar and screen edges
   const leftEdgePos = Math.max(12, tablePosition.left + 12);
-  const rightEdgePos = Math.max(leftEdgePos + 60, Math.min(window.innerWidth - 56, tablePosition.right - 56));
+  // Keep right chevron well inside table boundary, avoiding action button column (~80px from right edge)
+  const rightEdgePos = Math.max(leftEdgePos + 60, Math.min(window.innerWidth - 80, tablePosition.right - 80));
   const bottomPillPos = Math.max(200, Math.min(window.innerWidth - 200, tablePosition.centerX));
 
   return (

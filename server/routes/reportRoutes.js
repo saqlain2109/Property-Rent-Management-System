@@ -1568,6 +1568,19 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
   const codeToId = {};
   dbUnits.forEach(u => { if (u.unitCode) codeToId[u.unitCode] = String(u._id); });
 
+  // Build MATRIX_UNIT_CODE_MAP: "propertyName__unitLabel" -> unitCode (for baseline.json cross-referencing)
+  const MATRIX_UNIT_CODE_MAP = {};
+  dbUnits.forEach(u => {
+    if (u.unitCode && u.propertyId) {
+      const propName = u.propertyId.name || '';
+      const unitLabel = u.unitName || u.unitCode || '';
+      const mapKey1 = `${propName}__${unitLabel}`;
+      const mapKey2 = `${propName}__${u.unitCode}`;
+      MATRIX_UNIT_CODE_MAP[mapKey1] = u.unitCode;
+      MATRIX_UNIT_CODE_MAP[mapKey2] = u.unitCode;
+    }
+  });
+
   // Fetch PaymentAllocations from MongoDB (excluding reversed receipts)
   const reversedReceipts = (await PaymentReceipt.find({ isReversed: true }).select('_id')).map(r => r._id);
   const dbAllocations = await PaymentAllocation.find({
