@@ -751,6 +751,14 @@ export default function PaymentsView() {
     if (!unitIdStr) return null;
     const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
 
+    const matchesMonth = (r) => {
+      if (r.allocations && r.allocations.some(a => a.rentMonthYear === targetMonth)) return true;
+      if (r.accountingMonth === targetMonth) return true;
+      if (typeof r.accountingMonth === 'string' && r.accountingMonth.startsWith(targetMonth)) return true;
+      if (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) return true;
+      return false;
+    };
+
     // Priority 1: Match unit, contractNo, and month
     if (contractNoStr) {
       const contractMatch = receipts.find(r => {
@@ -758,10 +766,7 @@ export default function PaymentsView() {
         if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
         const rContract = String(r.contractNo || '').trim().toLowerCase();
         if (rContract === contractNoStr) {
-          return r.allocations?.some(a => a.rentMonthYear === targetMonth) ||
-                 r.accountingMonth === targetMonth ||
-                 (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) ||
-                 (r.receiptDate && r.receiptDate.slice(0, 7) === targetMonth);
+          return matchesMonth(r);
         }
         return false;
       });
@@ -772,11 +777,8 @@ export default function PaymentsView() {
     return receipts.find(r => {
       if (r.isReversed) return false;
       if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
-      return r.allocations?.some(a => a.rentMonthYear === targetMonth) ||
-             r.accountingMonth === targetMonth ||
-             (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) ||
-             (r.receiptDate && r.receiptDate.slice(0, 7) === targetMonth);
-    });
+      return matchesMonth(r);
+    }) || null;
   };
 
   // Permanently delete payment receipt for a row on the collection screen
@@ -1353,15 +1355,9 @@ export default function PaymentsView() {
     // Open Fast Payment Modal for a specific row / tenant
   const openFastPaymentModal = (item) => {
     const existingReceipt = findReceiptForUnitAndMonth(item, selectedMonth);
-    if (existingReceipt) {
-      setEditingReceiptId(existingReceipt._id);
-      setEditingReceiptObj(existingReceipt);
-      setPaymentModalItem(null);
-    } else {
-      setEditingReceiptId(null);
-      setEditingReceiptObj(null);
-      setPaymentModalItem(item);
-    }
+    setEditingReceiptId(existingReceipt ? existingReceipt._id : null);
+    setEditingReceiptObj(existingReceipt || null);
+    setPaymentModalItem(item);
     setShowPaymentModal(true);
   };
 

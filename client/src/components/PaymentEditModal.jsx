@@ -38,6 +38,7 @@ export default function PaymentEditModal({
   const [assignmentsList, setAssignmentsList] = useState(propAssignments || []);
 
   // Form State
+  const [currentReceiptId, setCurrentReceiptId] = useState(null);
   const [selectedTenantInfo, setSelectedTenantInfo] = useState(null);
   const [unpaidMonthsList, setUnpaidMonthsList] = useState([]);
   const [selectedMonthsMap, setSelectedMonthsMap] = useState({});
@@ -148,194 +149,119 @@ export default function PaymentEditModal({
           setAssignmentsList(curAssignments);
         }
 
-        // Case 1: Editing an existing receipt (via receiptId or receipt object)
-        const targetReceiptId = receiptId || receipt?._id || receipt?.receiptId;
-        if (targetReceiptId) {
-          let recData = receipt;
+        // Resolve unit, tenant and contract identifiers
+        const tenantObj = item?.tenant || receipt?.tenantId || receipt?.tenant;
+        const unitObj = item?.unit || receipt?.unitId || receipt?.unit;
+        const tenantId = tenantObj?._id || (typeof tenantObj === 'string' ? tenantObj : null);
+        const unitId = unitObj?._id || (typeof unitObj === 'string' ? unitObj : null);
+        const monthlyRate = item?.monthlyRentExpected || unitObj?.monthlyRentExpected || receipt?.monthlyRentExpected || 22000;
+        const propName = item?.property?.name || unitObj?.propertyId?.name || receipt?.property?.name || 'Property';
+        const partName = item?.unit?.subUnitPartition || item?.unit?.unitName || unitObj?.subUnitPartition || unitObj?.unitName || receipt?.partitionName || 'Unit';
+        const activeContract = resolveContractForTargetMonth(tenantId, unitId, activeMonth, curAssignments) || item?.contractNo || receipt?.contractNo || '';
 
-          // If receipt lacks allocations or full details, fetch it directly
-          if (!recData || !recData.allocations || !recData.unitId || !recData.totalAmount) {
-            try {
-              const recRes = await API.get(`/payments/${targetReceiptId}`);
-              if (recRes.data.success) {
-                recData = recRes.data.data;
-              }
-            } catch (err) {
-              console.warn('Could not fetch single receipt via /payments/:id, using fallback receipt prop', err);
-            }
-          }
+        // Strict Single Receipt Lookup: Priority: receiptId prop > receipt prop > search by (unitId, activeMonth)
+        let targetReceiptId = receiptId || receipt?._id || receipt?.receiptId || null;
+        let recData = receipt || null;
 
-          const tenantObj = recData?.tenantId || recData?.tenant;
-          const unitObj = recData?.unitId || recData?.unit;
-          const tenantId = tenantObj?._id || (typeof tenantObj === 'string' ? tenantObj : null);
-          const unitId = unitObj?._id || (typeof unitObj === 'string' ? unitObj : null);
-          const monthlyRate = unitObj?.monthlyRentExpected || recData?.monthlyRentExpected || 22000;
-          const propName = unitObj?.propertyId?.name || recData?.property?.name || 'Property';
-          const partName = unitObj?.subUnitPartition || unitObj?.unitName || recData?.partitionName || 'Unit';
-
-          setSelectedTenantInfo({
-            tenantId,
-            initialTenantId: tenantId,
-            unitId,
-            receiptNumber: recData?.receiptNumber || '',
-            tenantName: tenantObj?.name || 'Tenant',
-            tenantPhone: tenantObj?.phone || '',
-            propertyName: propName,
-            partitionName: partName,
-            monthlyRate,
-            contractStartDate: recData?.contractStartDate || null,
-            contractEndDate: recData?.contractEndDate || null
-          });
-
-          // Fetch detailed ledger to get unpaid months
-          let unpaid = [];
-          if (unitId) {
-            try {
-              const ledgerQuery = tenantId ? `tenantId=${tenantId}&unitId=${unitId}` : `unitId=${unitId}`;
-              const ledgerRes = await API.get(`/payments/tenant-unit-ledger?${ledgerQuery}&upToMonthYear=${activeMonth}`);
-              const ledger = ledgerRes.data?.data;
-              const breakdown = ledger?.monthsBreakdown || [];
-              unpaid = breakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid');
-            } catch (lErr) {
-              console.warn('Could not load tenant-unit-ledger:', lErr);
-            }
-          }
-
-          const initialMap = {};
-          if (recData?.allocations && recData.allocations.length > 0) {
-            recData.allocations.forEach(a => {
-              initialMap[a.rentMonthYear] = a.allocatedAmount;
-              const monthBreakdownItem = breakdown.find(m => m.monthYear === a.rentMonthYear);
-              const trueExpectedRate = (monthBreakdownItem && monthBreakdownItem.expectedRate > 0)
-                ? monthBreakdownItem.expectedRate
-                : (monthlyRate || 22000);
-              const existingIdx = unpaid.findIndex(u => u.monthYear === a.rentMonthYear);
-              if (existingIdx >= 0) {
-                unpaid[existingIdx].expectedRate = trueExpectedRate;
-              } else {
-                unpaid.push({
-                  monthYear: a.rentMonthYear,
-                  outstandingAmount: 0,
-                  expectedRate: trueExpectedRate,
-                  isAdvance: a.rentMonthYear > activeMonth
-                });
-              }
-            });
-          } else if (recData?.rentMonthYear) {
-            initialMap[recData.rentMonthYear] = recData.allocatedAmount || recData.totalAmount || recData.receiptTotalAmount || 0;
-            const monthBreakdownItem = breakdown.find(m => m.monthYear === recData.rentMonthYear);
-            const trueExpectedRate = (monthBreakdownItem && monthBreakdownItem.expectedRate > 0)
-              ? monthBreakdownItem.expectedRate
-              : (monthlyRate || 22000);
-            const existingIdx = unpaid.findIndex(u => u.monthYear === recData.rentMonthYear);
-            if (existingIdx >= 0) {
-              unpaid[existingIdx].expectedRate = trueExpectedRate;
-            } else {
-              unpaid.push({
-                monthYear: recData.rentMonthYear,
-                outstandingAmount: 0,
-                expectedRate: trueExpectedRate,
-                isAdvance: recData.rentMonthYear > activeMonth
-              });
-            }
-          }
-
-          if (activeMonth && !unpaid.some(u => u.monthYear === activeMonth)) {
-            const monthBreakdownItem = breakdown.find(m => m.monthYear === activeMonth);
-            unpaid.push({
-              monthYear: activeMonth,
-              outstandingAmount: 0,
-              expectedRate: (monthBreakdownItem && monthBreakdownItem.expectedRate > 0) ? monthBreakdownItem.expectedRate : monthlyRate,
-              isAdvance: false
-            });
-          }
-
-          unpaid.sort((a, b) => a.monthYear.localeCompare(b.monthYear));
-          setUnpaidMonthsList(unpaid);
-
-          const activeContract = recData?.contractNo || resolveContractForTargetMonth(tenantId, unitId, activeMonth, curAssignments) || '';
-          const receiptDateStr = recData?.receiptDate ? new Date(recData.receiptDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-          const recTotal = recData?.totalAmount ?? recData?.receiptTotalAmount ?? 0;
-          const recDep = recData?.depositAmount !== undefined ? Number(recData.depositAmount) : 0;
-          const recRent = recData?.rentAmount !== undefined ? Number(recData.rentAmount) : (recTotal - recDep);
-
-          setPaymentForm({
-            status: recData?.status || 'Rented',
-            tenantId: tenantId || '',
-            unitId: unitId || '',
-            contractNo: activeContract,
-            receiptDate: receiptDateStr,
-            accountingMonth: recData?.accountingMonth || activeMonth,
-            rentAmount: String(recRent),
-            depositAmount: String(recDep),
-            totalAmount: String(recTotal),
-            comments: recData?.comments || `Rent payment for ${formatMonthYear(activeMonth)}`,
-            adjustmentAmount: String(recData?.adjustmentAmount || 0),
-            adjustmentDescription: recData?.adjustmentDescription || ''
-          });
-
-          setSelectedMonthsMap(initialMap);
-        } else if (item) {
-          // Case 2: Opening for a row item (Fast Payment recording from sheet)
-          const tenantId = item.tenant?._id;
-          const unitId = item.unit?._id;
-          const monthlyRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || item.monthsBreakdown?.[0]?.expectedRate || 22000;
-
-          setSelectedTenantInfo({
-            tenantId,
-            initialTenantId: tenantId,
-            assignmentId: item.assignmentId,
-            unitId,
-            tenantName: item.tenant?.name || 'Tenant',
-            tenantPhone: item.tenant?.phone || '',
-            propertyName: item.property?.name || '',
-            partitionName: item.unit?.subUnitPartition || item.unit?.unitName || '',
-            monthlyRate,
-            paidTillMonth: item.paidTillMonth
-          });
-
-          let unpaid = [];
+        // If targetReceiptId not passed directly, query payments for this unit and month
+        if (!targetReceiptId && unitId) {
           try {
-            const ledgerRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${tenantId}&unitId=${unitId}&upToMonthYear=${activeMonth}`);
-            const breakdown = ledgerRes.data?.data?.monthsBreakdown || item.monthsBreakdown || [];
-            unpaid = breakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid');
-          } catch (err) {
-            console.error('Failed to load ledger for item:', err);
+            const checkRes = await API.get(`/payments?unitId=${unitId}`);
+            if (checkRes.data?.success && Array.isArray(checkRes.data.data)) {
+              const matched = checkRes.data.data.find(r => 
+                !r.isReversed &&
+                (r.accountingMonth === activeMonth || 
+                 (r.monthPaidFor && r.monthPaidFor.includes(activeMonth)) ||
+                 r.allocations?.some(a => a.rentMonthYear === activeMonth))
+              );
+              if (matched) {
+                targetReceiptId = matched._id;
+                recData = matched;
+              }
+            }
+          } catch (cErr) {
+            console.warn('Could not check existing receipt via API:', cErr);
           }
-
-          if (activeMonth && !unpaid.some(u => u.monthYear === activeMonth)) {
-            unpaid.push({
-              monthYear: activeMonth,
-              outstandingAmount: 0,
-              expectedRate: monthlyRate,
-              isAdvance: false
-            });
-          }
-          unpaid.sort((a, b) => a.monthYear.localeCompare(b.monthYear));
-          setUnpaidMonthsList(unpaid);
-
-          const defaultAmt = monthlyRate;
-          const initialMap = { [activeMonth]: defaultAmt };
-          const activeContract = resolveContractForTargetMonth(tenantId, unitId, activeMonth, curAssignments) || item.contractNo || '';
-          const receiptDate = new Date().toISOString().split('T')[0];
-
-          setPaymentForm({
-            status: item.tenant ? 'Rented' : 'Vacant',
-            tenantId: tenantId || '',
-            unitId: unitId || '',
-            contractNo: activeContract,
-            receiptDate,
-            accountingMonth: activeMonth,
-            rentAmount: String(defaultAmt),
-            depositAmount: '0',
-            totalAmount: String(defaultAmt),
-            comments: `Rent collection for ${formatMonthYear(activeMonth)}`,
-            adjustmentAmount: '0',
-            adjustmentDescription: ''
-          });
-
-          setSelectedMonthsMap(initialMap);
         }
+
+        // If targetReceiptId exists, fetch single receipt to guarantee full, fresh data
+        if (targetReceiptId) {
+          try {
+            const recRes = await API.get(`/payments/${targetReceiptId}`);
+            if (recRes.data?.success) {
+              recData = recRes.data.data;
+            }
+          } catch (err) {
+            console.warn('Could not fetch single receipt via /payments/:id, using fallback receipt prop', err);
+          }
+        }
+
+        setCurrentReceiptId(targetReceiptId || null);
+
+        setSelectedTenantInfo({
+          tenantId,
+          initialTenantId: tenantId,
+          unitId,
+          receiptNumber: recData?.receiptNumber || '',
+          tenantName: tenantObj?.name || 'Tenant',
+          tenantPhone: tenantObj?.phone || '',
+          propertyName: propName,
+          partitionName: partName,
+          monthlyRate,
+          contractStartDate: recData?.contractStartDate || item?.startDate || null,
+          contractEndDate: recData?.contractEndDate || item?.endDate || null,
+          paidTillMonth: item?.paidTillMonth
+        });
+
+        // Determine recorded amounts: Rent Amount Paid, Deposit Amount, Total Amount Paid
+        let recTotal = 0;
+        let recDep = 0;
+        let recRent = 0;
+
+        if (recData && (recData._id || recData.totalAmount !== undefined)) {
+          recTotal = Number(recData.totalAmount !== undefined ? recData.totalAmount : (recData.receiptTotalAmount || 0));
+          recDep = recData.depositAmount !== undefined ? Number(recData.depositAmount) : 0;
+          recRent = recData.rentAmount !== undefined ? Number(recData.rentAmount) : (recTotal - recDep);
+        } else if (item && (item.rentAmountPaid !== undefined || item.actualPaidForMonth !== undefined)) {
+          recRent = item.rentAmountPaid !== undefined ? Number(item.rentAmountPaid) : Number(item.actualPaidForMonth || 0);
+          recDep = Number(item.depositAmount || 0);
+          recTotal = recRent + recDep;
+        } else {
+          // Default for a new unrecorded month: full monthly rent in Rent Amount Paid
+          recRent = monthlyRate;
+          recDep = 0;
+          recTotal = monthlyRate;
+        }
+
+        const receiptDateStr = recData?.receiptDate
+          ? new Date(recData.receiptDate).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0];
+
+        setPaymentForm({
+          status: recData?.status || (item?.tenant ? 'Rented' : 'Vacant'),
+          tenantId: tenantId || '',
+          unitId: unitId || '',
+          contractNo: recData?.contractNo || activeContract,
+          receiptDate: receiptDateStr,
+          accountingMonth: recData?.accountingMonth || activeMonth,
+          rentAmount: String(recRent),
+          depositAmount: String(recDep),
+          totalAmount: String(recTotal),
+          comments: recData?.comments || `Rent payment for ${formatMonthYear(activeMonth)}`,
+          adjustmentAmount: String(recData?.adjustmentAmount || 0),
+          adjustmentDescription: recData?.adjustmentDescription || ''
+        });
+
+        // Strict Rule: Exactly ONE line of payment for the active month
+        const initialMap = { [activeMonth]: recRent };
+        setSelectedMonthsMap(initialMap);
+
+        setUnpaidMonthsList([{
+          monthYear: activeMonth,
+          outstandingAmount: Math.max(0, monthlyRate - recRent),
+          expectedRate: monthlyRate,
+          isAdvance: false
+        }]);
       } catch (err) {
         console.error('Failed to initialize payment edit modal:', err);
         setErrorMsg(err.response?.data?.message || err.message || 'Failed to initialize payment details');
@@ -348,7 +274,7 @@ export default function PaymentEditModal({
   }, [isOpen, receiptId, receipt, item, activeMonth]);
 
   // Handle switching status between Rented and Vacant
-  const handleStatusChange = async (newStatus) => {
+  const handleStatusChange = (newStatus) => {
     if (newStatus === 'Vacant') {
       setPaymentForm(prev => ({
         ...prev,
@@ -360,33 +286,35 @@ export default function PaymentEditModal({
         totalAmount: '0',
         comments: `Unit marked vacant for ${formatMonthYear(activeMonth)}`
       }));
-      setSelectedMonthsMap({});
-      setUnpaidMonthsList([]);
+      setSelectedMonthsMap({ [activeMonth]: 0 });
+      setUnpaidMonthsList([{
+        monthYear: activeMonth,
+        outstandingAmount: 0,
+        expectedRate: 0,
+        isAdvance: false
+      }]);
     } else {
       const restoredTenantId = selectedTenantInfo?.initialTenantId || (tenantsList.length > 0 ? tenantsList[0]._id : '');
       const matchedContract = resolveContractForTargetMonth(restoredTenantId, selectedTenantInfo?.unitId, activeMonth);
+      const monthlyRate = selectedTenantInfo?.monthlyRate || 22000;
 
       setPaymentForm(prev => ({
         ...prev,
         status: 'Rented',
         tenantId: restoredTenantId,
         contractNo: matchedContract,
+        rentAmount: String(monthlyRate),
+        depositAmount: '0',
+        totalAmount: String(monthlyRate),
         comments: `Rent collection for ${formatMonthYear(activeMonth)}`
       }));
-
-      if (restoredTenantId && selectedTenantInfo?.unitId) {
-        try {
-          const lRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${restoredTenantId}&unitId=${selectedTenantInfo.unitId}&upToMonthYear=${activeMonth}`);
-          const breakdown = lRes.data?.data?.monthsBreakdown || [];
-          const unpaid = breakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid');
-          setUnpaidMonthsList(unpaid);
-          const targetMonthData = breakdown.find(m => m.monthYear === activeMonth);
-          const defaultAmt = targetMonthData?.outstandingAmount || targetMonthData?.expectedRate || selectedTenantInfo?.monthlyRate || 22000;
-          syncPaymentState(defaultAmt > 0 ? { [activeMonth]: defaultAmt } : {}, restoredTenantId, selectedTenantInfo.unitId);
-        } catch (err) {
-          console.error('Error fetching ledger for restored tenant:', err);
-        }
-      }
+      setSelectedMonthsMap({ [activeMonth]: monthlyRate });
+      setUnpaidMonthsList([{
+        monthYear: activeMonth,
+        outstandingAmount: 0,
+        expectedRate: monthlyRate,
+        isAdvance: false
+      }]);
     }
   };
 
@@ -560,7 +488,7 @@ export default function PaymentEditModal({
 
   // Delete existing receipt and reset to 0
   const handleDeleteExistingReceipt = async () => {
-    const rId = targetReceiptId;
+    const rId = currentReceiptId || targetReceiptId;
     if (!rId) return;
     if (!window.confirm('Are you sure you want to delete this payment record and make the rent collected ₹0?')) {
       return;
@@ -598,6 +526,7 @@ export default function PaymentEditModal({
     const enteredRent = Number(paymentForm.rentAmount) || 0;
     const enteredDeposit = Number(paymentForm.depositAmount) || 0;
     const enteredTotal = enteredRent + enteredDeposit;
+    const activeReceiptId = currentReceiptId || receiptId || receipt?._id || receipt?.receiptId;
 
     // SCENARIO: User wants to make amount paid zero / remove payment
     if (enteredTotal === 0) {
@@ -605,9 +534,9 @@ export default function PaymentEditModal({
         setSubmitting(true);
         setErrorMsg('');
 
-        if (targetReceiptId) {
+        if (activeReceiptId) {
           try {
-            await API.delete(`/payments/${targetReceiptId}`);
+            await API.delete(`/payments/${activeReceiptId}`);
           } catch (delErr) {
             console.warn('Receipt delete ignored if already gone:', delErr);
           }
@@ -711,7 +640,7 @@ export default function PaymentEditModal({
         allocations
       };
 
-      const targetReceiptId = receiptId || receipt?._id || receipt?.receiptId;
+      const targetReceiptId = currentReceiptId || receiptId || receipt?._id || receipt?.receiptId;
       let responseData;
 
       if (targetReceiptId) {
@@ -761,7 +690,7 @@ export default function PaymentEditModal({
 
   if (!isOpen) return null;
 
-  const targetReceiptId = receiptId || receipt?._id || receipt?.receiptId;
+  const targetReceiptId = currentReceiptId || receiptId || receipt?._id || receipt?.receiptId;
   const isEditing = Boolean(targetReceiptId);
 
   return (
@@ -847,7 +776,7 @@ export default function PaymentEditModal({
           <button
             type="button"
             onClick={handleSubmitPayment}
-            disabled={submitting || (paymentForm.status !== 'Vacant' && (paymentForm.totalAmount === '' || Number(paymentForm.totalAmount) < 0 || (!isEditing && Number(paymentForm.totalAmount) === 0)))}
+            disabled={submitting || (paymentForm.status !== 'Vacant' && (paymentForm.totalAmount === '' || Number(paymentForm.totalAmount) < 0))}
             className={`px-5 py-1.5 rounded-xl text-white text-xs font-extrabold shadow-sm active:scale-95 transition-all cursor-pointer ${
               isEditing
                 ? (Number(paymentForm.totalAmount || 0) === 0 ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/20' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20')
@@ -1323,7 +1252,7 @@ export default function PaymentEditModal({
                       <Plus className="w-3 h-3" />
                       <span>Add Advance Month</span>
                     </button>
-                    {unpaidMonthsList.length > 0 && (
+                    {unpaidMonthsList.length > 1 && (
                       <button
                         type="button"
                         onClick={selectAllUnpaid}

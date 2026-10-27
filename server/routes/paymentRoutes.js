@@ -95,7 +95,7 @@ router.get('/', protect, async (req, res) => {
         monthPaidFor: monthsPaidFor,
         monthsCovered: monthsPaidFor,
         paidForMonth: monthsPaidFor,
-        accountingMonth: monthsPaidFor,
+        accountingMonth: r.accountingMonth || monthsPaidFor,
         allocations: rAlloc
       };
     }
@@ -718,6 +718,24 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     if (req.body.adjustmentDescription !== undefined) receipt.adjustmentDescription = req.body.adjustmentDescription;
 
     await receipt.save();
+
+    // Clean up any other duplicate receipts for this unit & month to guarantee single receipt
+    const targetMonth = receipt.accountingMonth || receipt.monthPaidFor;
+    if (targetMonth && targetUnitId) {
+      const duplicates = await PaymentReceipt.find({
+        _id: { $ne: receipt._id },
+        unitId: targetUnitId,
+        isReversed: false,
+        $or: [
+          { accountingMonth: targetMonth },
+          { monthPaidFor: targetMonth }
+        ]
+      });
+      for (const dup of duplicates) {
+        await PaymentAllocation.deleteMany({ receiptId: dup._id });
+        await PaymentReceipt.findByIdAndDelete(dup._id);
+      }
+    }
 
     await logAudit({
       userId: req.user._id,
