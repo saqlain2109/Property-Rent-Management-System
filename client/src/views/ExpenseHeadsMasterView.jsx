@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import ApexToolbar from '../components/ApexToolbar';
+import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { 
   useResizableColumns, 
   ResizeHandle, 

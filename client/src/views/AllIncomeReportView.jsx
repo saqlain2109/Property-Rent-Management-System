@@ -35,31 +35,60 @@ import {
 const ALL_INCOME_COLUMNS_DEF = [
   { id: 'index', label: '#', defaultVisible: true },
   { id: 'receiptDate', label: 'Receipt Date', defaultVisible: true },
+  { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
   { id: 'receiptNumber', label: 'Receipt #', defaultVisible: true },
   { id: 'contractNo', label: 'Contract #', defaultVisible: true },
   { id: 'property', label: 'Property', defaultVisible: true },
+  { id: 'propertyCode', label: 'Property Code', defaultVisible: false },
+  { id: 'propertyType', label: 'Property Type', defaultVisible: false },
+  { id: 'propertyAddress', label: 'Property Address', defaultVisible: false },
+  { id: 'city', label: 'City', defaultVisible: false },
+  { id: 'ownerOrResponsiblePerson', label: 'Property Owner', defaultVisible: false },
   { id: 'unit', label: 'Sub-Property / Partition', defaultVisible: true },
+  { id: 'unitCode', label: 'Unit Code', defaultVisible: false },
+  { id: 'subUnitArea', label: 'Partition Area (Sq Ft)', defaultVisible: false },
+  { id: 'carpetAreaSqFt', label: 'Carpet Area (Sq Ft)', defaultVisible: false },
+  { id: 'floor', label: 'Floor / Location', defaultVisible: false },
+  { id: 'unitType', label: 'Unit Type', defaultVisible: false },
+  { id: 'monthlyRentExpected', label: 'Monthly Rent Rate (₹)', defaultVisible: false },
+  { id: 'occupancyStatus', label: 'Occupancy Status', defaultVisible: false },
+  { id: 'legacySheetCode', label: 'Legacy Sheet Code', defaultVisible: false },
   { id: 'tenant', label: 'Tenant', defaultVisible: true },
+  { id: 'tenantCode', label: 'Tenant Code', defaultVisible: false },
   { id: 'phone', label: 'Phone', defaultVisible: false },
-  { id: 'monthsCovered', label: 'Month(s) Covered', defaultVisible: true },
-  { id: 'paymentMode', label: 'Payment Mode', defaultVisible: true },
-  { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
-  { id: 'bankName', label: 'Bank', defaultVisible: false },
-  { id: 'comments', label: 'Notes / Comments', defaultVisible: true },
+  { id: 'email', label: 'Email', defaultVisible: false },
+  { id: 'tenantType', label: 'Tenant Type', defaultVisible: false },
+  { id: 'idProofType', label: 'ID Proof Type', defaultVisible: false },
+  { id: 'idProofNumber', label: 'ID Proof Number', defaultVisible: false },
+  { id: 'tenantAddress', label: 'Tenant Address', defaultVisible: false },
+  { id: 'emergencyContact', label: 'Emergency Contact', defaultVisible: false },
+  { id: 'deposit', label: 'Security Deposit (₹)', defaultVisible: false },
+  { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
+  { id: 'status', label: 'Status', defaultVisible: true },
   { id: 'totalAmount', label: 'Amount (₹)', defaultVisible: true },
+  { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
+  { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
+  { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
+  { id: 'comments', label: 'Notes / Comments', defaultVisible: true },
+  { id: 'isReversed', label: 'Reversal Status', defaultVisible: false },
+  { id: 'reversalReason', label: 'Reversal Reason', defaultVisible: false },
+  { id: 'reversalDate', label: 'Reversal Date', defaultVisible: false },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Action', defaultVisible: true },
 ];
 
 const DEFAULT_INCOME_COLS = [
   'index',
   'receiptDate',
+  'accountingMonth',
   'receiptNumber',
   'contractNo',
   'property',
   'unit',
   'tenant',
   'monthsCovered',
-  'paymentMode',
+  'status',
   'referenceNumber',
   'comments',
   'totalAmount',
@@ -69,19 +98,104 @@ const DEFAULT_INCOME_COLS = [
 const DEFAULT_INCOME_COLUMN_WIDTHS = {
   index: 50,
   receiptDate: 110,
+  accountingMonth: 140,
   receiptNumber: 130,
   contractNo: 120,
   property: 160,
+  propertyCode: 120,
+  propertyType: 140,
+  propertyAddress: 180,
+  city: 100,
+  ownerOrResponsiblePerson: 130,
   unit: 140,
+  unitCode: 110,
+  subUnitArea: 130,
+  carpetAreaSqFt: 130,
+  floor: 110,
+  unitType: 130,
+  monthlyRentExpected: 140,
+  occupancyStatus: 120,
+  legacySheetCode: 120,
   tenant: 150,
+  tenantCode: 120,
   phone: 120,
+  email: 160,
+  tenantType: 120,
+  idProofType: 120,
+  idProofNumber: 130,
+  tenantAddress: 180,
+  emergencyContact: 150,
+  deposit: 130,
   monthsCovered: 150,
-  paymentMode: 120,
-  referenceNumber: 130,
-  bankName: 120,
-  comments: 180,
+  status: 95,
   totalAmount: 130,
+  adjustmentAmount: 140,
+  adjustmentDescription: 180,
+  referenceNumber: 130,
+  comments: 180,
+  isReversed: 120,
+  reversalReason: 150,
+  reversalDate: 120,
+  createdAt: 120,
+  updatedAt: 120,
   actions: 85
+};
+
+
+// Helper to extract formatted backend values for any column ID
+const getIncomeFieldVal = (r, colId) => {
+  if (!r) return '';
+  switch (colId) {
+    case 'index': return '';
+    case 'receiptDate': return r.receiptDate ? formatDate(r.receiptDate) : '';
+    case 'accountingMonth': {
+      const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+      return m ? formatMonthYear(m) : '';
+    }
+    case 'receiptNumber': return r.receiptNumber || '';
+    case 'contractNo': return r.contractNo || '';
+    case 'property': return r.unitId?.propertyId?.name || '';
+    case 'propertyCode': return r.unitId?.propertyId?.propertyCode || '';
+    case 'propertyType': return r.unitId?.propertyId?.propertyType || '';
+    case 'propertyAddress': return typeof r.unitId?.propertyId?.address === 'string' ? r.unitId.propertyId.address : '';
+    case 'city': return r.unitId?.propertyId?.city || '';
+    case 'ownerOrResponsiblePerson': return r.unitId?.propertyId?.ownerOrResponsiblePerson || '';
+    case 'unit': return r.unitId?.subUnitPartition || r.unitId?.unitName || '';
+    case 'unitCode': return r.unitId?.unitCode || '';
+    case 'subUnitArea': return r.unitId?.areaSqFt ? `${r.unitId.areaSqFt} sq ft` : '';
+    case 'carpetAreaSqFt': return r.unitId?.carpetAreaSqFt ? `${r.unitId.carpetAreaSqFt} sq ft` : '';
+    case 'floor': return r.unitId?.floor || '';
+    case 'unitType': return r.unitId?.unitType || '';
+    case 'monthlyRentExpected': return r.unitId?.monthlyRentExpected || 0;
+    case 'occupancyStatus': return r.unitId?.occupancyStatus || '';
+    case 'legacySheetCode': return r.unitId?.legacySheetCode || '';
+    case 'tenant': return r.tenantId?.name || '';
+    case 'tenantCode': return r.tenantId?.tenantCode || '';
+    case 'phone': return r.tenantId?.phone || '';
+    case 'email': return r.tenantId?.email || '';
+    case 'tenantType': return r.tenantId?.tenantType || '';
+    case 'idProofType': return r.tenantId?.idProofType || '';
+    case 'idProofNumber': return r.tenantId?.idProofNumber || '';
+    case 'tenantAddress': return r.tenantId?.address || '';
+    case 'emergencyContact': return `${r.tenantId?.emergencyContactName || ''} ${r.tenantId?.emergencyContactPhone ? `(${r.tenantId.emergencyContactPhone})` : ''}`.trim();
+    case 'deposit': return r.tenantId?.deposit || 0;
+    case 'monthsCovered': {
+      const rawM = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+      return rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '';
+    }
+    case 'status': return r.status || 'Rented';
+    case 'totalAmount': return Number(r.totalAmount) || 0;
+    case 'adjustmentAmount': return Number(r.adjustmentAmount) || 0;
+    case 'adjustmentDescription': return r.adjustmentDescription || '';
+    case 'referenceNumber': return r.referenceNumber || '';
+    case 'comments': return r.comments || '';
+    case 'isReversed': return r.isReversed ? 'Reversed' : 'Active';
+    case 'reversalReason': return r.reversalReason || '';
+    case 'reversalDate': return r.reversalDate ? formatDate(r.reversalDate) : '';
+    case 'createdAt': return r.createdAt ? formatDate(r.createdAt) : '';
+    case 'updatedAt': return r.updatedAt ? formatDate(r.updatedAt) : '';
+    default: return r[colId] != null ? String(r[colId]) : '';
+  }
 };
 
 export default function AllIncomeReportView() {
@@ -104,7 +218,7 @@ export default function AllIncomeReportView() {
 
   // Column management & widths
   const [visibleColumns, setVisibleColumns] = useState(() => {
-    const saved = localStorage.getItem('cols_all_income_v1');
+    const saved = localStorage.getItem('cols_all_income_v2');
     if (!saved) return DEFAULT_INCOME_COLS;
     try {
       const allowed = ALL_INCOME_COLUMNS_DEF.map(c => c.id);
@@ -119,9 +233,9 @@ export default function AllIncomeReportView() {
     columnWidths,
     handleResizeStart,
     resetColumnWidths
-  } = useResizableColumns('all_income_v1', DEFAULT_INCOME_COLUMN_WIDTHS);
+  } = useResizableColumns('all_income_v2', DEFAULT_INCOME_COLUMN_WIDTHS);
 
-  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('all_income_v1', 0);
+  const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('all_income_v2', 0);
 
   // Edit Receipt Modal
   const [editingReceipt, setEditingReceipt] = useState(null);
@@ -135,10 +249,9 @@ export default function AllIncomeReportView() {
     contractNo: '',
     customContractNo: '',
     isCustomContract: false,
+    status: 'Rented',
     totalAmount: '',
-    paymentMode: 'Cash',
     referenceNumber: '',
-    bankName: '',
     comments: ''
   });
   const [savingReceipt, setSavingReceipt] = useState(false);
@@ -176,15 +289,29 @@ export default function AllIncomeReportView() {
 
   const filterSuggestions = useMemo(() => {
     return {
+      accountingMonth: extractUniqueValues(receipts, r => {
+        const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+        return m ? formatMonthYear(m) : '';
+      }),
       receiptNumber: extractUniqueValues(receipts, r => r.receiptNumber),
       contractNo: extractUniqueValues(receipts, r => r.contractNo),
       property: extractUniqueValues(receipts, r => r.unitId?.propertyId?.name),
+      propertyCode: extractUniqueValues(receipts, r => r.unitId?.propertyId?.propertyCode),
+      propertyType: extractUniqueValues(receipts, r => r.unitId?.propertyId?.propertyType),
+      city: extractUniqueValues(receipts, r => r.unitId?.propertyId?.city),
       unit: extractUniqueValues(receipts, r => r.unitId?.subUnitPartition || r.unitId?.unitName),
+      unitCode: extractUniqueValues(receipts, r => r.unitId?.unitCode),
+      unitType: extractUniqueValues(receipts, r => r.unitId?.unitType),
+      floor: extractUniqueValues(receipts, r => r.unitId?.floor),
+      occupancyStatus: extractUniqueValues(receipts, r => r.unitId?.occupancyStatus),
       tenant: extractUniqueValues(receipts, r => r.tenantId?.name),
+      tenantCode: extractUniqueValues(receipts, r => r.tenantId?.tenantCode),
       phone: extractUniqueValues(receipts, r => r.tenantId?.phone),
-      paymentMode: ['Cash', 'Bank Transfer', 'Cheque', 'UPI / Online'],
+      email: extractUniqueValues(receipts, r => r.tenantId?.email),
+      tenantType: extractUniqueValues(receipts, r => r.tenantId?.tenantType),
+      status: ['Rented', 'Vacant'],
       monthsCovered: extractUniqueValues(receipts, r => r.monthsCovered),
-      bankName: extractUniqueValues(receipts, r => r.bankName),
+      isReversed: ['Active', 'Reversed'],
       comments: extractUniqueValues(receipts, r => r.comments)
     };
   }, [receipts]);
@@ -203,9 +330,8 @@ export default function AllIncomeReportView() {
         const unit = (r.unitId?.subUnitPartition || r.unitId?.unitName || '').toLowerCase();
         const ten = (r.tenantId?.name || '').toLowerCase();
         const phone = (r.tenantId?.phone || '').toLowerCase();
-        const mode = (r.paymentMode || '').toLowerCase();
+        const stat = (r.status || 'Rented').toLowerCase();
         const ref = (r.referenceNumber || '').toLowerCase();
-        const bank = (r.bankName || '').toLowerCase();
         const comm = (r.comments || '').toLowerCase();
         const months = (r.monthsCovered || '').toLowerCase();
         const amt = String(r.totalAmount || '');
@@ -217,9 +343,8 @@ export default function AllIncomeReportView() {
           unit.includes(q) ||
           ten.includes(q) ||
           phone.includes(q) ||
-          mode.includes(q) ||
+          stat.includes(q) ||
           ref.includes(q) ||
-          bank.includes(q) ||
           comm.includes(q) ||
           months.includes(q) ||
           amt.includes(q)
@@ -227,39 +352,26 @@ export default function AllIncomeReportView() {
       });
     }
 
-    // 2. APEX Structured Filters
+    // 2. APEX Structured Filters (supports all backend columns)
     if (activeFilters.length > 0) {
       rows = rows.filter(r => {
         return activeFilters.every(flt => {
-          let cellVal = '';
-          if (flt.column === 'receiptNumber') cellVal = r.receiptNumber;
-          else if (flt.column === 'receiptDate') cellVal = r.receiptDate ? formatDate(r.receiptDate) : '';
-          else if (flt.column === 'contractNo') cellVal = r.contractNo;
-          else if (flt.column === 'property') cellVal = r.unitId?.propertyId?.name;
-          else if (flt.column === 'unit') cellVal = r.unitId?.subUnitPartition || r.unitId?.unitName;
-          else if (flt.column === 'tenant') cellVal = r.tenantId?.name;
-          else if (flt.column === 'phone') cellVal = r.tenantId?.phone;
-          else if (flt.column === 'monthsCovered') cellVal = r.monthsCovered;
-          else if (flt.column === 'paymentMode') cellVal = r.paymentMode;
-          else if (flt.column === 'referenceNumber') cellVal = r.referenceNumber;
-          else if (flt.column === 'bankName') cellVal = r.bankName;
-          else if (flt.column === 'comments') cellVal = r.comments;
-          else if (flt.column === 'totalAmount') cellVal = r.totalAmount;
+          const cellVal = getIncomeFieldVal(r, flt.column);
           return evaluateFilterRule(cellVal, flt.operator, flt.value);
         });
       });
     }
 
-    // 3. Sorting
+    // 3. Sorting (supports all backend columns)
     if (sortConfig.key) {
       rows = sortDataRows(rows, sortConfig.key, sortConfig.direction, (item, key) => {
-        if (key === 'totalAmount') return Number(item.totalAmount) || 0;
-        if (key === 'receiptDate') return item.receiptDate ? new Date(item.receiptDate).getTime() : 0;
-        if (key === 'property') return item.unitId?.propertyId?.name || '';
-        if (key === 'unit') return item.unitId?.subUnitPartition || item.unitId?.unitName || '';
-        if (key === 'tenant') return item.tenantId?.name || '';
-        if (key === 'phone') return item.tenantId?.phone || '';
-        return item[key] || '';
+        if (['totalAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(key)) {
+          return Number(getIncomeFieldVal(item, key)) || 0;
+        }
+        if (['receiptDate', 'createdAt', 'updatedAt', 'reversalDate'].includes(key)) {
+          return item[key] ? new Date(item[key]).getTime() : 0;
+        }
+        return getIncomeFieldVal(item, key);
       });
     }
 
@@ -274,25 +386,21 @@ export default function AllIncomeReportView() {
     return processedReceipts.slice(start, start + Number(rowsPerPage));
   }, [processedReceipts, rowsPerPage, currentPage]);
 
-  // Export to Excel
+  // Export to Excel with full backend columns support
   const exportToExcel = () => {
     try {
-      const dataToExport = processedReceipts.map((r, i) => ({
-        '#': i + 1,
-        'Receipt Date': r.receiptDate ? formatDate(r.receiptDate) : '',
-        'Receipt #': r.receiptNumber || '',
-        'Contract #': r.contractNo || '',
-        'Property': r.unitId?.propertyId?.name || '',
-        'Sub-Property / Partition': r.unitId?.subUnitPartition || r.unitId?.unitName || '',
-        'Tenant': r.tenantId?.name || '',
-        'Phone': r.tenantId?.phone || '',
-        'Month(s) Covered': r.monthsCovered || '',
-        'Payment Mode': r.paymentMode || 'Cash',
-        'Ref / Cheque #': r.referenceNumber || '',
-        'Bank': r.bankName || '',
-        'Notes / Comments': r.comments || '',
-        'Amount (₹)': Number(r.totalAmount) || 0
-      }));
+      const exportCols = ALL_INCOME_COLUMNS_DEF.filter(c => c.id !== 'actions' && (visibleColumns.includes(c.id) || visibleColumns.length === 0));
+      const dataToExport = processedReceipts.map((r, i) => {
+        const row = { '#': i + 1 };
+        exportCols.forEach(col => {
+          if (col.id === 'index') return;
+          const val = getIncomeFieldVal(r, col.id);
+          row[col.label] = ['totalAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(col.id)
+            ? (Number(val) || 0)
+            : val;
+        });
+        return row;
+      });
 
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
@@ -323,10 +431,9 @@ export default function AllIncomeReportView() {
       contractNo: cNo,
       customContractNo: '',
       isCustomContract: false,
+      status: r.status || 'Rented',
       totalAmount: String(r.totalAmount || 0),
-      paymentMode: r.paymentMode || 'Cash',
       referenceNumber: r.referenceNumber || '',
-      bankName: r.bankName || '',
       comments: r.comments || ''
     });
   };
@@ -381,19 +488,17 @@ export default function AllIncomeReportView() {
       setSavingReceipt(true);
       const targetMonth = editForm.rentMonthYear || editForm.receiptDate.slice(0, 7);
       const amountNum = Number(editForm.totalAmount);
-      const resolvedContractNo = editForm.isCustomContract
-        ? (editForm.customContractNo || editForm.contractNo)
-        : editForm.contractNo;
+      const resolvedContractNo = editForm.status === 'Vacant' ? '' : (editForm.isCustomContract
+        ? (editForm.customContractNo || editForm.contractNo) : editForm.contractNo);
 
       const payload = {
         receiptNumber: editForm.receiptNumber.trim(),
         receiptDate: editForm.receiptDate,
+        status: editForm.status || 'Rented',
         totalAmount: amountNum,
-        paymentMode: editForm.paymentMode,
         referenceNumber: editForm.referenceNumber,
-        bankName: editForm.bankName,
         contractNo: resolvedContractNo,
-        tenantId: editForm.tenantId || undefined,
+        tenantId: editForm.status === 'Vacant' ? null : (editForm.tenantId || undefined),
         unitId: editForm.unitId || undefined,
         comments: editForm.comments,
         allocations: [
@@ -485,7 +590,7 @@ export default function AllIncomeReportView() {
         visibleColumns={visibleColumns}
         onChangeVisibleColumns={(cols) => {
           setVisibleColumns(cols);
-          try { localStorage.setItem('cols_all_income_v1', JSON.stringify(cols)); } catch(e){}
+          try { localStorage.setItem('cols_all_income_v2', JSON.stringify(cols)); } catch(e){}
         }}
         columnWidths={columnWidths}
         onResetWidths={resetColumnWidths}
@@ -535,8 +640,8 @@ export default function AllIncomeReportView() {
                         key={colId}
                         {...getHeaderDragProps(colId, visibleColumns, (cols) => {
                           setVisibleColumns(cols);
-                          try { localStorage.setItem('cols_all_income_v1', JSON.stringify(cols)); } catch(e){}
-                        }, 'all_income_v1')}
+                          try { localStorage.setItem('cols_all_income_v2', JSON.stringify(cols)); } catch(e){}
+                        }, 'all_income_v2')}
                         style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
                         className={`py-2.5 pl-3 pr-6 border-r border-slate-300 relative group bg-slate-100 ${align}`}
                       >
@@ -596,6 +701,18 @@ export default function AllIncomeReportView() {
                           );
                         }
 
+                        if (colId === 'accountingMonth') {
+                          const acctM = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 whitespace-nowrap text-xs font-semibold text-slate-800 text-center">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/60 font-bold">
+                                <Calendar className="w-3 h-3 text-teal-600" />
+                                {acctM ? formatMonthYear(acctM) : '—'}
+                              </span>
+                            </td>
+                          );
+                        }
+
                         if (colId === 'receiptNumber') {
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 font-mono font-bold text-teal-800 whitespace-nowrap">
@@ -651,20 +768,28 @@ export default function AllIncomeReportView() {
                         }
 
                         if (colId === 'monthsCovered') {
+                          const rawM = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+                          const formatted = rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '—';
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 whitespace-nowrap">
-                              <span className="inline-block px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 font-bold text-[11px] border border-slate-200">
-                                {r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '—'}
+                              <span className="inline-block px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 font-bold text-[11px] border border-blue-200">
+                                {formatted}
                               </span>
                             </td>
                           );
                         }
 
-                        if (colId === 'paymentMode') {
+                        if (colId === 'status') {
+                          const rStatus = r.status || 'Rented';
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 whitespace-nowrap">
-                              <span className="inline-block px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold border border-slate-200">
-                                {r.paymentMode || 'Cash'}
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                rStatus === 'Vacant'
+                                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${rStatus === 'Vacant' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                {rStatus}
                               </span>
                             </td>
                           );
@@ -674,14 +799,6 @@ export default function AllIncomeReportView() {
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600 whitespace-nowrap">
                               {r.referenceNumber || '—'}
-                            </td>
-                          );
-                        }
-
-                        if (colId === 'bankName') {
-                          return (
-                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-slate-600 whitespace-nowrap">
-                              {r.bankName || '—'}
                             </td>
                           );
                         }
@@ -718,7 +835,57 @@ export default function AllIncomeReportView() {
                           );
                         }
 
-                        return <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200">—</td>;
+                        if (colId === 'adjustmentAmount') {
+                          const adj = Number(r.adjustmentAmount) || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono font-bold whitespace-nowrap">
+                              {adj !== 0 ? (
+                                <span className={adj > 0 ? 'text-emerald-700' : 'text-rose-600'}>
+                                  {adj > 0 ? `+${formatCurrency(adj)}` : formatCurrency(adj)}
+                                </span>
+                              ) : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'isReversed') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                r.isReversed ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              }`}>
+                                {r.isReversed ? 'Reversed' : 'Active'}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'occupancyStatus') {
+                          const st = r.unitId?.occupancyStatus || 'Occupied';
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                              <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                {st}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        if (['monthlyRentExpected', 'deposit'].includes(colId)) {
+                          const num = Number(getIncomeFieldVal(r, colId)) || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono text-slate-700 whitespace-nowrap">
+                              {num > 0 ? formatCurrency(num) : '—'}
+                            </td>
+                          );
+                        }
+
+                        const textVal = getIncomeFieldVal(r, colId);
+                        return (
+                          <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-xs text-slate-700 whitespace-nowrap truncate max-w-xs" title={textVal}>
+                            {textVal || '—'}
+                          </td>
+                        );
                       })}
                     </tr>
                   );
@@ -807,279 +974,274 @@ export default function AllIncomeReportView() {
             </div>
 
             {/* Modal Form Body */}
-            <form onSubmit={handleSaveReceipt} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 bg-white">
-              {/* Row 1: Receipt Number & Payment Date */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Receipt # <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editForm.receiptNumber}
-                    onChange={(e) => setEditForm({ ...editForm, receiptNumber: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono font-bold text-teal-800"
-                    placeholder="e.g. REC-2026-0001"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Payment Date <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={editForm.receiptDate}
-                    onChange={(e) => setEditForm({ ...editForm, receiptDate: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
-                </div>
-              </div>
+            <form onSubmit={handleSaveReceipt} className="flex-1 overflow-y-auto p-4 sm:p-5 bg-white">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                
+                {/* COLUMN 1: OCCUPANCY & STATUS */}
+                <div className="space-y-3 p-3.5 bg-slate-50/70 rounded-2xl border border-slate-200/80">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block pb-1 border-b border-slate-200">
+                    Occupancy & Status
+                  </span>
 
-              {/* Row 2: Accounting Month & Amount */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Accounting Month <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="month"
-                    required
-                    value={editForm.rentMonthYear}
-                    onChange={(e) => setEditForm({ ...editForm, rentMonthYear: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono font-bold text-slate-800"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">Determines contract period & monthly ledger</span>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Amount (₹) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={editForm.totalAmount}
-                    onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 font-black text-emerald-700 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-                    placeholder="e.g. 25000"
-                  />
-                </div>
-              </div>
-
-              {/* Row 3: Property & Sub-Property / Partition */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Property</label>
-                  <select
-                    value={editForm.propertyId}
-                    onChange={(e) => {
-                      const newPropId = e.target.value;
-                      const validUnits = units.filter(u => String(u.propertyId?._id || u.propertyId) === String(newPropId));
-                      const newUnitId = validUnits.length > 0 ? validUnits[0]._id : '';
-                      setEditForm({ ...editForm, propertyId: newPropId, unitId: newUnitId });
-                    }}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
-                  >
-                    <option value="">-- Choose Property --</option>
-                    {properties.map(p => (
-                      <option key={p._id} value={p._id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Sub-Property / Partition</label>
-                  <select
-                    value={editForm.unitId}
-                    onChange={(e) => setEditForm({ ...editForm, unitId: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
-                  >
-                    <option value="">-- Choose Unit / Partition --</option>
-                    {availableUnitsForEdit.map(u => (
-                      <option key={u._id} value={u._id}>
-                        {u.subUnitPartition || u.unitName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Row 4: Tenant & Contract No (Filtered by Date Ranges!) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tenant</label>
-                  <select
-                    value={editForm.tenantId}
-                    onChange={(e) => setEditForm({ ...editForm, tenantId: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
-                  >
-                    <option value="">-- Choose Tenant --</option>
-                    {tenants.map(t => (
-                      <option key={t._id} value={t._id}>
-                        {t.name} {t.phone ? `(${t.phone})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-slate-700">
-                      Contract # (Date Range Filtered)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setEditForm({ ...editForm, isCustomContract: !editForm.isCustomContract })}
-                      className="text-[10px] text-teal-700 hover:underline font-semibold cursor-pointer"
-                    >
-                      {editForm.isCustomContract ? 'Choose from list' : 'Custom / Type'}
-                    </button>
+                  {/* Status Toggle */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-slate-200/70 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setEditForm(f => ({ ...f, status: 'Rented' }))}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          editForm.status !== 'Vacant'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900 bg-transparent'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${editForm.status !== 'Vacant' ? 'bg-white' : 'bg-emerald-500'}`} />
+                        <span>Rented</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditForm(f => ({ ...f, status: 'Vacant', tenantId: '', contractNo: '', customContractNo: '' }))}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          editForm.status === 'Vacant'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900 bg-transparent'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${editForm.status === 'Vacant' ? 'bg-white' : 'bg-amber-500'}`} />
+                        <span>Vacant</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {editForm.isCustomContract ? (
+                  {/* Property */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Property</label>
+                    <select
+                      value={editForm.propertyId}
+                      onChange={(e) => {
+                        const newPropId = e.target.value;
+                        const validUnits = units.filter(u => String(u.propertyId?._id || u.propertyId) === String(newPropId));
+                        const newUnitId = validUnits.length > 0 ? validUnits[0]._id : '';
+                        setEditForm({ ...editForm, propertyId: newPropId, unitId: newUnitId });
+                      }}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
+                    >
+                      <option value="">-- Choose Property --</option>
+                      {properties.map(p => (
+                        <option key={p._id} value={p._id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Partition / Sub-Unit */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Sub-Property / Partition</label>
+                    <select
+                      value={editForm.unitId}
+                      onChange={(e) => setEditForm({ ...editForm, unitId: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
+                    >
+                      <option value="">-- Choose Unit / Partition --</option>
+                      {availableUnitsForEdit.map(u => (
+                        <option key={u._id} value={u._id}>
+                          {u.subUnitPartition || u.unitName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Tenant */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Tenant</label>
+                    {editForm.status === 'Vacant' ? (
+                      <input
+                        type="text"
+                        disabled
+                        value=""
+                        placeholder="— (Blank - Unit is Vacant) —"
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-dashed border-amber-300 bg-amber-50/50 text-amber-800 font-bold"
+                      />
+                    ) : (
+                      <select
+                        value={editForm.tenantId}
+                        onChange={(e) => setEditForm({ ...editForm, tenantId: e.target.value })}
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
+                      >
+                        <option value="">-- Choose Tenant --</option>
+                        {tenants.map(t => (
+                          <option key={t._id} value={t._id}>
+                            {t.name} {t.phone ? `(${t.phone})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Contract No */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Contract Number</label>
+                    {editForm.status === 'Vacant' ? (
+                      <input
+                        type="text"
+                        disabled
+                        value=""
+                        placeholder="— (Blank - No Contract) —"
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-dashed border-amber-300 bg-amber-50/50 text-amber-800 font-mono font-bold"
+                      />
+                    ) : editForm.isCustomContract ? (
+                      <input
+                        type="text"
+                        placeholder="Type contract number..."
+                        value={editForm.customContractNo}
+                        onChange={(e) => setEditForm({ ...editForm, customContractNo: e.target.value })}
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
+                      />
+                    ) : (
+                      <select
+                        value={editForm.contractNo}
+                        onChange={(e) => setEditForm({ ...editForm, contractNo: e.target.value })}
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono font-medium"
+                      >
+                        <option value="">-- Choose Contract --</option>
+                        {contractOptions.allRelevant.map(c => {
+                          const cNo = c.contractNo || c.assignmentCode;
+                          const sStr = c.startDate ? c.startDate.slice(0, 10) : 'Open';
+                          const eStr = c.endDate ? c.endDate.slice(0, 10) : 'Ongoing';
+                          return (
+                            <option key={c._id} value={cNo}>
+                              {cNo} ({sStr} to {eStr})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {/* COLUMN 2: FINANCIALS & DATES */}
+                <div className="space-y-3 p-3.5 bg-slate-50/70 rounded-2xl border border-slate-200/80">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block pb-1 border-b border-slate-200">
+                    Receipt Details & Financials
+                  </span>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Receipt # <span className="text-rose-500">*</span>
+                    </label>
                     <input
                       type="text"
-                      placeholder="Type custom contract #..."
-                      value={editForm.customContractNo || editForm.contractNo}
-                      onChange={(e) => setEditForm({ ...editForm, customContractNo: e.target.value, contractNo: e.target.value })}
-                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 font-mono font-bold text-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      required
+                      value={editForm.receiptNumber}
+                      onChange={(e) => setEditForm({ ...editForm, receiptNumber: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono font-bold text-teal-800"
+                      placeholder="e.g. REC-2026-0001"
                     />
-                  ) : (
-                    <select
-                      value={editForm.contractNo}
-                      onChange={(e) => setEditForm({ ...editForm, contractNo: e.target.value })}
-                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-mono font-bold text-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                    >
-                      <option value="">-- No Contract / Clear --</option>
+                  </div>
 
-                      {/* Current assigned contract if not in list */}
-                      {editForm.contractNo && !assignments.some(c => (c.contractNo || c.assignmentCode) === editForm.contractNo) && (
-                        <option value={editForm.contractNo}>
-                          {editForm.contractNo} (Current)
-                        </option>
-                      )}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Payment Date <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={editForm.receiptDate}
+                      onChange={(e) => setEditForm({ ...editForm, receiptDate: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    />
+                  </div>
 
-                      {/* Option Group 1: Strictly Valid for this Accounting Month / Date Range */}
-                      {contractOptions.validForDateRange.length > 0 && (
-                        <optgroup label={`✔ Valid for ${editForm.rentMonthYear || 'Period'} (Within Date Range)`}>
-                          {contractOptions.validForDateRange.map(c => {
-                            const cNo = c.contractNo || c.assignmentCode;
-                            const sStr = c.startDate ? formatDate(c.startDate) : 'Start';
-                            const eStr = c.endDate ? formatDate(c.endDate) : 'Active';
-                            return (
-                              <option key={c._id} value={cNo}>
-                                {cNo} ({sStr} to {eStr})
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      )}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Accounting Month <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="month"
+                      required
+                      value={editForm.rentMonthYear}
+                      onChange={(e) => setEditForm({ ...editForm, rentMonthYear: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono font-bold text-slate-800"
+                    />
+                  </div>
 
-                      {/* Option Group 2: Other Contracts for this Tenant/Unit (Outside range) */}
-                      {contractOptions.otherPeriods.length > 0 && (
-                        <optgroup label="⚠ Other Contracts (Outside this Month Range)">
-                          {contractOptions.otherPeriods.map(c => {
-                            const cNo = c.contractNo || c.assignmentCode;
-                            const sStr = c.startDate ? formatDate(c.startDate) : 'Start';
-                            const eStr = c.endDate ? formatDate(c.endDate) : 'Ended';
-                            return (
-                              <option key={c._id} value={cNo}>
-                                {cNo} ({sStr} to {eStr})
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      )}
-
-                      {/* Fallback: All contracts if neither tenant nor unit selected */}
-                      {contractOptions.validForDateRange.length === 0 && contractOptions.otherPeriods.length === 0 && (
-                        <optgroup label="All System Lease Contracts">
-                          {assignments.filter(c => c.contractNo).map(c => (
-                            <option key={c._id} value={c.contractNo}>
-                              {c.contractNo} ({c.tenantId?.name || 'Tenant'})
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                  )}
-                  {contractOptions.validForDateRange.length === 0 && !editForm.isCustomContract && (
-                    <span className="text-[10px] text-amber-600 block mt-0.5">
-                      No contract date range strictly overlaps with {editForm.rentMonthYear || 'this month'}. Select from other periods or type custom.
-                    </span>
-                  )}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Amount (₹) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      value={editForm.totalAmount}
+                      onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })}
+                      className="w-full px-3 py-1.5 text-sm font-black rounded-xl border border-slate-300 text-emerald-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      placeholder="e.g. 25000"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {/* Row 5: Payment Mode & Ref / Cheque # */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
-                  <select
-                    value={editForm.paymentMode}
-                    onChange={(e) => setEditForm({ ...editForm, paymentMode: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 font-medium"
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="Bank Transfer / NEFT / RTGS">Bank Transfer / NEFT / RTGS</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="UPI / GPay">UPI / GPay</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Ref / Cheque #</label>
-                  <input
-                    type="text"
-                    placeholder="UTR / Cheque / Transaction #"
-                    value={editForm.referenceNumber}
-                    onChange={(e) => setEditForm({ ...editForm, referenceNumber: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
-                  />
-                </div>
-              </div>
+                {/* COLUMN 3: REFERENCES & COMMENTS */}
+                <div className="space-y-3 p-3.5 bg-slate-50/70 rounded-2xl border border-slate-200/80">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block pb-1 border-b border-slate-200">
+                    References & Notes
+                  </span>
 
-              {/* Row 6: Bank Name & Comments */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Bank Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. HDFC / SBI / ICICI"
-                    value={editForm.bankName}
-                    onChange={(e) => setEditForm({ ...editForm, bankName: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Ref / Cheque #</label>
+                    <input
+                      type="text"
+                      placeholder="UTR / Cheque / Transaction #"
+                      value={editForm.referenceNumber}
+                      onChange={(e) => setEditForm({ ...editForm, referenceNumber: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Notes / Comments</label>
+                    <textarea
+                      rows="4"
+                      placeholder="Notes, remarks or collection details..."
+                      value={editForm.comments}
+                      onChange={(e) => setEditForm({ ...editForm, comments: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    />
+                  </div>
+
+                  <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500">
+                    <p className="font-semibold text-slate-700">Audit Status:</p>
+                    <p className="text-[11px] mt-0.5">Payment mode & bank name are omitted. Occupancy is tracked by Status.</p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Notes / Comments</label>
-                  <textarea
-                    rows="2"
-                    placeholder="Notes, remarks or collection details..."
-                    value={editForm.comments}
-                    onChange={(e) => setEditForm({ ...editForm, comments: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
-                </div>
+
               </div>
 
               {/* Modal Footer */}
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2.5 pt-3 mt-4 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setEditingReceipt(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={savingReceipt}
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer transition-colors"
+                  className="px-5 py-2 text-xs font-extrabold text-white bg-teal-600 hover:bg-teal-700 active:scale-95 transition-all rounded-xl shadow-md flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>{savingReceipt ? 'Saving Changes...' : 'Save Income'}</span>
+                  {savingReceipt ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Saving Changes...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Update Receipt Record</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

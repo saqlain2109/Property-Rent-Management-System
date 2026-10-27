@@ -32,7 +32,6 @@ export default function PropertyAccountSummaryReport() {
     expectedRent: 130,
     receivedRent: 130,
     receiptDate: 120,
-    mode: 100,
     balanceDue: 120,
     status: 100
   }), []);
@@ -169,7 +168,6 @@ export default function PropertyAccountSummaryReport() {
         if (colId === 'unit') val = row.unitName || '';
         else if (colId === 'tenant') val = row.tenantName || '';
         else if (colId === 'contractType') val = row.contractType || '';
-        else if (colId === 'mode') val = row.paymentMode || '';
         else if (colId === 'status') val = row.status || '';
         return filterVals.includes(String(val));
       });
@@ -184,7 +182,6 @@ export default function PropertyAccountSummaryReport() {
         else if (earnSort.key === 'expectedRent') { va = a.expectedRent || 0; vb = b.expectedRent || 0; }
         else if (earnSort.key === 'receivedRent') { va = a.receivedRent || 0; vb = b.receivedRent || 0; }
         else if (earnSort.key === 'receiptDate') { va = a.paidDate || ''; vb = b.paidDate || ''; }
-        else if (earnSort.key === 'mode') { va = a.paymentMode || ''; vb = b.paymentMode || ''; }
         else if (earnSort.key === 'balanceDue') { va = a.balanceDue || 0; vb = b.balanceDue || 0; }
         else if (earnSort.key === 'status') { va = a.status || ''; vb = b.status || ''; }
         else { va = a[earnSort.key]; vb = b[earnSort.key]; }
@@ -203,9 +200,8 @@ export default function PropertyAccountSummaryReport() {
     const units = Array.from(new Set(earnings.map(r => r.unitName).filter(Boolean))).sort();
     const tenants = Array.from(new Set(earnings.map(r => r.tenantName).filter(Boolean))).sort();
     const contractTypes = Array.from(new Set(earnings.map(r => r.contractType).filter(Boolean))).sort();
-    const modes = Array.from(new Set(earnings.map(r => r.paymentMode).filter(Boolean))).sort();
     const statuses = Array.from(new Set(earnings.map(r => r.status).filter(Boolean))).sort();
-    return { unit: units, tenant: tenants, contractType: contractTypes, mode: modes, status: statuses };
+    return { unit: units, tenant: tenants, contractType: contractTypes, status: statuses };
   }, [earnings]);
 
   // Filtered and sorted expenses
@@ -568,22 +564,7 @@ export default function PropertyAccountSummaryReport() {
                         onResizeStart={handleEarnResizeStart}
                         className="border-b border-r border-slate-200"
                       />
-                      <ColumnHeaderCell
-                        colId="mode"
-                        label="Mode"
-                        width={earnWidths.mode}
-                        isSortable={true}
-                        sortDirection={earnSort.key === 'mode' ? earnSort.direction : null}
-                        onSort={() => handleEarnSort('mode')}
-                        isFilterable={true}
-                        uniqueValues={earnUniqueValues.mode}
-                        filterValue={earnFilters.mode}
-                        onApplyFilter={(col, vals) => setEarnFilters(p => ({ ...p, [col]: vals }))}
-                        onClearFilter={(col) => setEarnFilters(p => { const n = { ...p }; delete n[col]; return n; })}
-                        onResizeStart={handleEarnResizeStart}
-                        className="border-b border-r border-slate-200"
-                      />
-                      <ColumnHeaderCell
+                                            <ColumnHeaderCell
                         colId="balanceDue"
                         label="Balance Due"
                         width={earnWidths.balanceDue}
@@ -677,14 +658,7 @@ export default function PropertyAccountSummaryReport() {
                         >
                           {row.paidDate ? formatDate(row.paidDate) : <span className="text-slate-400">—</span>}
                         </td>
-                        <td
-                          style={{ width: earnWidths.mode, minWidth: earnWidths.mode, maxWidth: earnWidths.mode }}
-                          className={`py-2.5 px-3 text-slate-600 border-b border-slate-100 ${
-                            autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'
-                          }`}
-                        >
-                          {row.paymentMode || <span className="text-slate-400">—</span>}
-                        </td>
+
                         <td
                           style={{ width: earnWidths.balanceDue, minWidth: earnWidths.balanceDue, maxWidth: earnWidths.balanceDue }}
                           className={`py-2.5 px-3 text-right font-mono font-bold border-b border-slate-100 ${

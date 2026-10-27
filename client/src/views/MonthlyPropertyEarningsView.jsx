@@ -73,6 +73,9 @@ export default function MonthlyPropertyEarningsView() {
     const map = {
       index: 48,
       property: 260,
+      propertyCode: 120,
+      propertyType: 130,
+      unitsCount: 100,
       total: 135
     };
     effectiveMonthLabels.forEach(m => {
@@ -119,6 +122,9 @@ export default function MonthlyPropertyEarningsView() {
     const list = [
       { id: 'index', label: '#', defaultVisible: true },
       { id: 'property', label: 'Property / Partition', defaultVisible: true },
+      { id: 'propertyCode', label: 'Property Code', defaultVisible: false },
+      { id: 'propertyType', label: 'Property Type', defaultVisible: false },
+      { id: 'unitsCount', label: 'Units Count', defaultVisible: false },
     ];
     effectiveMonthLabels.forEach(m => {
       list.push({ id: m.key, label: m.label, defaultVisible: true });
@@ -650,6 +656,54 @@ export default function MonthlyPropertyEarningsView() {
                       style={{ borderBottom: '2px solid #334155' }}
                     />
                   )}
+                  {(visibleColumns.length === 0 || visibleColumns.includes('propertyCode')) && (
+                    <ColumnHeaderCell
+                      colId="propertyCode"
+                      label="Property Code"
+                      align="left"
+                      width={columnWidths['propertyCode'] || 120}
+                      minWidth={100}
+                      isSortable={true}
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                      onResizeStart={handleResizeStart}
+                      isHeaderSticky={isHeaderSticky}
+                      theme="dark"
+                      style={{ borderBottom: '2px solid #334155' }}
+                    />
+                  )}
+                  {(visibleColumns.length === 0 || visibleColumns.includes('propertyType')) && (
+                    <ColumnHeaderCell
+                      colId="propertyType"
+                      label="Property Type"
+                      align="left"
+                      width={columnWidths['propertyType'] || 130}
+                      minWidth={110}
+                      isSortable={true}
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                      onResizeStart={handleResizeStart}
+                      isHeaderSticky={isHeaderSticky}
+                      theme="dark"
+                      style={{ borderBottom: '2px solid #334155' }}
+                    />
+                  )}
+                  {(visibleColumns.length === 0 || visibleColumns.includes('unitsCount')) && (
+                    <ColumnHeaderCell
+                      colId="unitsCount"
+                      label="Units Count"
+                      align="center"
+                      width={columnWidths['unitsCount'] || 100}
+                      minWidth={80}
+                      isSortable={true}
+                      sortConfig={sortConfig}
+                      onSort={handleSort}
+                      onResizeStart={handleResizeStart}
+                      isHeaderSticky={isHeaderSticky}
+                      theme="dark"
+                      style={{ borderBottom: '2px solid #334155' }}
+                    />
+                  )}
                   {displayMonthCols.map((m, mIdx) => (
                     <ColumnHeaderCell
                       key={m.key}
@@ -772,6 +826,21 @@ export default function MonthlyPropertyEarningsView() {
                             </div>
                           </td>
                         )}
+                        {(visibleColumns.length === 0 || visibleColumns.includes('propertyCode')) && (
+                          <td className="py-2 px-3 bg-white font-mono text-xs text-slate-700 border-r border-slate-100">
+                            {row.propertyCode || '—'}
+                          </td>
+                        )}
+                        {(visibleColumns.length === 0 || visibleColumns.includes('propertyType')) && (
+                          <td className="py-2 px-3 bg-white text-xs text-slate-700 border-r border-slate-100">
+                            {row.propertyType || '—'}
+                          </td>
+                        )}
+                        {(visibleColumns.length === 0 || visibleColumns.includes('unitsCount')) && (
+                          <td className="py-2 px-3 bg-white text-center font-bold text-xs text-slate-700 border-r border-slate-100">
+                            {row.units?.length || 0}
+                          </td>
+                        )}
 
                         {/* Month Columns */}
                         {displayMonthCols.map(m => {
@@ -862,6 +931,21 @@ export default function MonthlyPropertyEarningsView() {
                                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0" />
                                 <span className={`font-semibold text-slate-700 ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}>{u.unitName}</span>
                               </div>
+                            </td>
+                          )}
+                          {(visibleColumns.length === 0 || visibleColumns.includes('propertyCode')) && (
+                            <td className="py-2 px-3 bg-slate-50 font-mono text-xs text-slate-500 border-r border-slate-100">
+                              {u.unitCode || '—'}
+                            </td>
+                          )}
+                          {(visibleColumns.length === 0 || visibleColumns.includes('propertyType')) && (
+                            <td className="py-2 px-3 bg-slate-50 text-xs text-slate-500 border-r border-slate-100">
+                              {u.occupancyStatus || '—'}
+                            </td>
+                          )}
+                          {(visibleColumns.length === 0 || visibleColumns.includes('unitsCount')) && (
+                            <td className="py-2 px-3 bg-slate-50 text-center text-xs text-slate-400 border-r border-slate-100">
+                              —
                             </td>
                           )}
 

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import API from '../services/api';
+import PaymentEditModal from './PaymentEditModal';
+import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import {
   X, Edit3, Save, Calendar, CheckCircle2, AlertCircle, Plus, Trash2,
   FileText, Building2, User, RefreshCw, IndianRupee, Tag,
-  Clock, ArrowUpRight, HelpCircle, Receipt
+  Clock, ArrowUpRight, HelpCircle, Receipt, ExternalLink
 } from 'lucide-react';
 
 const DEFAULT_EXPENSE_HEADS = [
@@ -44,10 +46,14 @@ export default function ReportDrilldownModal({
   const [data, setData] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
+  const [modalReceipt, setModalReceipt] = useState(null);
   const [editExpenseForm, setEditExpenseForm] = useState(null);
   const [categories, setCategories] = useState(DEFAULT_EXPENSE_HEADS);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Browser Back button navigation: dismiss drilldown modal back to the report table
+  useModalBackHandler(isOpen, onClose);
   const [successMsg, setSuccessMsg] = useState('');
 
   const isExpenseTarget = target?.type === 'expense';
@@ -95,8 +101,7 @@ export default function ReportDrilldownModal({
         expenseMonth: defaultMonth,
         expenseDate: defaultDate,
         description: target.category ? `${target.category} expense` : '',
-        vendorOrPayee: '',
-        paymentMode: 'Cash',
+
         referenceNumber: ''
       });
       setNewPaymentForm(null);
@@ -116,9 +121,9 @@ export default function ReportDrilldownModal({
         tenantId: String(firstAssign?.tenantId?._id || firstAssign?.tenantId || ''),
         contractNo: firstAssign?.contractNo || firstAssign?.assignmentCode || '',
         amount: firstAssign?.unitId?.monthlyRentExpected || firstAssign?.monthlyRentExpected || '',
+        status: 'Rented',
         receiptDate: defaultDate,
         rentMonthYear: defaultMonth,
-        paymentMode: 'Cash',
         referenceNumber: '',
         comments: `Rent collection for ${defaultMonth}`
       });
@@ -151,8 +156,7 @@ export default function ReportDrilldownModal({
         expenseMonth: newExpenseForm.expenseMonth || (target.month || new Date().toISOString().slice(0, 7)),
         expenseDate: newExpenseForm.expenseDate ? new Date(newExpenseForm.expenseDate) : new Date(),
         description: newExpenseForm.description?.trim() || `${newExpenseForm.category} expense`,
-        vendorOrPayee: newExpenseForm.vendorOrPayee?.trim() || '',
-        paymentMode: newExpenseForm.paymentMode || 'Cash',
+
         referenceNumber: newExpenseForm.referenceNumber || ''
       };
 
@@ -188,13 +192,14 @@ export default function ReportDrilldownModal({
       }
 
       const m = newPaymentForm.rentMonthYear || target.month || new Date().toISOString().slice(0, 7);
+      const isVacant = newPaymentForm.status === 'Vacant';
       const payload = {
-        tenantId: newPaymentForm.tenantId,
+        status: newPaymentForm.status || 'Rented',
+        tenantId: isVacant ? null : newPaymentForm.tenantId,
         unitId: newPaymentForm.unitId,
-        contractNo: newPaymentForm.contractNo || '',
+        contractNo: isVacant ? '' : (newPaymentForm.contractNo || ''),
         receiptDate: newPaymentForm.receiptDate || new Date().toISOString().split('T')[0],
         totalAmount: amt,
-        paymentMode: newPaymentForm.paymentMode || 'Cash',
         referenceNumber: newPaymentForm.referenceNumber || '',
         comments: newPaymentForm.comments || `Rent payment for ${m}`,
         allocations: [{
@@ -315,7 +320,7 @@ export default function ReportDrilldownModal({
     setErrorMsg('');
     setSuccessMsg('');
     setEditExpenseForm(null);
-    setEditingId(record.receiptId);
+    setModalReceipt(record);
 
     const dateStr = record.receiptDate
       ? new Date(record.receiptDate).toISOString().split('T')[0]
@@ -325,10 +330,9 @@ export default function ReportDrilldownModal({
       receiptId: record.receiptId,
       receiptNumber: record.receiptNumber,
       receiptDate: dateStr,
+      status: record.status || 'Rented',
       totalAmount: record.receiptTotalAmount || 0,
-      paymentMode: record.paymentMode || 'Cash',
       referenceNumber: record.referenceNumber || '',
-      bankName: record.bankName || '',
       comments: record.comments || '',
       allocations: record.allocations && record.allocations.length > 0
         ? record.allocations.map(a => ({
@@ -401,11 +405,10 @@ export default function ReportDrilldownModal({
       }
 
       const payload = {
+        status: editForm.status || 'Rented',
         receiptDate: editForm.receiptDate,
         totalAmount: Number(editForm.totalAmount),
-        paymentMode: editForm.paymentMode,
         referenceNumber: editForm.referenceNumber,
-        bankName: editForm.bankName,
         comments: editForm.comments,
         allocations: editForm.allocations
       };
@@ -447,8 +450,7 @@ export default function ReportDrilldownModal({
       expenseDate: dateStr,
       category: record.category || 'Maintenance',
       description: record.description || record.comments || '',
-      vendorOrPayee: record.vendorOrPayee || (record.tenant?.name !== '—' ? record.tenant?.name : ''),
-      paymentMode: record.paymentMode || 'Cash',
+
       referenceNumber: record.referenceNumber || ''
     });
   };
@@ -717,31 +719,7 @@ export default function ReportDrilldownModal({
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Payee / Vendor</label>
-                      <input
-                        type="text"
-                        placeholder="Payee or vendor name"
-                        value={newExpenseForm.vendorOrPayee}
-                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, vendorOrPayee: e.target.value }))}
-                        className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl"
-                      />
-                    </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
-                      <select
-                        value={newExpenseForm.paymentMode}
-                        onChange={(e) => setNewExpenseForm(prev => ({ ...prev, paymentMode: e.target.value }))}
-                        className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl"
-                      >
-                        <option value="Cash">Cash</option>
-                        <option value="Bank Transfer">Bank Transfer</option>
-                        <option value="Cheque">Cheque</option>
-                        <option value="UPI / GPay">UPI / GPay</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">Reference / Cheque No</label>
@@ -897,18 +875,31 @@ export default function ReportDrilldownModal({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
-                      <select
-                        value={newPaymentForm.paymentMode}
-                        onChange={(e) => setNewPaymentForm(prev => ({ ...prev, paymentMode: e.target.value }))}
-                        className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl"
-                      >
-                        <option value="Cash">Cash</option>
-                        <option value="Bank Transfer / NEFT / RTGS">Bank Transfer</option>
-                        <option value="Cheque">Cheque</option>
-                        <option value="UPI / GPay">UPI / GPay</option>
-                        <option value="Other">Other</option>
-                      </select>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
+                      <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setNewPaymentForm(prev => ({ ...prev, status: 'Rented' }))}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            newPaymentForm.status !== 'Vacant'
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Rented
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewPaymentForm(prev => ({ ...prev, status: 'Vacant', tenantId: '', contractNo: '', amount: '0' }))}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            newPaymentForm.status === 'Vacant'
+                              ? 'bg-amber-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Vacant
+                        </button>
+                      </div>
                     </div>
 
                     <div className="sm:col-span-2">
@@ -1003,9 +994,13 @@ export default function ReportDrilldownModal({
                                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
                                 {formatDate(rec.receiptDate)}
                               </span>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
-                                {rec.paymentMode}
-                              </span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  (rec.status || 'Rented') === 'Vacant'
+                                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                }`}>
+                                  {rec.status || 'Rented'}
+                                </span>
                               {rec.category && (
                                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold border border-rose-200">
                                   {rec.category}
@@ -1134,50 +1129,18 @@ export default function ReportDrilldownModal({
                             </div>
                           </div>
 
-                          {/* Row 2: Payee, Mode, Reference */}
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                Payee / Vendor
-                              </label>
-                              <input
-                                type="text"
-                                value={editExpenseForm.vendorOrPayee}
-                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, vendorOrPayee: e.target.value }))}
-                                placeholder="Vendor, payee or recipient name"
-                                className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                Payment Mode
-                              </label>
-                              <select
-                                value={editExpenseForm.paymentMode}
-                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, paymentMode: e.target.value }))}
-                                className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 cursor-pointer"
-                              >
-                                <option value="Cash">Cash</option>
-                                <option value="Bank Transfer">Bank Transfer</option>
-                                <option value="Cheque">Cheque</option>
-                                <option value="UPI / GPay">UPI / GPay</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                Bill / Reference / Cheque No
-                              </label>
-                              <input
-                                type="text"
-                                value={editExpenseForm.referenceNumber}
-                                onChange={(e) => setEditExpenseForm(prev => ({ ...prev, referenceNumber: e.target.value }))}
-                                placeholder="Optional reference"
-                                className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                              />
-                            </div>
+                          {/* Row 2: Reference */}
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Bill / Reference / Cheque No
+                            </label>
+                            <input
+                              type="text"
+                              value={editExpenseForm.referenceNumber}
+                              onChange={(e) => setEditExpenseForm(prev => ({ ...prev, referenceNumber: e.target.value }))}
+                              placeholder="Optional reference"
+                              className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                            />
                           </div>
 
                           {/* Row 3: Description / Reason */}
@@ -1241,9 +1204,13 @@ export default function ReportDrilldownModal({
                               <Calendar className="w-3.5 h-3.5 text-slate-400" />
                               {formatDate(rec.receiptDate)}
                             </span>
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
-                              {rec.paymentMode}
-                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  (rec.status || 'Rented') === 'Vacant'
+                                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                }`}>
+                                  {rec.status || 'Rented'}
+                                </span>
                           </div>
 
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs">
@@ -1298,9 +1265,27 @@ export default function ReportDrilldownModal({
                               type="button"
                               onClick={() => startEditingReceipt(rec)}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-700 text-xs font-semibold transition-all shadow-2xs group cursor-pointer"
+                              title="Edit record using full 3-column view"
                             >
                               <Edit3 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
                               <span>Edit Record</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                const targetMonth = rec.accountingMonth || (rec.receiptDate ? String(rec.receiptDate).slice(0, 7) : target?.month);
+                                if (targetMonth) {
+                                  localStorage.setItem('payments_selected_month', targetMonth);
+                                }
+                                window.location.hash = '#/payments';
+                                window.dispatchEvent(new PopStateEvent('popstate'));
+                              }}
+                              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                              title="Open Rent & Payment collection sheet for this month"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Rent & Payment</span>
                             </button>
                             <button
                               type="button"
@@ -1362,19 +1347,32 @@ export default function ReportDrilldownModal({
 
                           <div>
                             <label className="block text-xs font-bold text-slate-700 mb-1">
-                              Payment Mode
+                              Status
                             </label>
-                            <select
-                              value={editForm.paymentMode}
-                              onChange={(e) => setEditForm(prev => ({ ...prev, paymentMode: e.target.value }))}
-                              className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 cursor-pointer"
-                            >
-                              <option value="Bank Transfer / NEFT / RTGS">Bank Transfer / NEFT / RTGS</option>
-                              <option value="Cash">Cash</option>
-                              <option value="Cheque">Cheque</option>
-                              <option value="UPI">UPI</option>
-                              <option value="Other">Other</option>
-                            </select>
+                            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                              <button
+                                type="button"
+                                onClick={() => setEditForm(prev => ({ ...prev, status: 'Rented' }))}
+                                className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                  editForm.status !== 'Vacant'
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                Rented
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditForm(prev => ({ ...prev, status: 'Vacant' }))}
+                                className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                  editForm.status === 'Vacant'
+                                    ? 'bg-amber-600 text-white shadow-xs'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                Vacant
+                              </button>
+                            </div>
                           </div>
                         </div>
 
@@ -1456,6 +1454,33 @@ export default function ReportDrilldownModal({
             </div>
           )}
         </div>
+
+        {/* SHARED FULL-SCREEN PAYMENT EDIT MODAL */}
+        {modalReceipt && (
+          <PaymentEditModal
+            isOpen={Boolean(modalReceipt)}
+            onClose={() => setModalReceipt(null)}
+            receiptId={modalReceipt.receiptId || modalReceipt._id}
+            receipt={modalReceipt}
+            selectedMonth={modalReceipt.accountingMonth || modalReceipt.rentMonthYear || target?.month || ''}
+            backButtonLabel="Back to Monthly Report"
+            onSuccess={async () => {
+              setModalReceipt(null);
+              await fetchDrilldown();
+              if (onRecordUpdated) onRecordUpdated();
+            }}
+            onNavigateToPayments={(rec) => {
+              setModalReceipt(null);
+              onClose();
+              const targetMonth = rec.accountingMonth || (rec.receiptDate ? String(rec.receiptDate).slice(0, 7) : target?.month);
+              if (targetMonth) {
+                localStorage.setItem('payments_selected_month', targetMonth);
+              }
+              window.location.hash = '#/payments';
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
+          />
+        )}
 
         {/* Modal Footer */}
         <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">

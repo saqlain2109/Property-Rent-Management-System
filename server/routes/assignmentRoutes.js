@@ -108,8 +108,37 @@ router.get('/', protect, async (req, res) => {
       })
       .sort({ startDate: -1 });
 
-    // Fetch reversed receipts to exclude
-    const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+    // Fetch reversed receipts, all agreements, and all allocations in parallel
+    const [reversedReceipts, allAgreements, allAllocations] = await Promise.all([
+      PaymentReceipt.find({ isReversed: true }).distinct('_id'),
+      RentAgreement.find({}).sort({ effectiveFrom: 1 }),
+      PaymentAllocation.find({})
+    ]);
+
+    const revIdSet = new Set(reversedReceipts.map(String));
+    const validAllocations = allAllocations.filter(a => !revIdSet.has(String(a.receiptId)));
+
+    const agreementsByAssign = new Map();
+    for (const ag of allAgreements) {
+      if (ag.assignmentId) {
+        const k = String(ag.assignmentId);
+        if (!agreementsByAssign.has(k)) agreementsByAssign.set(k, []);
+        agreementsByAssign.get(k).push(ag);
+      }
+    }
+
+    const allocationsByUnitTenant = new Map();
+    for (const al of validAllocations) {
+      const k = `${String(al.unitId)}_${String(al.tenantId)}`;
+      if (!allocationsByUnitTenant.has(k)) allocationsByUnitTenant.set(k, []);
+      allocationsByUnitTenant.get(k).push(al);
+    }
+
+    const calcOptions = {
+      reversedReceiptIds: reversedReceipts,
+      agreementsByAssign,
+      allocationsByUnitTenant
+    };
 
     // Enrich each assignment with rate history, total expected, and total received
     const enriched = await Promise.all(assignments.map(async (assign) => {
@@ -126,14 +155,14 @@ router.get('/', protect, async (req, res) => {
         };
       }
 
-      // Fetch rent agreements strictly for this specific assignment
-      let rateHistory = await RentAgreement.find({ assignmentId: assign._id }).sort({ effectiveFrom: 1 });
+      // Fetch rent agreements strictly for this specific assignment from in-memory cache
+      let rateHistory = agreementsByAssign.get(String(assign._id)) || [];
       if (!rateHistory.length) {
-        rateHistory = await RentAgreement.find({
-          assignmentId: { $exists: false },
-          unitId: assign.unitId._id,
-          tenantId: assign.tenantId._id
-        }).sort({ effectiveFrom: 1 });
+        rateHistory = allAgreements.filter(a =>
+          !a.assignmentId &&
+          String(a.unitId) === String(assign.unitId._id) &&
+          String(a.tenantId) === String(assign.tenantId._id)
+        );
       }
 
       const currentAgr = assign.status === 'Active'
@@ -141,7 +170,7 @@ router.get('/', protect, async (req, res) => {
         : (rateHistory[rateHistory.length - 1] || null);
 
       try {
-        const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id, null, assign);
+        const ledger = await calculateTenantUnitLedger(assign.unitId._id, assign.tenantId._id, null, assign, calcOptions);
         return {
           ...obj,
           rateHistory,
@@ -209,27 +238,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
     }
 
-    // Validate start and end dates against existing contracts for this sub-property (unitId)
-    const conflictingContract = await findContractOverlap(unitId, contractStartDate, contractEndDate);
-    if (conflictingContract) {
-      const conflictNo = conflictingContract.contractNo || conflictingContract.assignmentCode;
-      const tenantName = conflictingContract.tenantId?.name || 'Unknown Tenant';
-      const dateRangeStr = formatConflictingDateRange(conflictingContract.startDate, conflictingContract.endDate);
-      const conflictStatus = conflictingContract.status || 'Active';
-
-      return res.status(409).json({
-        success: false,
-        message: `A contract already exists within this date range for this sub-property:\n• Contract No: ${conflictNo}\n• Tenant: ${tenantName}\n• Date Range: ${dateRangeStr}\n• Status: ${conflictStatus}`,
-        conflict: {
-          contractNo: conflictNo,
-          tenantName,
-          dateRange: dateRangeStr,
-          startDate: conflictingContract.startDate,
-          endDate: conflictingContract.endDate,
-          status: conflictStatus
-        }
-      });
-    }
+       // Overlap restriction removed - contracts can be added for any date
 
     const contractHasEnded = isDateBeforeToday(contractEndDate);
     // If end date is in the past, status is Ended; otherwise keep requested status or default to Active
@@ -508,27 +517,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       return res.status(400).json({ success: false, message: 'End date cannot be before the start date' });
     }
 
-    // Validate start and end dates against existing contracts for this unit (excluding current assignment)
-    const conflictingContract = await findContractOverlap(nextUnitId, nextStartDate, nextEndDate, assignment._id);
-    if (conflictingContract) {
-      const conflictNo = conflictingContract.contractNo || conflictingContract.assignmentCode;
-      const tenantName = conflictingContract.tenantId?.name || 'Unknown Tenant';
-      const dateRangeStr = formatConflictingDateRange(conflictingContract.startDate, conflictingContract.endDate);
-      const conflictStatus = conflictingContract.status || 'Active';
-
-      return res.status(409).json({
-        success: false,
-        message: `A contract already exists within this date range for this sub-property:\n• Contract No: ${conflictNo}\n• Tenant: ${tenantName}\n• Date Range: ${dateRangeStr}\n• Status: ${conflictStatus}`,
-        conflict: {
-          contractNo: conflictNo,
-          tenantName,
-          dateRange: dateRangeStr,
-          startDate: conflictingContract.startDate,
-          endDate: conflictingContract.endDate,
-          status: conflictStatus
-        }
-      });
-    }
+       // Overlap restriction removed - contracts can be added for any date
 
     const contractHasEnded = isDateBeforeToday(nextEndDate);
     const nextStatus = contractHasEnded

@@ -3,6 +3,7 @@ import API from '../services/api';
 import * as XLSX from 'xlsx';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
+import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { Layers, Plus, Search, Download, Edit, Trash2, RotateCcw, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
@@ -89,6 +90,9 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
 
   // Modal
   const [showModal, setShowModal] = useState(false);
+
+  // Browser Back button navigation: dismiss partition modal back to table
+  useModalBackHandler(showModal, () => setShowModal(false));
   const [editingUnit, setEditingUnit] = useState(null);
 
   // Form

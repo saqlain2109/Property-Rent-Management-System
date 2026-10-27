@@ -6,6 +6,7 @@ const { body, validationResult } = require('express-validator');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const PaymentAllocation = require('../models/PaymentAllocation');
 const TenantAssignment = require('../models/TenantAssignment');
+const RentAgreement = require('../models/RentAgreement');
 const Unit = require('../models/Unit');
 const { calculateTenantUnitLedger, getEffectiveRentForMonth, getCurrentMonthYear } = require('../services/rentCalculator');
 const { protect, authorize } = require('../middleware/auth');
@@ -15,7 +16,7 @@ const { syncMonthlyLedgers } = require('../utils/ledgerSync');
 // @route GET /api/payments
 router.get('/', protect, async (req, res) => {
   try {
-    const { tenantId, unitId, startDate, endDate, mode, contractNo } = req.query;
+    const { tenantId, unitId, startDate, endDate, mode, status, contractNo } = req.query;
     let query = { isReversed: false };
 
     if (contractNo) {
@@ -40,7 +41,8 @@ router.get('/', protect, async (req, res) => {
       if (tenantId) query.tenantId = tenantId;
       if (unitId) query.unitId = unitId;
     }
-    if (mode) query.paymentMode = mode;
+    if (status) query.status = status;
+    if (mode) query.status = mode;
     if (startDate || endDate) {
       query.receiptDate = {};
       if (startDate) query.receiptDate.$gte = new Date(startDate);
@@ -48,25 +50,50 @@ router.get('/', protect, async (req, res) => {
     }
 
     const receipts = await PaymentReceipt.find(query)
-      .populate('tenantId', 'name tenantCode phone')
+      .populate('tenantId', 'name tenantCode phone email')
       .populate({
         path: 'unitId',
-        populate: { path: 'propertyId', select: 'name propertyCode' }
+        select: 'unitName subUnitPartition propertyId monthlyRentExpected floor totalAreaSqFt displayOrder unitCode',
+        populate: { path: 'propertyId', select: 'name propertyCode displayOrder totalAreaSqFt propertyType address' }
       })
-      .sort({ receiptDate: -1 });
+      .sort({ receiptDate: -1 })
+      .lean();
 
-    // Fetch allocations for these receipts
+    // Fetch allocations for these receipts in parallel with lean
     const receiptIds = receipts.map(r => r._id);
-    const allocations = await PaymentAllocation.find({ receiptId: { $in: receiptIds } });
+    const allocations = await PaymentAllocation.find({ receiptId: { $in: receiptIds } })
+      .select('receiptId rentMonthYear allocatedAmount contractNo notes')
+      .lean();
 
-    const receiptsWithAllocations = receipts.map(r => {
-      const rAlloc = allocations.filter(a => a.receiptId.toString() === r._id.toString());
-      return {
-        ...r.toObject(),
-        allocations: rAlloc,
-        monthsCovered: rAlloc.map(a => a.rentMonthYear).join(', ')
+    // Fast O(1) allocation lookup Map
+    const allocMap = new Map();
+    for (let i = 0; i < allocations.length; i++) {
+      const a = allocations[i];
+      const rid = a.receiptId.toString();
+      let arr = allocMap.get(rid);
+      if (!arr) {
+        arr = [];
+        allocMap.set(rid, arr);
+      }
+      arr.push(a);
+    }
+
+    const receiptsWithAllocations = new Array(receipts.length);
+    for (let i = 0; i < receipts.length; i++) {
+      const r = receipts[i];
+      const rAlloc = allocMap.get(r._id.toString()) || [];
+      const derivedAccountingMonth = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+      const monthsPaidFor = rAlloc.map(a => a.rentMonthYear).join(', ') || r.monthPaidFor || derivedAccountingMonth;
+      receiptsWithAllocations[i] = {
+        ...r,
+        status: r.status || 'Rented',
+        monthPaidFor: monthsPaidFor,
+        monthsCovered: monthsPaidFor,
+        paidForMonth: monthsPaidFor,
+        accountingMonth: monthsPaidFor,
+        allocations: rAlloc
       };
-    });
+    }
 
     res.json({ success: true, count: receiptsWithAllocations.length, data: receiptsWithAllocations });
   } catch (error) {
@@ -86,16 +113,76 @@ router.get('/outstanding-summary', protect, async (req, res) => {
     const monthStart = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
     const monthEnd = new Date(Date.UTC(year, m - 1, totalDays, 23, 59, 59, 999));
 
-    // Get all units excluding inactive ones
-    const reversedReceiptIds = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
-    const targetAllocs = await PaymentAllocation.find({
-      rentMonthYear: targetMonth,
-      receiptId: { $nin: reversedReceiptIds }
-    });
+    // Fast parallel batch pre-fetch of units, assignments, agreements, allocations, and tenants
+    const [
+      reversedReceiptIds,
+      allUnits,
+      allAssignments,
+      allAgreements,
+      allAllocations,
+      allTenants,
+      monthReceipts
+    ] = await Promise.all([
+      PaymentReceipt.find({ isReversed: true }).distinct('_id'),
+      Unit.find({ isActive: { $ne: false } })
+        .populate('propertyId', 'name propertyCode displayOrder totalAreaSqFt propertyType address')
+        .sort({ displayOrder: 1, unitCode: 1 }),
+      TenantAssignment.find({
+        status: { $nin: ['Terminated', 'Cancelled'] },
+        $or: [
+          { startDate: null, endDate: null },
+          { startDate: null, endDate: { $gte: monthStart } },
+          { startDate: { $lte: monthEnd }, endDate: null },
+          { startDate: { $lte: monthEnd }, endDate: { $gte: monthStart } }
+        ]
+      }).populate('tenantId', 'name tenantCode phone').sort({ startDate: -1 }),
+      RentAgreement.find({}).sort({ effectiveFrom: 1 }),
+      PaymentAllocation.find({}),
+      Tenant.find({}),
+      PaymentReceipt.find({
+        isReversed: false,
+        $or: [
+          { accountingMonth: targetMonth },
+          { receiptDate: { $gte: monthStart, $lte: monthEnd } }
+        ]
+      }).select('unitId tenantId status totalAmount contractNo accountingMonth')
+    ]);
 
-    const allUnits = await Unit.find({ isActive: { $ne: false } })
-      .populate('propertyId', 'name propertyCode displayOrder totalAreaSqFt propertyType address')
-      .sort({ displayOrder: 1, unitCode: 1 });
+    const revIdSet = new Set(reversedReceiptIds.map(String));
+    const validAllocations = allAllocations.filter(a => !revIdSet.has(String(a.receiptId)));
+    const targetAllocs = validAllocations.filter(a => a.rentMonthYear === targetMonth);
+
+    const agreementsByAssign = new Map();
+    for (const ag of allAgreements) {
+      if (ag.assignmentId) {
+        const k = String(ag.assignmentId);
+        if (!agreementsByAssign.has(k)) agreementsByAssign.set(k, []);
+        agreementsByAssign.get(k).push(ag);
+      }
+    }
+
+    const allocationsByUnitTenant = new Map();
+    for (const al of validAllocations) {
+      const k = `${String(al.unitId)}_${String(al.tenantId)}`;
+      if (!allocationsByUnitTenant.has(k)) allocationsByUnitTenant.set(k, []);
+      allocationsByUnitTenant.get(k).push(al);
+    }
+
+    const tenantsById = new Map();
+    for (const t of allTenants) {
+      tenantsById.set(String(t._id), t);
+    }
+
+    const unitsById = new Map();
+    for (const u of allUnits) {
+      unitsById.set(String(u._id), u);
+    }
+
+    const calcOptions = {
+      reversedReceiptIds,
+      agreementsByAssign,
+      allocationsByUnitTenant
+    };
 
     const summaries = [];
     const processedPairs = new Set();
@@ -103,142 +190,94 @@ router.get('/outstanding-summary', protect, async (req, res) => {
     for (const unit of allUnits) {
       if (!unit.propertyId) continue;
 
-      // 1. Find all active assignments covering targetMonth
-      let assigns = await TenantAssignment.find({
-        unitId: unit._id,
-        $or: [
-          { startDate: { $lte: monthEnd }, endDate: { $gte: monthStart } },
-          { startDate: null, endDate: null },
-          { startDate: { $lte: monthEnd }, endDate: null }
-        ]
-      }).populate('tenantId', 'name tenantCode phone').sort({ startDate: -1 });
+      // 1. Find all active assignments covering targetMonth for this unit
+      const assigns = allAssignments.filter(a => {
+        const uId = String(a.unitId?._id || a.unitId || '');
+        if (uId !== String(unit._id)) return false;
+        if (a.startDate && new Date(a.startDate) > monthEnd) return false;
+        if (a.endDate && new Date(a.endDate) < monthStart) return false;
+        if (a.status === 'Terminated' || a.status === 'Cancelled') return false;
+        return true;
+      });
 
-      // Fallback if no matching assignment for targetMonth
+      // Check if unit has a receipt for this month explicitly marked as Vacant
+      const unitMonthReceipt = monthReceipts.find(r => String(r.unitId?._id || r.unitId) === String(unit._id));
+      const isExplicitlyVacant = unitMonthReceipt?.status === 'Vacant';
+
+      // If no active lease contract covering targetMonth, unit is Vacant
       if (!assigns || assigns.length === 0) {
-        let fallback = await TenantAssignment.findOne({ unitId: unit._id, status: 'Active' })
-          .populate('tenantId', 'name tenantCode phone').sort({ startDate: -1 });
-        if (!fallback) {
-          fallback = await TenantAssignment.findOne({ unitId: unit._id })
-            .populate('tenantId', 'name tenantCode phone').sort({ startDate: -1 });
-        }
-        if (fallback) assigns = [fallback];
-      }
-
-      // Check allocations for this unit in targetMonth
-      const unitAllocs = targetAllocs.filter(a => a.unitId.toString() === unit._id.toString());
-      for (const ua of unitAllocs) {
-        const alreadyHas = assigns.some(asgn => asgn.tenantId && asgn.tenantId._id.toString() === ua.tenantId.toString());
-        if (!alreadyHas) {
-          let uaAssign = await TenantAssignment.findOne({ unitId: unit._id, tenantId: ua.tenantId })
-            .populate('tenantId', 'name tenantCode phone').sort({ startDate: -1 });
-          if (!uaAssign) {
-            const t = await Tenant.findById(ua.tenantId);
-            if (t) {
-              uaAssign = {
-                _id: new mongoose.Types.ObjectId(),
-                assignmentCode: `AUTO-${ua.contractNo || 'IMPORT'}`,
-                contractNo: ua.contractNo || '',
-                status: 'Ended',
-                startDate: monthStart,
-                endDate: monthEnd,
-                tenantId: t,
-                unitId: unit
-              };
-            }
-          }
-          if (uaAssign) assigns.push(uaAssign);
-        }
+        summaries.push({
+          assignmentId: null,
+          assignmentCode: '',
+          contractNo: '',
+          contractStatus: 'Vacant',
+          contractType: 'Rent',
+          startDate: null,
+          endDate: null,
+          createdAt: null,
+          updatedAt: null,
+          status: 'Vacant',
+          tenant: null,
+          unit: unit,
+          property: unit.propertyId,
+          monthlyRentExpected: 0,
+          actualPaidForMonth: 0,
+          paidTillMonth: 'Vacant',
+          nextUnpaidMonth: 'None',
+          totalExpected: 0,
+          totalAllocated: 0,
+          totalOutstanding: 0,
+          isOverdue: false,
+          unpaidMonthsCount: 0,
+          monthsBreakdown: []
+        });
+        continue;
       }
 
       for (const assign of assigns) {
         if (!assign || !assign.tenantId) continue;
-        const pairKey = `${unit._id.toString()}_${assign.tenantId._id.toString()}`;
+        const tenantActualId = assign.tenantId._id || assign.tenantId;
+        const pairKey = `${String(unit._id)}_${String(tenantActualId)}`;
         if (processedPairs.has(pairKey)) continue;
         processedPairs.add(pairKey);
 
-        const ledger = await calculateTenantUnitLedger(unit._id, assign.tenantId._id, targetMonth, assign);
-        const effectiveRate = await getEffectiveRentForMonth(unit._id, assign.tenantId._id, targetMonth, assign);
+        const ledger = await calculateTenantUnitLedger(unit._id, tenantActualId, targetMonth, assign, calcOptions);
+        const effectiveRate = await getEffectiveRentForMonth(unit._id, tenantActualId, targetMonth, assign, calcOptions);
         const targetMonthData = ledger.monthsBreakdown.find(m => m.monthYear === targetMonth);
-        const actualPaidForMonth = targetMonthData ? (targetMonthData.actualAllocated ?? targetMonthData.allocatedAmount ?? 0) : 0;
+        const receiptPaidInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant' && unitMonthReceipt.totalAmount !== undefined)
+          ? (Number(unitMonthReceipt.totalAmount) || 0)
+          : null;
+        const actualPaidForMonth = isExplicitlyVacant
+          ? 0
+          : (receiptPaidInMonth !== null
+              ? receiptPaidInMonth
+              : (targetMonthData ? (targetMonthData.actualAllocated ?? targetMonthData.allocatedAmount ?? 0) : 0));
 
         summaries.push({
           assignmentId: assign._id,
           assignmentCode: assign.assignmentCode,
-          contractNo: assign.contractNo || assign.assignmentCode,
-          contractStatus: assign.status,
+          contractNo: isExplicitlyVacant ? '' : (assign.contractNo || assign.assignmentCode),
+          contractStatus: assign.status, // Preserve underlying contract status for reference
           contractType: assign.contractType || 'Rent',
           startDate: assign.startDate,
           endDate: assign.endDate,
           createdAt: assign.createdAt,
           updatedAt: assign.updatedAt,
-          tenant: assign.tenantId,
+          status: isExplicitlyVacant ? 'Vacant' : (unitMonthReceipt?.status || 'Rented'),
+          tenant: isExplicitlyVacant ? null : assign.tenantId,
           unit: unit,
           property: unit.propertyId,
-          monthlyRentExpected: effectiveRate || unit.monthlyRentExpected || 0,
+          monthlyRentExpected: isExplicitlyVacant ? 0 : (effectiveRate || unit.monthlyRentExpected || 0),
           actualPaidForMonth: actualPaidForMonth,
-          paidTillMonth: ledger.paidTillMonth || 'None',
-          nextUnpaidMonth: ledger.nextUnpaidMonth || 'Up to date',
-          totalExpected: ledger.totalExpected,
-          totalAllocated: ledger.totalAllocated,
-          totalOutstanding: ledger.totalOutstanding,
-          isOverdue: ledger.totalOutstanding > 0,
-          unpaidMonthsCount: ledger.monthsBreakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid').length,
-          monthsBreakdown: ledger.monthsBreakdown
+          paidTillMonth: isExplicitlyVacant ? 'Vacant' : (ledger.paidTillMonth || 'None'),
+          nextUnpaidMonth: isExplicitlyVacant ? 'None' : (ledger.nextUnpaidMonth || 'Up to date'),
+          totalExpected: isExplicitlyVacant ? 0 : ledger.totalExpected,
+          totalAllocated: isExplicitlyVacant ? 0 : ledger.totalAllocated,
+          totalOutstanding: isExplicitlyVacant ? 0 : ledger.totalOutstanding,
+          isOverdue: isExplicitlyVacant ? false : (ledger.totalOutstanding > 0),
+          unpaidMonthsCount: isExplicitlyVacant ? 0 : ledger.monthsBreakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid').length,
+          monthsBreakdown: isExplicitlyVacant ? [] : ledger.monthsBreakdown
         });
-      }
-    }
-
-    // Also include any allocations for special units or units not in allUnits
-    for (const a of targetAllocs) {
-      const pairKey = `${a.unitId.toString()}_${a.tenantId.toString()}`;
-      if (!processedPairs.has(pairKey)) {
-        processedPairs.add(pairKey);
-        const u = await Unit.findById(a.unitId).populate('propertyId');
-        const t = await Tenant.findById(a.tenantId);
-        if (u && t && u.propertyId) {
-          let asgn = await TenantAssignment.findOne({ unitId: u._id, tenantId: t._id });
-          if (!asgn) {
-            asgn = {
-              _id: new mongoose.Types.ObjectId(),
-              assignmentCode: `AUTO-${a.contractNo || 'IMPORT'}`,
-              contractNo: a.contractNo || '',
-              status: 'Ended',
-              startDate: monthStart,
-              endDate: monthEnd,
-              tenantId: t,
-              unitId: u
-            };
-          }
-          const ledger = await calculateTenantUnitLedger(u._id, t._id, targetMonth, asgn);
-          const effectiveRate = await getEffectiveRentForMonth(u._id, t._id, targetMonth, asgn);
-          const targetMonthData = ledger.monthsBreakdown.find(m => m.monthYear === targetMonth);
-          const actualPaidForMonth = targetMonthData ? (targetMonthData.actualAllocated ?? targetMonthData.allocatedAmount ?? 0) : 0;
-
-          summaries.push({
-            assignmentId: asgn._id,
-            assignmentCode: asgn.assignmentCode,
-            contractNo: asgn.contractNo || asgn.assignmentCode,
-            contractStatus: asgn.status,
-            contractType: asgn.contractType || 'Rent',
-            startDate: asgn.startDate,
-            endDate: asgn.endDate,
-            createdAt: asgn.createdAt,
-            updatedAt: asgn.updatedAt,
-            tenant: t,
-            unit: u,
-            property: u.propertyId,
-            monthlyRentExpected: effectiveRate || u.monthlyRentExpected || 0,
-            actualPaidForMonth: actualPaidForMonth,
-            paidTillMonth: ledger.paidTillMonth || 'None',
-            nextUnpaidMonth: ledger.nextUnpaidMonth || 'Up to date',
-            totalExpected: ledger.totalExpected,
-            totalAllocated: ledger.totalAllocated,
-            totalOutstanding: ledger.totalOutstanding,
-            isOverdue: ledger.totalOutstanding > 0,
-            unpaidMonthsCount: ledger.monthsBreakdown.filter(m => m.status === 'Unpaid' || m.status === 'Partially Paid').length,
-            monthsBreakdown: ledger.monthsBreakdown
-          });
-        }
       }
     }
 
@@ -275,10 +314,42 @@ router.get('/tenant-unit-ledger', protect, async (req, res) => {
   }
 });
 
+// @route GET /api/payments/:id
+// Get single receipt with populated details and allocations
+router.get('/:id', protect, async (req, res) => {
+  try {
+    const receipt = await PaymentReceipt.findById(req.params.id)
+      .populate('tenantId', 'name tenantCode phone email')
+      .populate({
+        path: 'unitId',
+        populate: { path: 'propertyId', select: 'name propertyCode' }
+      });
+    if (!receipt) {
+      return res.status(404).json({ success: false, message: 'Receipt not found' });
+    }
+    const allocations = await PaymentAllocation.find({ receiptId: receipt._id }).sort({ rentMonthYear: 1 });
+    res.json({
+      success: true,
+      data: {
+        ...receipt.toObject(),
+        allocations
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // @route POST /api/payments
 // Create receipt and allocate amount to rent months
 router.post('/', protect, authorize('admin', 'manager'), [
-  body('tenantId').isMongoId().withMessage('Valid tenant ID is required'),
+  body('tenantId').custom((val, { req }) => {
+    if (req.body.status === 'Vacant') return true;
+    if (!val || !mongoose.Types.ObjectId.isValid(val)) {
+      throw new Error('Valid tenant ID is required when status is Rented');
+    }
+    return true;
+  }),
   body('unitId').isMongoId().withMessage('Valid unit ID is required'),
   body('receiptDate').isISO8601().withMessage('Valid receipt date is required'),
   body('totalAmount').isNumeric().withMessage('Total amount must be a number'),
@@ -295,12 +366,13 @@ router.post('/', protect, authorize('admin', 'manager'), [
       unitId,
       receiptDate,
       totalAmount,
-      paymentMode,
       referenceNumber,
-      bankName,
       comments,
-      allocations // array of { rentMonthYear: "YYYY-MM", allocatedAmount: number, notes?: string }
+      allocations
     } = req.body;
+    const status = req.body.status === 'Vacant' ? 'Vacant' : 'Rented';
+    const finalTenantId = status === 'Vacant' ? null : tenantId;
+    const finalContractNo = status === 'Vacant' ? '' : (req.body.contractNo || '');
 
     const parsedTotal = Number(totalAmount);
     const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
@@ -317,17 +389,23 @@ router.post('/', protect, authorize('admin', 'manager'), [
     const d = new Date(receiptDate);
     const receiptNumber = `REC-${d.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
 
+    const allocMonths = (allocations || []).map(a => a.rentMonthYear).filter(Boolean).join(', ');
+    const finalMonthPaidFor = allocMonths || req.body.monthPaidFor || req.body.accountingMonth || (receiptDate ? new Date(receiptDate).toISOString().slice(0, 7) : getCurrentMonthYear());
+
     const receipt = await PaymentReceipt.create({
       receiptNumber,
       receiptDate,
-      tenantId,
+      monthPaidFor: finalMonthPaidFor,
+      accountingMonth: finalMonthPaidFor,
+      status,
+      tenantId: finalTenantId,
       unitId,
       totalAmount: parsedTotal,
-      paymentMode: paymentMode || 'Cash',
       referenceNumber: referenceNumber || '',
-      bankName: bankName || '',
       comments: comments || '',
-      contractNo: req.body.contractNo || '',
+      contractNo: finalContractNo,
+      adjustmentAmount: Number(req.body.adjustmentAmount) || 0,
+      adjustmentDescription: req.body.adjustmentDescription || '',
       recordedBy: req.user._id
     });
 
@@ -355,7 +433,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       req
     });
 
-    await syncMonthlyLedgers().catch(console.error);
+    setImmediate(() => syncMonthlyLedgers().catch(console.error));
 
     res.status(201).json({
       success: true,
@@ -372,8 +450,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
 router.put('/:id', protect, authorize('admin', 'manager'), [
   body('receiptDate').optional().isISO8601().withMessage('Valid receipt date is required'),
   body('totalAmount').optional().isNumeric().withMessage('Total amount must be a number'),
-  body('paymentMode').optional().isString(),
-  body('allocations').optional().isArray({ min: 1 }).withMessage('At least one month allocation is required')
+    body('allocations').optional().isArray({ min: 1 }).withMessage('At least one month allocation is required')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -395,18 +472,18 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       receiptNumber,
       receiptDate,
       totalAmount,
-      paymentMode,
       referenceNumber,
-      bankName,
       comments,
       allocations,
-      contractNo
+      contractNo,
+      status
     } = req.body;
 
     const parsedTotal = totalAmount !== undefined ? Number(totalAmount) : receipt.totalAmount;
-    const targetTenantId = tenantId || receipt.tenantId;
+    const newStatus = status !== undefined ? status : (receipt.status || 'Rented');
+    const targetTenantId = newStatus === 'Vacant' ? null : (tenantId !== undefined ? tenantId : receipt.tenantId);
     const targetUnitId = unitId || receipt.unitId;
-    const targetContractNo = contractNo !== undefined ? contractNo : (req.body.contractNo !== undefined ? req.body.contractNo : receipt.contractNo || '');
+    const targetContractNo = newStatus === 'Vacant' ? '' : (contractNo !== undefined ? contractNo : (receipt.contractNo || ''));
 
     if (allocations && Array.isArray(allocations)) {
       const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
@@ -440,16 +517,32 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       }
     }
 
-    if (tenantId) receipt.tenantId = targetTenantId;
-    if (unitId) receipt.unitId = targetUnitId;
+    receipt.status = newStatus;
+    receipt.tenantId = targetTenantId;
+    receipt.unitId = targetUnitId;
     if (receiptNumber && receiptNumber.trim()) receipt.receiptNumber = receiptNumber.trim();
     if (receiptDate) receipt.receiptDate = receiptDate;
     if (totalAmount !== undefined) receipt.totalAmount = parsedTotal;
-    if (paymentMode) receipt.paymentMode = paymentMode;
     if (referenceNumber !== undefined) receipt.referenceNumber = referenceNumber;
-    if (bankName !== undefined) receipt.bankName = bankName;
     if (comments !== undefined) receipt.comments = comments;
-    if (contractNo !== undefined) receipt.contractNo = targetContractNo;
+    receipt.contractNo = targetContractNo;
+    if (allocations && Array.isArray(allocations)) {
+      const allocMonths = allocations.map(a => a.rentMonthYear).filter(Boolean).join(', ');
+      receipt.monthPaidFor = allocMonths;
+      receipt.accountingMonth = allocMonths;
+    } else if (req.body.monthPaidFor !== undefined) {
+      receipt.monthPaidFor = req.body.monthPaidFor;
+      receipt.accountingMonth = req.body.monthPaidFor;
+    } else if (req.body.accountingMonth !== undefined) {
+      receipt.monthPaidFor = req.body.accountingMonth;
+      receipt.accountingMonth = req.body.accountingMonth;
+    } else if (receiptDate) {
+      const dMonth = new Date(receiptDate).toISOString().slice(0, 7);
+      receipt.monthPaidFor = dMonth;
+      receipt.accountingMonth = dMonth;
+    }
+    if (req.body.adjustmentAmount !== undefined) receipt.adjustmentAmount = Number(req.body.adjustmentAmount) || 0;
+    if (req.body.adjustmentDescription !== undefined) receipt.adjustmentDescription = req.body.adjustmentDescription;
 
     await receipt.save();
 
@@ -463,7 +556,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     });
 
     const updatedAllocations = await PaymentAllocation.find({ receiptId: receipt._id });
-    await syncMonthlyLedgers().catch(console.error);
+    setImmediate(() => syncMonthlyLedgers().catch(console.error));
 
     res.json({
       success: true,
@@ -503,7 +596,7 @@ router.post('/:id/reverse', protect, authorize('admin'), [
       req
     });
 
-    await syncMonthlyLedgers().catch(console.error);
+    setImmediate(() => syncMonthlyLedgers().catch(console.error));
 
     res.json({ success: true, message: 'Payment successfully reversed with full audit trail', data: receipt });
   } catch (error) {
@@ -511,9 +604,9 @@ router.post('/:id/reverse', protect, authorize('admin'), [
   }
 });
 
-// @route DELETE /api/payments/:id
+// @route DELETE /api/payments/:id (and /api/payments/:id/permanent)
 // Hard delete payment receipt and allocations
-router.delete('/:id', protect, authorize('admin'), async (req, res) => {
+const deletePaymentHandler = async (req, res) => {
   try {
     const receipt = await PaymentReceipt.findById(req.params.id);
     if (!receipt) {
@@ -532,12 +625,15 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
       req
     });
 
-    await syncMonthlyLedgers().catch(console.error);
+    setImmediate(() => syncMonthlyLedgers().catch(console.error));
 
     res.json({ success: true, message: 'Payment receipt permanently deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
-});
+};
+
+router.delete('/:id/permanent', protect, authorize('admin', 'manager'), deletePaymentHandler);
+router.delete('/:id', protect, authorize('admin', 'manager'), deletePaymentHandler);
 
 module.exports = router;

@@ -9,6 +9,7 @@ const Unit = require('../models/Unit');
 const { protect, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/audit');
 
+
 // @route GET /api/tenants
 router.get('/', protect, async (req, res) => {
   try {
@@ -93,6 +94,7 @@ router.get('/:id', protect, async (req, res) => {
 });
 
 // @route POST /api/tenants
+
 router.post('/', protect, authorize('admin', 'manager'), [
   body('name').trim().notEmpty().withMessage('Tenant name is required')
 ], async (req, res) => {

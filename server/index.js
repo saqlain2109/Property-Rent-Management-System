@@ -2,11 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 const dotenv = require('dotenv');
+dotenv.config({ path: path.join(__dirname, '.env') });
 const connectDB = require('./config/db');
 const { noSqlInjectionProtection } = require('./middleware/security');
-
-dotenv.config();
 
 const app = express();
 

@@ -10,7 +10,7 @@ const paymentAllocationSchema = new mongoose.Schema({
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',
-    required: true,
+    required: false,
     index: true,
   },
   unitId: {
@@ -27,10 +27,6 @@ const paymentAllocationSchema = new mongoose.Schema({
   allocatedAmount: {
     type: Number,
     required: true,
-  },
-  isAdvanceOrExcess: {
-    type: Boolean,
-    default: false,
   },
   contractNo: {
     type: String,

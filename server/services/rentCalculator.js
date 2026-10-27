@@ -61,7 +61,7 @@ function calculateMonthRatio(startDay, endDay, totalDays) {
  * Determine effective monthly rent for a given unit/tenant for a given month "YYYY-MM"
  * Supports proration for partial first/last month and mid-month rent rate revisions.
  */
-async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAssignment = null) {
+async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAssignment = null, options = {}) {
   const [year, month] = monthYearStr.split('-').map(Number);
   const totalDays = new Date(year, month, 0).getDate();
   const monthStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
@@ -90,33 +90,63 @@ async function getEffectiveRentForMonth(unitId, tenantId, monthYearStr, passedAs
 
   if (windowStart > windowEnd) return 0;
 
-  // Find all rent agreements active during this window for this specific assignment
-  const agreements = await RentAgreement.find({
-    assignmentId: assignment._id,
-    $or: [
-      { effectiveFrom: null },
-      { effectiveFrom: { $lte: windowEnd } }
-    ],
-    $and: [
-      {
-        $or: [
-          { effectiveTo: null },
-          { effectiveTo: { $gte: windowStart } }
-        ]
-      }
-    ]
-  }).sort({ effectiveFrom: 1 });
+  // Use pre-fetched agreements if provided in options
+  let assignAgreements = null;
+  if (options.agreementsByAssign && assignment._id) {
+    assignAgreements = options.agreementsByAssign.get(String(assignment._id)) || [];
+  } else if (Array.isArray(options.agreements)) {
+    assignAgreements = options.agreements.filter(ag => String(ag.assignmentId) === String(assignment._id));
+  }
 
-  if (!agreements || agreements.length === 0) {
-    const latestAgreement = await RentAgreement.findOne({
-      assignmentId: assignment._id
-    }).sort({ effectiveFrom: -1 });
-    if (!latestAgreement) return assignment.monthlyRentExpected || 0;
+  let agreements;
+  if (assignAgreements !== null) {
+    agreements = assignAgreements.filter(ag => {
+      const agFrom = ag.effectiveFrom ? new Date(ag.effectiveFrom) : null;
+      const agTo = ag.effectiveTo ? new Date(ag.effectiveTo) : null;
+      const matchFrom = !agFrom || agFrom <= windowEnd;
+      const matchTo = !agTo || agTo >= windowStart;
+      return matchFrom && matchTo;
+    }).sort((a, b) => new Date(a.effectiveFrom || 0) - new Date(b.effectiveFrom || 0));
 
-    const sDay = getDayNumber(windowStart);
-    const eDay = getDayNumber(windowEnd);
-    const ratio = calculateMonthRatio(sDay, eDay, totalDays);
-    return Math.round(latestAgreement.monthlyRate * ratio);
+    if (!agreements || agreements.length === 0) {
+      const sortedAll = [...assignAgreements].sort((a, b) => new Date(b.effectiveFrom || 0) - new Date(a.effectiveFrom || 0));
+      const latestAgreement = sortedAll[0];
+      if (!latestAgreement) return assignment.monthlyRentExpected || 0;
+
+      const sDay = getDayNumber(windowStart);
+      const eDay = getDayNumber(windowEnd);
+      const ratio = calculateMonthRatio(sDay, eDay, totalDays);
+      return Math.round(latestAgreement.monthlyRate * ratio);
+    }
+  } else {
+    // Find all rent agreements active during this window for this specific assignment
+    agreements = await RentAgreement.find({
+      assignmentId: assignment._id,
+      $or: [
+        { effectiveFrom: null },
+        { effectiveFrom: { $lte: windowEnd } }
+      ],
+      $and: [
+        {
+          $or: [
+            { effectiveTo: null },
+            { effectiveTo: { $gte: windowStart } }
+          ]
+        }
+      ]
+    }).sort({ effectiveFrom: 1 });
+
+    if (!agreements || agreements.length === 0) {
+      const latestAgreement = await RentAgreement.findOne({
+        assignmentId: assignment._id
+      }).sort({ effectiveFrom: -1 });
+      if (!latestAgreement) return assignment.monthlyRentExpected || 0;
+
+      const sDay = getDayNumber(windowStart);
+      const eDay = getDayNumber(windowEnd);
+      const ratio = calculateMonthRatio(sDay, eDay, totalDays);
+      return Math.round(latestAgreement.monthlyRate * ratio);
+    }
   }
 
   let totalProratedRent = 0;
@@ -152,7 +182,7 @@ function getCurrentMonthYear() {
  * @param {String} upToMonthYear optional target month, defaults to current month
  * @param {Object} passedAssignment optional specific assignment instance
  */
-async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passedAssignment = null) {
+async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passedAssignment = null, options = {}) {
   const effectiveUpTo = upToMonthYear || getCurrentMonthYear();
   // 1. Get occupancy assignment
   let assignment = passedAssignment;
@@ -227,12 +257,23 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passed
 
   // Fetch all payment allocations for this tenant and unit
   // Exclude allocations belonging to reversed receipts
-  const reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
-  const allocations = await PaymentAllocation.find({
-    unitId,
-    tenantId,
-    receiptId: { $nin: reversedReceipts }
-  });
+  let allocations;
+  if (options.allocationsByUnitTenant) {
+    const pairKey = `${String(unitId)}_${String(tenantId)}`;
+    allocations = options.allocationsByUnitTenant.get(pairKey) || [];
+  } else if (Array.isArray(options.allocations)) {
+    allocations = options.allocations.filter(a => String(a.unitId) === String(unitId) && String(a.tenantId) === String(tenantId));
+  } else {
+    let reversedReceipts = options.reversedReceiptIds;
+    if (!reversedReceipts) {
+      reversedReceipts = await PaymentReceipt.find({ isReversed: true }).distinct('_id');
+    }
+    allocations = await PaymentAllocation.find({
+      unitId,
+      tenantId,
+      receiptId: { $nin: reversedReceipts }
+    });
+  }
 
   // Always include any month for which a real payment allocation exists
   const allocatedMonths = allocations.map(a => a.rentMonthYear);
@@ -252,7 +293,7 @@ async function calculateTenantUnitLedger(unitId, tenantId, upToMonthYear, passed
 
   for (const m of months) {
     const isHistoricallySettled = assignment.initialPaidTillMonth && m <= assignment.initialPaidTillMonth;
-    const expectedRate = await getEffectiveRentForMonth(unitId, tenantId, m, assignment);
+    const expectedRate = await getEffectiveRentForMonth(unitId, tenantId, m, assignment, options);
     
     // Sum allocations for this month
     const monthAllocations = allocations.filter(a => a.rentMonthYear === m);

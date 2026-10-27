@@ -77,6 +77,7 @@ async function syncMonthlyLedgers() {
   let runningBalance = startMonth === '2024-03' ? 5305950 : BASELINE_OPENING_BALANCE;
   const ledgerReport = [];
 
+  const bulkOps = [];
   for (const m of months) {
     if (m === '2024-03') {
       runningBalance = 5305950;
@@ -91,19 +92,23 @@ async function syncMonthlyLedgers() {
     const closing = opening + net;
     runningBalance = closing;
 
-    await MonthlyLedger.findOneAndUpdate(
-      { monthYear: m },
-      {
-        monthYear: m,
-        openingBalance: opening,
-        totalIncomeReceived: inc,
-        totalExpensesPaid: exp,
-        netCashFlow: net,
-        closingBalance: closing,
-        isReconciled: true
-      },
-      { upsert: true, new: true }
-    );
+    bulkOps.push({
+      updateOne: {
+        filter: { monthYear: m },
+        update: {
+          $set: {
+            monthYear: m,
+            openingBalance: opening,
+            totalIncomeReceived: inc,
+            totalExpensesPaid: exp,
+            netCashFlow: net,
+            closingBalance: closing,
+            isReconciled: true
+          }
+        },
+        upsert: true
+      }
+    });
 
     ledgerReport.push({
       monthYear: m,
@@ -114,6 +119,10 @@ async function syncMonthlyLedgers() {
       closingBalance: closing,
       isReconciled: true
     });
+  }
+
+  if (bulkOps.length > 0) {
+    await MonthlyLedger.bulkWrite(bulkOps);
   }
 
   return ledgerReport;

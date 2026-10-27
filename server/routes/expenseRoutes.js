@@ -35,15 +35,14 @@ router.get('/', protect, async (req, res) => {
     if (search) {
       query.$or = [
         { description: { $regex: search, $options: 'i' } },
-        { vendorOrPayee: { $regex: search, $options: 'i' } },
         { expenseCode: { $regex: search, $options: 'i' } },
         { legacyCode: { $regex: search, $options: 'i' } },
       ];
     }
 
     const expenses = await Expense.find(query)
-      .populate('propertyId', 'name propertyCode')
-      .populate('unitId', 'unitName unitCode subUnitPartition')
+      .populate('propertyId')
+      .populate('unitId')
       .sort({ expenseDate: -1 });
 
     const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
@@ -200,7 +199,7 @@ router.delete('/categories/:id', protect, authorize('admin', 'manager'), async (
 router.post('/', protect, authorize('admin', 'manager'), [
   body('category').trim().notEmpty().withMessage('Expense category is required'),
   body('amount').isNumeric().withMessage('Amount must be a number'),
-  body('description').trim().notEmpty().withMessage('Description is required')
+  body('description').optional().trim()
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -208,7 +207,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    let { expenseDate, expenseMonth, headType, ...rest } = req.body;
+    let { expenseDate, expenseMonth, headType, description, vendorOrPayee, paymentMode, ...rest } = req.body;
 
     if (!expenseDate && !expenseMonth) {
       const now = new Date();
@@ -251,6 +250,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       expenseMonth: finalExpenseMonth,
       expenseCode,
       amount: Number(req.body.amount),
+      description: description ? description.trim() : '',
       recordedBy: req.user._id
     });
 
@@ -266,7 +266,11 @@ router.post('/', protect, authorize('admin', 'manager'), [
 
     await syncMonthlyLedgers().catch(console.error);
 
-    res.status(201).json({ success: true, data: expense });
+    const populatedExpense = await Expense.findById(expense._id)
+      .populate('propertyId')
+      .populate('unitId');
+
+    res.status(201).json({ success: true, data: populatedExpense });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -314,7 +318,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     if (!expense) {
       return res.status(404).json({ success: false, message: 'Expense not found' });
     }
-    const { expenseDate, expenseMonth, propertyId, unitId, headType, category, amount, description, vendorOrPayee, paymentMode, referenceNumber, expenseCode } = req.body;
+    const { expenseDate, expenseMonth, propertyId, unitId, headType, category, amount, description, referenceNumber, expenseCode } = req.body;
     if (expenseMonth && !expenseDate) {
       expense.expenseMonth = expenseMonth;
       const [y, m] = expenseMonth.split('-').map(Number);
@@ -335,16 +339,18 @@ router.put('/:id', protect, authorize('admin', 'manager'), async (req, res) => {
     }
     if (category) expense.category = category;
     if (amount !== undefined) expense.amount = Number(amount);
-    if (description !== undefined) expense.description = description;
-    if (vendorOrPayee !== undefined) expense.vendorOrPayee = vendorOrPayee;
-    if (paymentMode) expense.paymentMode = paymentMode;
+    if (description !== undefined) expense.description = description ? description.trim() : '';
     if (referenceNumber !== undefined) expense.referenceNumber = referenceNumber;
     if (expenseCode && expenseCode.trim()) expense.expenseCode = expenseCode.trim();
 
     await expense.save();
     await syncMonthlyLedgers().catch(console.error);
 
-    res.json({ success: true, message: 'Expense updated successfully', data: expense });
+    const updatedExpense = await Expense.findById(expense._id)
+      .populate('propertyId')
+      .populate('unitId');
+
+    res.json({ success: true, message: 'Expense updated successfully', data: updatedExpense });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

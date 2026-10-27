@@ -46,18 +46,9 @@ const expenseSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    required: true,
-    trim: true,
-  },
-  vendorOrPayee: {
-    type: String,
-    trim: true,
+    required: false,
     default: '',
-  },
-  paymentMode: {
-    type: String,
-    enum: ['Cash', 'Bank Transfer', 'Cheque', 'UPI / GPay', 'Other'],
-    default: 'Cash',
+    trim: true,
   },
   referenceNumber: {
     type: String,

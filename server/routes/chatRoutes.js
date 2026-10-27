@@ -254,17 +254,17 @@ router.post('/query', protect, async (req, res) => {
           const first = receipts[0];
           const dateStr = first.receiptDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
           answer = matchedTenant
-            ? `The last payment from **${matchedTenant.name}** was **₹${first.totalAmount.toLocaleString('en-IN')}** received on **${dateStr}** via **${first.paymentMode}** (Receipt: ${first.receiptNumber}).`
+            ? `The last payment from **${matchedTenant.name}** was **₹${first.totalAmount.toLocaleString('en-IN')}** received on **${dateStr}** (Receipt: ${first.receiptNumber}).`
             : `Recent payment receipts log:`;
 
           tableData = {
-            columns: ['Receipt No', 'Date', 'Tenant', 'Unit', 'Payment Mode', 'Amount Received'],
+            columns: ['Receipt No', 'Date', 'Tenant', 'Unit', 'Status', 'Amount Received'],
             rows: receipts.map(r => [
               r.receiptNumber,
               r.receiptDate.toISOString().split('T')[0],
               r.tenantId?.name || 'N/A',
               r.unitId?.unitName || 'N/A',
-              r.paymentMode,
+              r.status || 'Rented',
               `₹${r.totalAmount.toLocaleString('en-IN')}`
             ])
           };

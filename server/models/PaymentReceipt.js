@@ -15,7 +15,13 @@ const paymentReceiptSchema = new mongoose.Schema({
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',
-    required: true,
+    required: false,
+    index: true,
+  },
+  status: {
+    type: String,
+    enum: ['Rented', 'Vacant'],
+    default: 'Rented',
     index: true,
   },
   unitId: {
@@ -28,31 +34,40 @@ const paymentReceiptSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
-  paymentMode: {
-    type: String,
-    enum: ['Cash', 'Bank Transfer / NEFT / RTGS', 'Cheque', 'UPI / GPay', 'Other'],
-    default: 'Cash',
-  },
   referenceNumber: {
     type: String,
     trim: true,
     default: '', // Cheque no / UTR / Transaction id
-  },
-  bankName: {
-    type: String,
-    trim: true,
-    default: '',
   },
   comments: {
     type: String,
     trim: true,
     default: '',
   },
+  monthPaidFor: {
+    type: String,
+    trim: true,
+    index: true, // e.g. "2026-01" or "2026-01, 2026-02"
+  },
+  accountingMonth: {
+    type: String,
+    trim: true,
+    index: true, // kept in sync with monthPaidFor
+  },
   contractNo: {
     type: String,
     trim: true,
     default: '',
     index: true,
+  },
+  adjustmentAmount: {
+    type: Number,
+    default: 0,
+  },
+  adjustmentDescription: {
+    type: String,
+    trim: true,
+    default: '',
   },
   recordedBy: {
     type: mongoose.Schema.Types.ObjectId,

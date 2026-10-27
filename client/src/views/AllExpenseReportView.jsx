@@ -36,13 +36,26 @@ const ALL_EXPENSE_COLUMNS_DEF = [
   { id: 'expenseCode', label: 'Expense Code', defaultVisible: true },
   { id: 'headType', label: 'Expense Head type', defaultVisible: true },
   { id: 'property', label: 'Property', defaultVisible: true },
+  { id: 'propertyCode', label: 'Property Code', defaultVisible: false },
+  { id: 'propertyType', label: 'Property Type', defaultVisible: false },
+  { id: 'propertyAddress', label: 'Property Address', defaultVisible: false },
+  { id: 'city', label: 'City', defaultVisible: false },
+  { id: 'ownerOrResponsiblePerson', label: 'Property Owner', defaultVisible: false },
   { id: 'unit', label: 'Sub-Property / Partition', defaultVisible: true },
+  { id: 'unitCode', label: 'Unit Code', defaultVisible: false },
+  { id: 'subUnitArea', label: 'Partition Area (Sq Ft)', defaultVisible: false },
+  { id: 'floor', label: 'Floor / Location', defaultVisible: false },
+  { id: 'unitType', label: 'Unit Type', defaultVisible: false },
   { id: 'category', label: 'Expense Head / Category', defaultVisible: true },
-  { id: 'vendorOrPayee', label: 'Payee / Vendor', defaultVisible: true },
-  { id: 'paymentMode', label: 'Payment Mode', defaultVisible: true },
+
   { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: false },
   { id: 'description', label: 'Description', defaultVisible: true },
   { id: 'amount', label: 'Amount (₹)', defaultVisible: true },
+  { id: 'legacyCode', label: 'Legacy Expense Code', defaultVisible: false },
+  { id: 'isReversed', label: 'Reversal Status', defaultVisible: false },
+  { id: 'reversalReason', label: 'Reversal Reason', defaultVisible: false },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Action', defaultVisible: true },
 ];
 
@@ -69,14 +82,65 @@ const DEFAULT_EXPENSE_COLUMN_WIDTHS = {
   expenseCode: 120,
   headType: 110,
   property: 160,
+  propertyCode: 120,
+  propertyType: 140,
+  propertyAddress: 180,
+  city: 100,
+  ownerOrResponsiblePerson: 130,
   unit: 140,
+  unitCode: 110,
+  subUnitArea: 130,
+  floor: 110,
+  unitType: 130,
   category: 150,
   vendorOrPayee: 140,
   paymentMode: 120,
   referenceNumber: 130,
   description: 180,
   amount: 130,
+  legacyCode: 120,
+  isReversed: 120,
+  reversalReason: 150,
+  createdAt: 120,
+  updatedAt: 120,
   actions: 85
+};
+
+// Helper to extract formatted backend values for any expense column ID
+const getExpenseFieldVal = (e, colId) => {
+  if (!e) return '';
+  const isCommon = !e.propertyId;
+  const isOther = e.headType === 'Other' || isCommon;
+  switch (colId) {
+    case 'index': return '';
+    case 'expenseDate': return e.expenseDate ? formatDate(e.expenseDate) : '';
+    case 'expenseMonthYear': return e.expenseMonthYear || '';
+    case 'expenseCode': return e.expenseCode || '';
+    case 'headType': return isOther ? 'Other' : 'Property';
+    case 'property': return e.propertyId?.name || (isOther ? 'Other / General' : '');
+    case 'propertyCode': return e.propertyId?.propertyCode || '';
+    case 'propertyType': return e.propertyId?.propertyType || '';
+    case 'propertyAddress': return typeof e.propertyId?.address === 'string' ? e.propertyId.address : '';
+    case 'city': return e.propertyId?.city || '';
+    case 'ownerOrResponsiblePerson': return e.propertyId?.ownerOrResponsiblePerson || '';
+    case 'unit': return e.unitId?.subUnitPartition || e.unitId?.unitName || (isCommon ? 'Common' : '');
+    case 'unitCode': return e.unitId?.unitCode || '';
+    case 'subUnitArea': return e.unitId?.areaSqFt ? `${e.unitId.areaSqFt} sq ft` : '';
+    case 'floor': return e.unitId?.floor || '';
+    case 'unitType': return e.unitId?.unitType || '';
+    case 'category': return e.category || '';
+    case 'vendorOrPayee': return e.vendorOrPayee || '';
+    case 'paymentMode': return e.paymentMode || 'Cash';
+    case 'referenceNumber': return e.referenceNumber || '';
+    case 'description': return e.description || '';
+    case 'amount': return Number(e.amount) || 0;
+    case 'legacyCode': return e.legacyCode || '';
+    case 'isReversed': return e.isReversed ? 'Reversed' : 'Active';
+    case 'reversalReason': return e.reversalReason || '';
+    case 'createdAt': return e.createdAt ? formatDate(e.createdAt) : '';
+    case 'updatedAt': return e.updatedAt ? formatDate(e.updatedAt) : '';
+    default: return e[colId] != null ? String(e[colId]) : '';
+  }
 };
 
 export default function AllExpenseReportView() {
@@ -128,8 +192,7 @@ export default function AllExpenseReportView() {
     unitId: '',
     category: '',
     amount: '',
-    vendorOrPayee: '',
-    paymentMode: 'Cash',
+
     referenceNumber: '',
     description: ''
   });
@@ -170,11 +233,19 @@ export default function AllExpenseReportView() {
       expenseMonthYear: extractUniqueValues(expenses, e => e.expenseMonthYear),
       headType: ['Property', 'Other'],
       property: extractUniqueValues(expenses, e => e.propertyId?.name || (e.headType === 'Other' || e.headType === 'Common' ? 'Other / General' : '')),
+      propertyCode: extractUniqueValues(expenses, e => e.propertyId?.propertyCode),
+      propertyType: extractUniqueValues(expenses, e => e.propertyId?.propertyType),
+      city: extractUniqueValues(expenses, e => e.propertyId?.city),
       unit: extractUniqueValues(expenses, e => e.unitId?.subUnitPartition || e.unitId?.unitName),
+      unitCode: extractUniqueValues(expenses, e => e.unitId?.unitCode),
+      floor: extractUniqueValues(expenses, e => e.unitId?.floor),
+      unitType: extractUniqueValues(expenses, e => e.unitId?.unitType),
       category: extractUniqueValues(expenses, e => e.category),
       vendorOrPayee: extractUniqueValues(expenses, e => e.vendorOrPayee),
       paymentMode: ['Cash', 'Bank Transfer', 'Cheque', 'UPI / Online'],
       referenceNumber: extractUniqueValues(expenses, e => e.referenceNumber),
+      legacyCode: extractUniqueValues(expenses, e => e.legacyCode),
+      isReversed: ['Active', 'Reversed'],
       description: extractUniqueValues(expenses, e => e.description)
     };
   }, [expenses]);
@@ -215,36 +286,24 @@ export default function AllExpenseReportView() {
       });
     }
 
-    // 2. APEX Structured Filters
+    // 2. APEX Structured Filters (supports all backend columns)
     if (activeFilters.length > 0) {
       rows = rows.filter(e => {
         return activeFilters.every(flt => {
-          let cellVal = '';
-          if (flt.column === 'expenseCode') cellVal = e.expenseCode;
-          else if (flt.column === 'expenseDate') cellVal = e.expenseDate ? formatDate(e.expenseDate) : '';
-          else if (flt.column === 'expenseMonthYear') cellVal = e.expenseMonthYear;
-          else if (flt.column === 'headType') cellVal = e.headType;
-          else if (flt.column === 'property') cellVal = e.propertyId?.name || (e.headType === 'Common' ? 'Common / All' : '');
-          else if (flt.column === 'unit') cellVal = e.unitId?.subUnitPartition || e.unitId?.unitName;
-          else if (flt.column === 'category') cellVal = e.category;
-          else if (flt.column === 'vendorOrPayee') cellVal = e.vendorOrPayee;
-          else if (flt.column === 'paymentMode') cellVal = e.paymentMode;
-          else if (flt.column === 'referenceNumber') cellVal = e.referenceNumber;
-          else if (flt.column === 'description') cellVal = e.description;
-          else if (flt.column === 'amount') cellVal = e.amount;
+          const cellVal = getExpenseFieldVal(e, flt.column);
           return evaluateFilterRule(cellVal, flt.operator, flt.value);
         });
       });
     }
 
-    // 3. Sorting
+    // 3. Sorting (supports all backend columns)
     if (sortConfig.key) {
       rows = sortDataRows(rows, sortConfig.key, sortConfig.direction, (item, key) => {
         if (key === 'amount') return Number(item.amount) || 0;
-        if (key === 'expenseDate') return item.expenseDate ? new Date(item.expenseDate).getTime() : 0;
-        if (key === 'property') return item.propertyId?.name || (item.headType === 'Common' ? 'Common / All' : '');
-        if (key === 'unit') return item.unitId?.subUnitPartition || item.unitId?.unitName || '';
-        return item[key] || '';
+        if (['expenseDate', 'createdAt', 'updatedAt'].includes(key)) {
+          return item[key] ? new Date(item[key]).getTime() : 0;
+        }
+        return getExpenseFieldVal(item, key);
       });
     }
 
@@ -259,24 +318,19 @@ export default function AllExpenseReportView() {
     return processedExpenses.slice(start, start + Number(rowsPerPage));
   }, [processedExpenses, rowsPerPage, currentPage]);
 
-  // Export to Excel
+  // Export to Excel with full backend columns support
   const exportToExcel = () => {
     try {
-      const dataToExport = processedExpenses.map((e, i) => ({
-        '#': i + 1,
-        'Expense Date': e.expenseDate ? formatDate(e.expenseDate) : '',
-        'Accounting Month': e.expenseMonthYear || '',
-        'Expense Code': e.expenseCode || '',
-        'Expense Head type': (e.headType === 'Other' || e.headType === 'Common') ? 'Other' : 'Property',
-        'Property': e.propertyId?.name || ((e.headType === 'Other' || e.headType === 'Common') ? 'Other / General' : ''),
-        'Sub-Property / Partition': e.unitId?.subUnitPartition || e.unitId?.unitName || '',
-        'Expense Head': e.category || '',
-        'Payee / Vendor': e.vendorOrPayee || '',
-        'Payment Mode': e.paymentMode || 'Cash',
-        'Ref / Cheque #': e.referenceNumber || '',
-        'Description': e.description || '',
-        'Amount (₹)': Number(e.amount) || 0
-      }));
+      const exportCols = ALL_EXPENSE_COLUMNS_DEF.filter(c => c.id !== 'actions' && (visibleColumns.includes(c.id) || visibleColumns.length === 0));
+      const dataToExport = processedExpenses.map((e, i) => {
+        const row = { '#': i + 1 };
+        exportCols.forEach(col => {
+          if (col.id === 'index') return;
+          const val = getExpenseFieldVal(e, col.id);
+          row[col.label] = col.id === 'amount' ? (Number(val) || 0) : val;
+        });
+        return row;
+      });
 
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
@@ -300,8 +354,7 @@ export default function AllExpenseReportView() {
       unitId: e.unitId?._id || e.unitId || '',
       category: e.category || '',
       amount: String(e.amount || 0),
-      vendorOrPayee: e.vendorOrPayee || '',
-      paymentMode: e.paymentMode || 'Cash',
+
       referenceNumber: e.referenceNumber || '',
       description: e.description || ''
     });
@@ -327,8 +380,7 @@ export default function AllExpenseReportView() {
         unitId: isOther ? null : (editForm.unitId || null),
         category: editForm.category,
         amount: Number(editForm.amount),
-        vendorOrPayee: editForm.vendorOrPayee,
-        paymentMode: editForm.paymentMode,
+
         referenceNumber: editForm.referenceNumber,
         description: editForm.description
       };
@@ -657,7 +709,24 @@ export default function AllExpenseReportView() {
                           );
                         }
 
-                        return <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200">—</td>;
+                        if (colId === 'isReversed') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                e.isReversed ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              }`}>
+                                {e.isReversed ? 'Reversed' : 'Active'}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        const textVal = getExpenseFieldVal(e, colId);
+                        return (
+                          <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-xs text-slate-700 whitespace-nowrap truncate max-w-xs" title={textVal}>
+                            {textVal || '—'}
+                          </td>
+                        );
                       })}
                     </tr>
                   );
@@ -878,33 +947,7 @@ export default function AllExpenseReportView() {
                 </div>
               )}
 
-              {/* Row 5: Payee / Vendor & Payment Mode */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Payee / Vendor</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Electrician, Water Dept, Contractor"
-                    value={editForm.vendorOrPayee}
-                    onChange={(e) => setEditForm({ ...editForm, vendorOrPayee: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
-                  <select
-                    value={editForm.paymentMode}
-                    onChange={(e) => setEditForm({ ...editForm, paymentMode: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-rose-400 font-medium"
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="UPI / Online">UPI / Online</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-              </div>
+
 
               {/* Row 6: Reference / Cheque # & Description */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">

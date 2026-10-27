@@ -4,6 +4,7 @@ import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
+import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
 import { 
@@ -73,8 +74,6 @@ const EXPENSES_SHEET_COLUMNS_DEF = [
   { id: 'unit', label: 'Partition (Unit)', defaultVisible: true },
   { id: 'category', label: 'Expense Head', defaultVisible: true },
   { id: 'description', label: 'Description', defaultVisible: true },
-  { id: 'payee', label: 'Payee / Vendor', defaultVisible: true },
-  { id: 'paymentMode', label: 'Payment Mode', defaultVisible: true },
   { id: 'amount', label: 'Amount (₹)', defaultVisible: true },
   { id: 'actions', label: 'Action', defaultVisible: true },
   { id: 'monthlyTotal', label: 'This Month Total', defaultVisible: true }
@@ -86,10 +85,8 @@ const DEFAULT_SHEET_COLUMN_WIDTHS = {
   property: 175,
   unit: 130,
   category: 145,
-  description: 180,
-  payee: 120,
-  paymentMode: 110,
-  amount: 115,
+  description: 220,
+  amount: 120,
   actions: 90,
   monthlyTotal: 220
 };
@@ -100,7 +97,7 @@ const EXPENSES_REGISTER_COLUMNS_DEF = [
   { id: 'property', label: 'Property', defaultVisible: true },
   { id: 'category', label: 'Expense Type', defaultVisible: true },
   { id: 'description', label: 'What it was for', defaultVisible: true },
-  { id: 'payee', label: 'Paid To / Mode', defaultVisible: true },
+  { id: 'payee', label: 'Paid To / Mode', defaultVisible: false },
   { id: 'amount', label: 'Amount', defaultVisible: true },
   { id: 'createdAt', label: 'Created Date', defaultVisible: false },
   { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
@@ -223,6 +220,11 @@ export default function ExpensesView() {
 
   // Modals & Inline Edit States
   const [showModal, setShowModal] = useState(false);
+
+  // Browser Back button navigation: dismiss expense modals back to table
+  useModalBackHandler(showModal, () => setShowModal(false));
+  useModalBackHandler(showAddCategoryModal, () => setShowAddCategoryModal(false));
+  useModalBackHandler(showManageHeadsModal, () => setShowManageHeadsModal(false));
   const [editingExpenseId, setEditingExpenseId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [entryByDate, setEntryByDate] = useState(false);
@@ -233,8 +235,6 @@ export default function ExpensesView() {
     unitId: '',
     category: 'Maintenance',
     description: '',
-    vendorOrPayee: '',
-    paymentMode: 'Cash',
     amount: ''
   });
   const [quickSaving, setQuickSaving] = useState(false);
@@ -251,7 +251,7 @@ export default function ExpensesView() {
     if (saved) {
       try {
         const allowed = EXPENSES_SHEET_COLUMNS_DEF.map(c => c.id);
-        return JSON.parse(saved).filter(c => allowed.includes(c));
+        return JSON.parse(saved).filter(c => allowed.includes(c) && c !== 'payee' && c !== 'paymentMode');
       } catch (e) {}
     }
     return EXPENSES_SHEET_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
@@ -290,8 +290,6 @@ export default function ExpensesView() {
     category: 'Maintenance',
     amount: '',
     description: '',
-    vendorOrPayee: '',
-    paymentMode: 'Cash',
   });
 
   const fetchData = async () => {
@@ -442,7 +440,13 @@ export default function ExpensesView() {
     } else if (!isOther && !propertyCategories.includes(form.category)) {
       nextCat = propertyCategories[0] || 'Maintenance';
     }
-    setForm(prev => ({ ...prev, propertyId: newPropId, unitId: '', category: nextCat }));
+    setForm(prev => ({
+      ...prev,
+      propertyId: newPropId,
+      headType: isOther ? 'Other' : 'Property',
+      unitId: '',
+      category: nextCat
+    }));
   };
 
   // Handle creating new expense category on the fly
@@ -536,21 +540,27 @@ export default function ExpensesView() {
 
   // Month Navigation Handlers (Same as PaymentsView)
   const handlePrevMonth = () => {
-    const [y, m] = selectedMonth.split('-').map(Number);
+    const cur = selectedMonth || getCurrentMonthYear();
+    const parts = cur.split('-').map(Number);
+    const y = parts[0] || new Date().getFullYear();
+    const m = parts[1] || (new Date().getMonth() + 1);
     const d = new Date(y, m - 2, 1);
     const prev = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     setSelectedMonth(prev);
   };
 
   const handleNextMonth = () => {
-    const [y, m] = selectedMonth.split('-').map(Number);
+    const cur = selectedMonth || getCurrentMonthYear();
+    const parts = cur.split('-').map(Number);
+    const y = parts[0] || new Date().getFullYear();
+    const m = parts[1] || (new Date().getMonth() + 1);
     const d = new Date(y, m, 1);
     const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     setSelectedMonth(next);
   };
 
   const handleSelectCustomMonth = (e) => {
-    if (e.target.value) {
+    if (e?.target?.value) {
       setSelectedMonth(e.target.value);
     }
   };
@@ -662,10 +672,7 @@ export default function ExpensesView() {
       quickAmountInputRef.current?.focus();
       return;
     }
-    if (!quickForm.description.trim()) {
-      alert('Please enter what this expense was for (Description).');
-      return;
-    }
+    // Description is non-mandatory
 
     try {
       setQuickSaving(true);
@@ -681,9 +688,7 @@ export default function ExpensesView() {
         propertyId: targetPropId,
         unitId: targetUnitId || null,
         category: quickForm.category || 'Maintenance',
-        description: quickForm.description.trim(),
-        vendorOrPayee: quickForm.vendorOrPayee.trim(),
-        paymentMode: quickForm.paymentMode || 'Cash',
+        description: quickForm.description?.trim() || '',
         amount: Number(quickForm.amount),
         expenseMonth: selectedMonth,
         expenseDate: `${selectedMonth}-01`
@@ -699,7 +704,6 @@ export default function ExpensesView() {
           ...prev,
           unitId: '',
           description: '',
-          vendorOrPayee: '',
           amount: ''
         }));
         await fetchData();
@@ -754,8 +758,6 @@ export default function ExpensesView() {
       'Partition': e.unitId?.subUnitPartition || e.unitId?.unitName || 'Entire Property',
       'Expense Type': e.category || 'Maintenance',
       'What it was for': e.description || '',
-      'Paid To / Vendor': e.vendorOrPayee || '—',
-      'Payment Mode': e.paymentMode || 'Cash',
       'Amount (₹)': e.amount || 0,
       'Created Date': e.createdAt ? formatDate(e.createdAt) : '',
       'Modified Date': e.updatedAt ? formatDate(e.updatedAt) : ''
@@ -769,8 +771,6 @@ export default function ExpensesView() {
       'Partition': '',
       'Expense Type': '',
       'What it was for': 'TOTAL EXPENSES',
-      'Paid To / Vendor': '',
-      'Payment Mode': '',
       'Amount (₹)': monthTotalSum,
       'Created Date': '',
       'Modified Date': ''
@@ -796,8 +796,6 @@ export default function ExpensesView() {
       category: isOtherScope ? (commonCategories[0] || 'MOM') : (propertyCategories[0] || 'Maintenance'),
       amount: '',
       description: '',
-      vendorOrPayee: '',
-      paymentMode: 'Cash',
     });
   };
 
@@ -1068,6 +1066,8 @@ export default function ExpensesView() {
     const amountNum = Number(draft.amount);
 
     if (!amountNum || amountNum <= 0) {
+      const input = document.getElementById(`row-amount-${propKey}`);
+      if (input) input.focus();
       alert('Please enter a valid amount greater than 0.');
       return;
     }
@@ -1082,16 +1082,17 @@ export default function ExpensesView() {
         propertyId: targetPropId,
         unitId: (!isCommon && draft.unitId) ? draft.unitId : null,
         category: draft.category || (isCommon ? 'MOM' : 'Maintenance'),
-        description: desc,
-        vendorOrPayee: draft.vendorOrPayee?.trim() || '',
-        paymentMode: draft.paymentMode || 'Cash',
+        description: draft.description?.trim() || '',
         amount: amountNum,
         expenseMonth: selectedMonth,
         expenseDate: `${selectedMonth}-01`
       });
 
       if (res.data?.success) {
-        setExpenses(prev => [res.data.data, ...prev]);
+        setExpenses(prev => {
+          const exists = prev.some(e => e._id === res.data.data._id);
+          return exists ? prev : [res.data.data, ...prev];
+        });
         setRowDrafts(prev => ({
           ...prev,
           [propKey]: {
@@ -1105,6 +1106,7 @@ export default function ExpensesView() {
         setTimeout(() => {
           setSavedFeedback(prev => ({ ...prev, [propKey]: false }));
         }, 2500);
+        await fetchData();
       }
     } catch (err) {
       alert(err.response?.data?.message || err.message || 'Failed to save expense');
@@ -1572,31 +1574,16 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                                   }
 
                                   if (colId === 'headType') {
-                            const isOther = e.headType === 'Other' || isExpenseOther(e);
-                            return (
-                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 border-r border-slate-100 whitespace-nowrap">
-                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${
-                                  isOther ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                }`}>
-                                  {isOther ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
-                                  {isOther ? 'Other' : 'Property'}
-                                </span>
-                              </td>
-                            );
-                          }
-                          if (colId === 'headType') {
-                            const isOther = e.headType === 'Other' || isExpenseOther(e);
-                            return (
-                              <td key={colId} style={frozenStyle} className="px-5 py-3.5 border-r border-slate-100 whitespace-nowrap">
-                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${
-                                  isOther ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                }`}>
-                                  {isOther ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
-                                  {isOther ? 'Other' : 'Property'}
-                                </span>
-                              </td>
-                            );
-                          }
+                                    const isOther = re.headType === 'Other' || isExpenseOther(re);
+                                    return (
+                                      <td key={colId} style={frozenStyle} className="px-2.5 py-1.5 border-r border-slate-200 whitespace-nowrap">
+                                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${isOther ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                          {isOther ? <Tag className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                                          {isOther ? 'Other' : 'Property'}
+                                        </span>
+                                      </td>
+                                    );
+                                  }
                           if (colId === 'property') {
                                     return (
                                       <td key={colId} style={frozenStyle} className="px-2.5 py-1.5 border-r border-slate-200">
@@ -1642,31 +1629,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                                     );
                                   }
 
-                                  if (colId === 'headType') {
-                                    const isOther = isCommon || re.headType === 'Other';
-                                    return (
-                                      <td key={colId} style={frozenStyle} className="px-2.5 py-1.5 border-r border-slate-200 whitespace-nowrap">
-                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                                          isOther ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                        }`}>
-                                          {isOther ? <Tag className="w-2.5 h-2.5" /> : <Building2 className="w-2.5 h-2.5" />}
-                                          {isOther ? 'Other' : 'Property'}
-                                        </span>
-                                      </td>
-                                    );
-                                  }
-                                  if (colId === 'headType') {
-                                return (
-                                  <td key={colId} style={frozenStyle} className="px-2.5 py-2 border-r border-slate-200 whitespace-nowrap">
-                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                                      isCommon ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    }`}>
-                                      {isCommon ? <Tag className="w-2.5 h-2.5" /> : <Building2 className="w-2.5 h-2.5" />}
-                                      {isCommon ? 'Other' : 'Property'}
-                                    </span>
-                                  </td>
-                                );
-                              }
+
                               if (colId === 'category') {
                                     if (isEditingThisLine) {
                                       return (
@@ -1881,6 +1844,19 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                                 );
                               }
 
+                              if (colId === 'headType') {
+                                return (
+                                  <td key={colId} style={frozenStyle} className="px-2.5 py-1.5 border-r border-slate-200 whitespace-nowrap">
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                      isCommon ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    }`}>
+                                      {isCommon ? <Tag className="w-2.5 h-2.5" /> : <Building2 className="w-2.5 h-2.5" />}
+                                      {isCommon ? 'Other' : 'Property'}
+                                    </span>
+                                  </td>
+                                );
+                              }
+
                               if (colId === 'property') {
                                 return (
                                   <td key={colId} style={frozenStyle} className="px-2.5 py-1.5 border-r border-slate-200">
@@ -1888,9 +1864,17 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                                       <span className="font-bold text-slate-900 text-xs truncate" title={isCommon ? 'General & Common Expenses' : prop.name}>
                                         {isCommon ? 'General & Common' : prop.name}
                                       </span>
-                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const el = document.getElementById(`row-amount-${propKey}`);
+                                          if (el) { el.focus(); el.select(); }
+                                        }}
+                                        className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 shrink-0 cursor-pointer transition-colors active:scale-95"
+                                        title="Click to enter amount for this property"
+                                      >
                                         + Add Line
-                                      </span>
+                                      </button>
                                     </div>
                                     <div className="text-[10px] text-slate-400 font-mono truncate">
                                       {isCommon ? 'Other' : (prop.propertyCode || '—')}
@@ -1998,6 +1982,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                                         value={draft.amount}
                                         onChange={(e) => updateRowDraft(propKey, { amount: e.target.value })}
                                         onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRowExpense(prop); }}
+                                        id={`row-amount-${propKey}`}
                                         className="w-full pl-5 pr-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono shadow-2xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                       />
                                     </div>
@@ -2015,7 +2000,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                                       className="w-full flex items-center justify-center gap-1 px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
                                       title="Save this expense line"
                                     >
-                                      {isSaving ? '...' : (isSaved ? <Check className="w-3.5 h-3.5 text-white" /> : '+ Add')}
+                                      {isSaving ? '...' : (isSaved ? <Check className="w-3.5 h-3.5 text-white" /> : '+ Add Line')}
                                     </button>
                                   </td>
                                 );
@@ -2041,13 +2026,13 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                   </tbody>
                   <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-extrabold text-xs text-slate-800 select-none">
                     <tr>
-                      <td colSpan={7} className="px-4 py-3 text-right">
+                      <td colSpan={Math.max(1, visibleSheetColumns.indexOf('amount'))} className="px-4 py-3 text-right">
                         Properties Total:
                       </td>
                       <td className="px-3 py-3 text-right font-mono text-emerald-800 text-sm">
                         ₹{propertyExpensesSum.toLocaleString('en-IN')}
                       </td>
-                      <td colSpan={2} className="px-4 py-3 text-right">
+                      <td colSpan={Math.max(1, visibleSheetColumns.length - visibleSheetColumns.indexOf('amount') - 1)} className="px-4 py-3 text-right">
                         <span className="text-slate-500 mr-2">Common: ₹{commonExpensesSum.toLocaleString('en-IN')}</span>
                         <span className="bg-slate-900 text-white px-2.5 py-1 rounded-lg">
                           Grand Total: ₹{(propertyExpensesSum + commonExpensesSum).toLocaleString('en-IN')}
@@ -2403,7 +2388,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
       {/* ======================================================== */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-scaleUp">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6">
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-lg font-extrabold text-slate-900">
@@ -2465,9 +2450,10 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                 </div>
               </div>
 
-              {/* Row 1: Property + Sub-Unit Partition (if Property) */}
-              {form.headType === 'Property' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* TWO COLUMN FORM LAYOUT */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Row 1 Col 1: Property */}
+                {form.headType === 'Property' ? (
                   <div>
                     <SearchableSelect
                       label="Property"
@@ -2487,6 +2473,18 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                       onChange={(propertyId) => handleModalPropertyChange(propertyId)}
                     />
                   </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Expense Scope</label>
+                    <div className="p-2.5 rounded-xl bg-indigo-50/80 border border-indigo-100 text-xs text-indigo-700 font-semibold flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>General / Other expense</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Row 1 Col 2: Sub-Unit Partition */}
+                {form.headType === 'Property' ? (
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">
                       Sub-Unit / Partition (Optional)
@@ -2495,7 +2493,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                       value={form.unitId}
                       disabled={!form.propertyId || form.propertyId === '__OTHER_EXPENSES__' || isGeneralCommonProperty(form.propertyId)}
                       onChange={(e) => setForm({ ...form, unitId: e.target.value })}
-                      className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     >
                       <option value="">Entire Property / Common Partition</option>
                       {units
@@ -2506,91 +2504,93 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                       }
                     </select>
                   </div>
-                </div>
-              ) : (
-                <div className="p-3 rounded-xl bg-indigo-50/80 border border-indigo-100 text-xs text-indigo-700 font-semibold flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>Other / General expense (not tied to any specific property partition)</span>
-                </div>
-              )}
-
-              {/* Row 1b: Expense Head / Category */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-600">Expense Type / Head *</label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowManageHeadsModal(true)}
-                      className="text-[11px] font-bold text-slate-500 hover:text-slate-700 underline flex items-center gap-0.5 cursor-pointer"
-                    >
-                      <Tag className="w-3 h-3 text-emerald-600" /> Manage Heads
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddCategoryModal(true)}
-                      className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-0.5 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" /> + Add New Head
-                    </button>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Unit</label>
+                    <div className="w-full px-3 py-2 text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-slate-50 flex items-center">
+                      — None (General) —
+                    </div>
                   </div>
-                </div>
-                <select
-                  value={form.category}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '__add_new__') {
-                      setShowAddCategoryModal(true);
-                    } else {
-                      const isOtherCat = commonCategories.includes(val);
-                      const isPropCat = propertyCategories.includes(val);
-                      let newType = form.headType;
-                      if (isOtherCat && !isPropCat) newType = 'Other';
-                      else if (isPropCat && !isOtherCat) newType = 'Property';
-                      setForm({
-                        ...form,
-                        category: val,
-                        headType: newType,
-                        propertyId: newType === 'Other' ? '__OTHER_EXPENSES__' : (form.propertyId === '__OTHER_EXPENSES__' ? '' : form.propertyId)
-                      });
-                    }
-                  }}
-                  className="w-full px-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-                >
-                  {(form.headType === 'Other' || form.propertyId === '__OTHER_EXPENSES__') ? (
-                    <>
-                      {!commonCategories.includes(form.category) && form.category && (
-                        <option value={form.category}>{form.category}</option>
-                      )}
-                      {commonCategories.map((category) => (
-                        <option key={category} value={category}>{category}</option>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      {!propertyCategories.includes(form.category) && form.category && (
-                        <option value={form.category}>{form.category}</option>
-                      )}
-                      {propertyCategories.map((category) => (
-                        <option key={category} value={category}>{category}</option>
-                      ))}
-                    </>
-                  )}
-                  <option value="__add_new__">+ Add New Head...</option>
-                </select>
-              </div>
+                )}
 
-              {/* Row 2: Amount + Month / Date Assignment */}
-              <div className="grid grid-cols-2 gap-4">
+                {/* Row 2 Col 1: Expense Type / Head */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-600">Expense Type / Head *</label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowManageHeadsModal(true)}
+                        className="text-[11px] font-bold text-slate-500 hover:text-slate-700 underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Tag className="w-3 h-3 text-emerald-600" /> Manage Heads
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCategoryModal(true)}
+                        className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" /> + Add
+                      </button>
+                    </div>
+                  </div>
+                  <select
+                    value={form.category}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__add_new__') {
+                        setShowAddCategoryModal(true);
+                      } else {
+                        const isOtherCat = commonCategories.includes(val);
+                        const isPropCat = propertyCategories.includes(val);
+                        let newType = form.headType;
+                        if (isOtherCat && !isPropCat) newType = 'Other';
+                        else if (isPropCat && !isOtherCat) newType = 'Property';
+                        setForm({
+                          ...form,
+                          category: val,
+                          headType: newType,
+                          propertyId: newType === 'Other' ? '__OTHER_EXPENSES__' : (form.propertyId === '__OTHER_EXPENSES__' ? '' : form.propertyId)
+                        });
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                  >
+                    {(form.headType === 'Other' || form.propertyId === '__OTHER_EXPENSES__') ? (
+                      <>
+                        {!commonCategories.includes(form.category) && form.category && (
+                          <option value={form.category}>{form.category}</option>
+                        )}
+                        {commonCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        {!propertyCategories.includes(form.category) && form.category && (
+                          <option value={form.category}>{form.category}</option>
+                        )}
+                        {propertyCategories.map((category) => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </>
+                    )}
+                    <option value="__add_new__">+ Add New Head...</option>
+                  </select>
+                </div>
+
+                {/* Row 2 Col 2: Amount */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Amount (₹) *</label>
                   <input
                     type="number" required min="0" step="0.01" placeholder="e.g. 4500"
                     value={form.amount}
                     onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-bold text-rose-600"
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-bold text-rose-600"
                   />
                 </div>
+
+                {/* Row 3 Col 1: Date / Month */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-semibold text-slate-600">
@@ -2609,53 +2609,30 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                       type="month" required
                       value={form.expenseMonth}
                       onChange={(e) => setForm({ ...form, expenseMonth: e.target.value })}
-                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-emerald-50/20 font-semibold text-slate-800"
+                      className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-emerald-50/20 font-semibold text-slate-800"
                     />
                   ) : (
                     <input
                       type="date" required
                       value={form.expenseDate}
                       onChange={(e) => setForm({ ...form, expenseDate: e.target.value, expenseMonth: e.target.value.slice(0, 7) })}
-                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                     />
                   )}
                 </div>
-              </div>
 
-              {/* Row 3: Description */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">What was it for? *</label>
-                <input
-                  type="text" required placeholder="e.g. Water tank cleaning, electrician visit, plumbing"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                />
-              </div>
-
-              {/* Row 4: Payee + Mode */}
-              <div className="grid grid-cols-2 gap-4">
+                {/* Row 3 Col 2: Description (Optional - Non-mandatory!) */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Paid To <span className="text-slate-400 font-normal">(optional)</span></label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Description <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                  </label>
                   <input
-                    type="text" placeholder="e.g. Ramesh Painter"
-                    value={form.vendorOrPayee}
-                    onChange={(e) => setForm({ ...form, vendorOrPayee: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    type="text"
+                    placeholder="e.g. Water tank cleaning, plumber (optional)"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Payment Method</label>
-                  <select
-                    value={form.paymentMode}
-                    onChange={(e) => setForm({ ...form, paymentMode: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="UPI / GPay">UPI / GPay</option>
-                  </select>
                 </div>
               </div>
 

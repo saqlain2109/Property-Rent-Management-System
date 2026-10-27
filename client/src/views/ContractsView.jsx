@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
+import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import {
@@ -34,6 +35,13 @@ const CONTRACTS_COLUMNS_DEF = [
   { id: 'history', label: 'Rate History', defaultVisible: false },
   { id: 'createdAt', label: 'Created Date', defaultVisible: false },
   { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
+  { id: 'tenantPhone', label: 'Tenant Phone', defaultVisible: false },
+  { id: 'tenantEmail', label: 'Tenant Email', defaultVisible: false },
+  { id: 'tenantCode', label: 'Tenant Code', defaultVisible: false },
+  { id: 'propertyCode', label: 'Property Code', defaultVisible: false },
+  { id: 'unitCode', label: 'Unit Code', defaultVisible: false },
+  { id: 'subUnitArea', label: 'Partition Area (Sq Ft)', defaultVisible: false },
+  { id: 'floor', label: 'Floor / Location', defaultVisible: false },
 ];
 
 const DEFAULT_CONTRACTS_COLS = [
@@ -91,37 +99,35 @@ const doContractDatesOverlap = (startA, endA, startB, endB) => {
   return sA <= eB && eA >= sB;
 };
 
-const findContractConflict = (contractsList, unitId, startDate, endDate, excludeId = null) => {
-  if (!unitId) return null;
-  return contractsList.find(c => {
-    if (excludeId && c._id === excludeId) return false;
-    const cUnitId = String(c.unitId?._id || c.unitId);
-    if (cUnitId !== String(unitId)) return false;
-    if (c.status === 'Terminated' || c.status === 'Cancelled') return false;
-    return doContractDatesOverlap(startDate, endDate, c.startDate, c.endDate);
-  });
-};
+// Conflicting contract restriction removed as requested - contracts can be added/edited for any date
+const findContractConflict = () => null;
 
 const CONTRACT_RECEIPTS_COLUMNS_DEF = [
   { id: 'receiptNumber', label: 'Receipt #', defaultVisible: true },
   { id: 'receiptDate', label: 'Date', defaultVisible: true },
-  { id: 'monthsCovered', label: 'Month(s) Covered', defaultVisible: true },
-  { id: 'paymentMode', label: 'Payment Mode', defaultVisible: true },
+  { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
+  { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
+  { id: 'status', label: 'Status', defaultVisible: true },
   { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
   { id: 'comments', label: 'Comments', defaultVisible: true },
   { id: 'totalAmount', label: 'Amount Received (₹)', defaultVisible: true },
+  { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
+  { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
+  { id: 'createdAt', label: 'Created Date', defaultVisible: false },
+  { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Action', defaultVisible: true },
 ];
 
 const DEFAULT_CONTRACT_RECEIPTS_COLS = [
-  'receiptNumber', 'receiptDate', 'monthsCovered', 'paymentMode', 'referenceNumber', 'comments', 'totalAmount', 'actions'
+  'receiptNumber', 'receiptDate', 'accountingMonth', 'monthsCovered', 'status', 'referenceNumber', 'comments', 'totalAmount', 'actions'
 ];
 
 const DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS = {
   receiptNumber: 130,
   receiptDate: 110,
+  accountingMonth: 140,
   monthsCovered: 160,
-  paymentMode: 120,
+  status: 95,
   referenceNumber: 130,
   comments: 180,
   totalAmount: 140,
@@ -235,6 +241,13 @@ export default function ContractsView() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedContract, setSelectedContract] = useState(null);
 
+  // Browser Back button navigation: dismiss open modals back to table
+  useModalBackHandler(showCreateModal, () => setShowCreateModal(false));
+  useModalBackHandler(showEditModal, () => setShowEditModal(false));
+  useModalBackHandler(showReviseModal, () => setShowReviseModal(false));
+  useModalBackHandler(showVacateModal, () => setShowVacateModal(false));
+  useModalBackHandler(showHistoryModal, () => setShowHistoryModal(false));
+
   // Forms
   const [createForm, setCreateForm] = useState({
     tenantId: '',
@@ -290,7 +303,7 @@ export default function ContractsView() {
   const [receiptRowsPerPage, setReceiptRowsPerPage] = useState(25);
   const [receiptCurrentPage, setReceiptCurrentPage] = useState(1);
   const [receiptVisibleColumns, setReceiptVisibleColumns] = useState(() => {
-    const saved = localStorage.getItem('cols_contract_receipts_v1');
+    const saved = localStorage.getItem('cols_contract_receipts_v2');
     if (!saved) return DEFAULT_CONTRACT_RECEIPTS_COLS;
     try {
       const allowed = CONTRACT_RECEIPTS_COLUMNS_DEF.map(c => c.id);
@@ -307,10 +320,11 @@ export default function ContractsView() {
   } = useResizableColumns('contract_receipts', DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS);
 
   const [viewingReceipt, setViewingReceipt] = useState(null);
+  useModalBackHandler(Boolean(viewingReceipt), () => setViewingReceipt(null));
   const [receiptEditForm, setReceiptEditForm] = useState({
     receiptDate: '',
     totalAmount: '',
-    paymentMode: 'Cash',
+    status: 'Rented',
     referenceNumber: '',
     comments: ''
   });
@@ -326,7 +340,7 @@ export default function ContractsView() {
       receiptNumber: extractUniqueValues(contractReceipts, r => r.receiptNumber),
       receiptDate: extractUniqueValues(contractReceipts, r => r.receiptDate ? formatDate(r.receiptDate) : ''),
       monthsCovered: extractUniqueValues(contractReceipts, r => r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || ''),
-      paymentMode: ['Cash', 'Bank Transfer', 'Cheque', 'UPI / Online'],
+      status: ['Rented', 'Vacant'],
       referenceNumber: extractUniqueValues(contractReceipts, r => r.referenceNumber),
       comments: extractUniqueValues(contractReceipts, r => r.comments)
     };
@@ -340,7 +354,7 @@ export default function ContractsView() {
       const q = receiptSearchQuery.toLowerCase().trim();
       rows = rows.filter(r => 
         (r.receiptNumber && r.receiptNumber.toLowerCase().includes(q)) ||
-        (r.paymentMode && r.paymentMode.toLowerCase().includes(q)) ||
+        ((r.status || 'Rented').toLowerCase().includes(q)) ||
         (r.referenceNumber && r.referenceNumber.toLowerCase().includes(q)) ||
         (r.comments && r.comments.toLowerCase().includes(q)) ||
         (r.monthsCovered && r.monthsCovered.toLowerCase().includes(q)) ||
@@ -357,7 +371,7 @@ export default function ContractsView() {
           if (flt.column === 'receiptNumber') cellVal = r.receiptNumber;
           else if (flt.column === 'receiptDate') cellVal = r.receiptDate ? formatDate(r.receiptDate) : '';
           else if (flt.column === 'monthsCovered') cellVal = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
-          else if (flt.column === 'paymentMode') cellVal = r.paymentMode;
+          else if (flt.column === 'status') cellVal = r.status || 'Rented';
           else if (flt.column === 'referenceNumber') cellVal = r.referenceNumber;
           else if (flt.column === 'comments') cellVal = r.comments;
           else if (flt.column === 'totalAmount') cellVal = r.totalAmount;
@@ -393,7 +407,7 @@ export default function ContractsView() {
         'Date': r.receiptDate ? formatDate(r.receiptDate) : '',
         'Contract No': r.contractNo || selectedContract?.contractNo || '',
         'Month(s) Covered': r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '',
-        'Payment Mode': r.paymentMode || 'Cash',
+        'Status': r.status || 'Rented',
         'Ref / Cheque #': r.referenceNumber || '',
         'Comments': r.comments || '',
         'Amount Received (₹)': Number(r.totalAmount) || 0
@@ -471,7 +485,7 @@ export default function ContractsView() {
     setReceiptEditForm({
       receiptDate: r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       totalAmount: String(r.totalAmount || 0),
-      paymentMode: r.paymentMode || 'Cash',
+      status: r.status || 'Rented',
       referenceNumber: r.referenceNumber || '',
       comments: r.comments || ''
     });
@@ -485,7 +499,7 @@ export default function ContractsView() {
       const payload = {
         receiptDate: receiptEditForm.receiptDate,
         totalAmount: Number(receiptEditForm.totalAmount),
-        paymentMode: receiptEditForm.paymentMode,
+        status: receiptEditForm.status || 'Rented',
         referenceNumber: receiptEditForm.referenceNumber,
         comments: receiptEditForm.comments,
         allocations: (viewingReceipt.allocations || []).map(a => ({
@@ -1249,6 +1263,55 @@ export default function ContractsView() {
                           );
                         }
 
+                        if (colId === 'tenantPhone') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-xs text-slate-700 whitespace-nowrap">
+                              {c.tenantId?.phone || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'tenantEmail') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-xs text-slate-600 truncate max-w-xs" title={c.tenantId?.email}>
+                              {c.tenantId?.email || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'tenantCode') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 font-mono text-xs text-slate-700">
+                              {c.tenantId?.tenantCode || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'propertyCode') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 font-mono text-xs text-slate-700">
+                              {c.unitId?.propertyId?.propertyCode || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'unitCode') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 font-mono text-xs text-slate-700">
+                              {c.unitId?.unitCode || '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'subUnitArea') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right text-xs text-slate-700">
+                              {c.unitId?.areaSqFt ? `${c.unitId.areaSqFt} sq ft` : '—'}
+                            </td>
+                          );
+                        }
+                        if (colId === 'floor') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-xs text-slate-600">
+                              {c.unitId?.floor || '—'}
+                            </td>
+                          );
+                        }
                         if (colId === 'actions') {
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 text-center whitespace-nowrap">
@@ -1898,7 +1961,7 @@ export default function ContractsView() {
                   visibleColumns={receiptVisibleColumns}
                   onChangeVisibleColumns={(cols) => {
                     setReceiptVisibleColumns(cols);
-                    try { localStorage.setItem('cols_contract_receipts_v1', JSON.stringify(cols)); } catch(e){}
+                    try { localStorage.setItem('cols_contract_receipts_v2', JSON.stringify(cols)); } catch(e){}
                   }}
                   columnWidths={receiptColumnWidths}
                   onResetWidths={() => {}}
@@ -1990,20 +2053,38 @@ export default function ContractsView() {
                                   </td>
                                 );
                               }
-                              if (colId === 'monthsCovered') {
+                              if (colId === 'accountingMonth') {
+                                const acctM = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
                                 return (
-                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">
-                                    <span className="inline-block px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 font-bold text-[11px] border border-teal-200/60">
-                                      {r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '—'}
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap text-xs font-semibold text-slate-800 text-center">
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-teal-50 text-teal-800 border border-teal-200/60 font-bold text-[11px]">
+                                      {acctM ? formatMonthYear(acctM) : '—'}
                                     </span>
                                   </td>
                                 );
                               }
-                              if (colId === 'paymentMode') {
+                              if (colId === 'monthsCovered') {
+                                const rawM = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+                                const formatted = rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '—';
                                 return (
                                   <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">
-                                    <span className="inline-block px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold border border-slate-200">
-                                      {r.paymentMode || 'Cash'}
+                                    <span className="inline-block px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 font-bold text-[11px] border border-blue-200">
+                                      {formatted}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              if (colId === 'status') {
+                                const rStatus = r.status || 'Rented';
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      rStatus === 'Vacant'
+                                        ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                        : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    }`}>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${rStatus === 'Vacant' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                      {rStatus}
                                     </span>
                                   </td>
                                 );
@@ -2041,6 +2122,32 @@ export default function ContractsView() {
                                       <Edit2 className="w-3 h-3 text-teal-600" />
                                       <span>Edit</span>
                                     </button>
+                                  </td>
+                                );
+                              }
+                              if (colId === 'adjustmentAmount') {
+                                const adj = Number(r.adjustmentAmount) || 0;
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-xs">
+                                    {adj !== 0 ? (
+                                      <span className={adj > 0 ? 'text-blue-700' : 'text-amber-700'}>
+                                        {adj > 0 ? `+${formatCurrency(adj)}` : formatCurrency(adj)}
+                                      </span>
+                                    ) : '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'adjustmentDescription') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-xs text-slate-600 max-w-xs truncate" title={r.adjustmentDescription}>
+                                    {r.adjustmentDescription || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'createdAt' || colId === 'updatedAt') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-xs text-slate-600 whitespace-nowrap">
+                                    {r[colId] ? formatDate(r[colId]) : '—'}
                                   </td>
                                 );
                               }
@@ -2154,18 +2261,31 @@ export default function ContractsView() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Payment Mode</label>
-                  <select
-                    value={receiptEditForm.paymentMode}
-                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, paymentMode: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  >
-                    <option value="Cash">Cash</option>
-                    <option value="Bank Transfer / NEFT / RTGS">Bank Transfer</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="UPI / GPay">UPI / GPay</option>
-                    <option value="Other">Other</option>
-                  </select>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Status</label>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptEditForm({ ...receiptEditForm, status: 'Rented' })}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        receiptEditForm.status !== 'Vacant'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Rented
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptEditForm({ ...receiptEditForm, status: 'Vacant' })}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        receiptEditForm.status === 'Vacant'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Vacant
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Ref / Cheque #</label>

@@ -15,25 +15,81 @@ import ExpenseHeadsMasterView from './views/ExpenseHeadsMasterView';
 import LedgerReportsView from './views/LedgerReportsView';
 import MonthWiseReportView from './views/MonthWiseReportView';
 import API from './services/api';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Menu, Building2 } from 'lucide-react';
 import { useAppFontSize, useTableAutoWrap, APP_FONT_SIZES } from './components/ColumnManager';
+import { useModalBackHandler } from './utils/useModalBackHandler';
+
+const VALID_TABS = [
+  'dashboard',
+  'properties',
+  'partitions',
+  'tenants',
+  'contracts',
+  'pg',
+  'payments',
+  'expenses',
+  'expense_heads',
+  'month_wise_report',
+  'monthly',
+  'ledger_reports'
+];
+
+function getTabFromHash() {
+  if (typeof window === 'undefined') return null;
+  const raw = window.location.hash.replace(/^#\/?/, '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('reports_')) return raw;
+  if (VALID_TABS.includes(raw)) return raw;
+  return null;
+}
 
 export default function App() {
   const { fontSize, setFontSize, cycleFontSize } = useAppFontSize();
   const { autoWrap, toggleAutoWrap } = useTableAutoWrap();
-  const [user, setUser] = useState(null);
-  const [currentTab, setCurrentTab] = useState(() => {
+  // Synchronously initialize user from localStorage to eliminate any unauthenticated flash on navigation
+  const [user, setUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('property_rent_user');
+      const token = localStorage.getItem('property_rent_token');
+      if (token && savedUser) {
+        return JSON.parse(savedUser);
+      }
+    } catch (err) {
+      console.error('Failed to parse saved user:', err);
+    }
+    return null;
+  });
+
+  const [currentTab, setCurrentTabState] = useState(() => {
+    const fromHash = getTabFromHash();
+    if (fromHash) return fromHash;
     return localStorage.getItem('property_mgmt_active_tab') || 'dashboard';
   });
 
-  useEffect(() => {
-    if (currentTab) {
-      localStorage.setItem('property_mgmt_active_tab', currentTab);
+  const setCurrentTab = (newTab, options = {}) => {
+    const { replace = false } = options;
+    if (!newTab) return;
+
+    setCurrentTabState(newTab);
+    localStorage.setItem('property_mgmt_active_tab', newTab);
+
+    const targetHash = `#/${newTab}`;
+    if (window.location.hash !== targetHash) {
+      if (replace) {
+        window.history.replaceState({ tab: newTab }, '', targetHash);
+      } else {
+        window.history.pushState({ tab: newTab }, '', targetHash);
+      }
     }
-  }, [currentTab]);
+  };
 
   const [isInitialized, setIsInitialized] = useState(true);
-  const [authChecking, setAuthChecking] = useState(true);
+  const [authChecking, setAuthChecking] = useState(() => {
+    const token = localStorage.getItem('property_rent_token');
+    const savedUser = localStorage.getItem('property_rent_user');
+    return !(token && savedUser);
+  });
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [partitionPropertyFilter, setPartitionPropertyFilter] = useState('');
   const [partitionSearch, setPartitionSearch] = useState('');
@@ -41,6 +97,9 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem('property_sidebar_collapsed') === 'true';
   });
+
+  // Modal back button dismissal for Profile Modal
+  useModalBackHandler(showProfileModal, () => setShowProfileModal(false));
 
   const handleToggleSidebar = () => {
     setSidebarCollapsed(prev => {
@@ -61,6 +120,8 @@ export default function App() {
 
         if (token && savedUser) {
           setUser(JSON.parse(savedUser));
+        } else {
+          setUser(null);
         }
       } catch (err) {
         console.error('Auth verification error:', err);
@@ -72,14 +133,50 @@ export default function App() {
     checkAuthStatus();
   }, []);
 
+  // Hash & Browser History Listener
+  useEffect(() => {
+    if (!user) return;
+
+    // Anchor initial hash if missing
+    const initialHashTab = getTabFromHash() || currentTab || 'dashboard';
+    if (window.location.hash !== `#/${initialHashTab}`) {
+      window.history.replaceState({ tab: initialHashTab, appRoot: true }, '', `#/${initialHashTab}`);
+    }
+
+    const handlePopState = (e) => {
+      // If modal was dismissed via popstate, do not switch main tabs
+      if (e.state && e.state.modalOpen) {
+        return;
+      }
+
+      const tabFromHash = getTabFromHash();
+      if (tabFromHash) {
+        setCurrentTabState(tabFromHash);
+        localStorage.setItem('property_mgmt_active_tab', tabFromHash);
+      } else {
+        // Root boundary protection: if user pressed back past the initial hash,
+        // keep them inside the app on dashboard rather than exiting the application or logging out
+        window.history.pushState({ tab: 'dashboard', appRoot: true }, '', '#/dashboard');
+        setCurrentTabState('dashboard');
+        localStorage.setItem('property_mgmt_active_tab', 'dashboard');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [user]);
+
   const handleLoginSuccess = (userData) => {
     setUser(userData);
+    const activeTab = getTabFromHash() || localStorage.getItem('property_mgmt_active_tab') || 'dashboard';
+    window.history.replaceState({ tab: activeTab, appRoot: true }, '', `#/${activeTab}`);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('property_rent_token');
     localStorage.removeItem('property_rent_user');
     setUser(null);
+    window.history.replaceState(null, '', '#/');
   };
 
   const handleNavigateToPartitions = (propertyId = '', searchQuery = '') => {
@@ -228,6 +325,7 @@ export default function App() {
 
         {/* Dynamic Content Views */}
         <div className="flex-1 p-2 sm:p-2.5 md:p-3 w-full max-w-[1920px] mx-auto transition-all duration-300">
+          <ErrorBoundary>
           {currentTab === 'dashboard' && (
             <Dashboard
               onNavigateToPartitions={handleNavigateToPartitions}
@@ -270,6 +368,7 @@ export default function App() {
               onSelectReport={(reportTab) => setCurrentTab(reportTab)}
             />
           )}
+          </ErrorBoundary>
         </div>
       </main>
 

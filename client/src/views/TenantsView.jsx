@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
+import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import { Users, Plus, Search, Download, TrendingUp, Edit, Trash2, LogOut, RotateCcw, FileText, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -113,6 +114,11 @@ export default function TenantsView({ onDataChanged }) {
   const [attachContract, setAttachContract] = useState(false);
   const [showIncreaseModal, setShowIncreaseModal] = useState(false);
   const [showVacateModal, setShowVacateModal] = useState(false);
+
+  // Browser Back button navigation: dismiss tenant modals back to table
+  useModalBackHandler(showTenantModal, () => setShowTenantModal(false));
+  useModalBackHandler(showIncreaseModal, () => setShowIncreaseModal(false));
+  useModalBackHandler(showVacateModal, () => setShowVacateModal(false));
 
   // Tenant Form with integrated Property & Vacant Sub-unit selection
   // (email and tenantType are sent via payload defaults, not shown in form)

@@ -55,8 +55,9 @@ export default function PropertyMonthlyMatrixReport() {
       { id: 'partition', label: 'Partition', defaultVisible: true },
       { id: 'details', label: 'Property / Tenant / Head', defaultVisible: true },
     ];
-    if (reportData?.activeMonths) {
-      reportData.activeMonths.forEach(m => {
+    const mList = reportData?.months || reportData?.activeMonths || [];
+    if (mList.length > 0) {
+      mList.forEach(m => {
         list.push({ id: m.monthKey, label: m.shortLabel || m.monthName, defaultVisible: true });
       });
     }
@@ -73,8 +74,9 @@ export default function PropertyMonthlyMatrixReport() {
       total: 125,
       subtotal: 130
     };
-    if (reportData?.activeMonths) {
-      reportData.activeMonths.forEach(m => {
+    const mList = reportData?.months || reportData?.activeMonths || [];
+    if (mList.length > 0) {
+      mList.forEach(m => {
         map[m.monthKey] = 110;
       });
     }

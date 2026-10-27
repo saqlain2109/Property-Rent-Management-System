@@ -25,7 +25,7 @@ const REPORT_OPTIONS = [
     label: 'All Income', 
     shortLabel: 'All Income',
     icon: TrendingUp, 
-    desc: 'Full register of all rent income receipts, payment modes, and transactions' 
+    desc: 'Full register of all rent income receipts, occupancy statuses, and transactions' 
   },
   { 
     id: 'all_expense', 
