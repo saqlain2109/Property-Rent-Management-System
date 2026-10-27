@@ -34,6 +34,7 @@ const VALID_TABS = [
   'month_wise_report',
   'monthly',
   'rent_report',
+  'lease_contract_report',
   'ledger_reports'
 ];
 
@@ -364,7 +365,7 @@ export default function App() {
             <MonthWiseReportView />
           )}
 
-          {(currentTab === 'ledger_reports' || currentTab.startsWith('reports_') || currentTab === 'rent_report') && (
+          {(currentTab === 'ledger_reports' || currentTab.startsWith('reports_') || currentTab === 'rent_report' || currentTab === 'lease_contract_report') && (
             <LedgerReportsView 
               activeReportId={currentTab} 
               onSelectReport={(reportTab) => setCurrentTab(reportTab)}

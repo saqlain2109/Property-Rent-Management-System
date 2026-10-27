@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import PropertyMonthlyMatrixReport from './PropertyMonthlyMatrixReport';
 import MonthWiseReportView from './MonthWiseReportView';
 import RentReportView from './RentReportView';
+import LeaseContractReportView from './LeaseContractReportView';
 import AllIncomeReportView from './AllIncomeReportView';
 import AllExpenseReportView from './AllExpenseReportView';
 import LedgerView from './LedgerView';
 import ReportsView from './ReportsView';
 import { 
   Building2, BookOpen, Download, FileSpreadsheet, 
-  ChevronDown, Layers, CheckCircle2, Table, TrendingUp, TrendingDown
+  ChevronDown, Layers, CheckCircle2, Table, TrendingUp, TrendingDown, FileText
 } from 'lucide-react';
 
 const REPORT_OPTIONS = [
@@ -28,6 +29,15 @@ const REPORT_OPTIONS = [
     icon: Table, 
     badge: 'Month Paid For',
     desc: 'Property-wise rent matrix based on month paid for, with monthly columns, drilldown edit, and Excel export' 
+  },
+  { 
+    id: 'lease_contract', 
+    sidebarId: 'reports_lease_contract',
+    label: 'Lease Contract Report', 
+    shortLabel: 'Lease Contract Report',
+    icon: FileText, 
+    badge: 'Contracts Timeline',
+    desc: 'Property & partition contracted monthly rent timeline matrix with graphical line format and vacancy visualization' 
   },
   { 
     id: 'all_income', 
@@ -207,6 +217,7 @@ export default function LedgerReportsView({ activeReportId, onSelectReport }) {
       <div>
         {activeTab === 'month_wise' && <MonthWiseReportView />}
         {activeTab === 'rent_report' && <RentReportView />}
+        {activeTab === 'lease_contract' && <LeaseContractReportView />}
         {activeTab === 'all_income' && <AllIncomeReportView />}
         {activeTab === 'all_expense' && <AllExpenseReportView />}
         {activeTab === 'property_matrix' && <PropertyMonthlyMatrixReport />}

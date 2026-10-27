@@ -1998,6 +1998,550 @@ router.get('/export-property-monthly-matrix-excel', protect, async (req, res) =>
   }
 });
 
+// @route GET /api/reports/lease-contract-matrix
+// Returns lease contract monthly rate matrix by property & partition/unit with timeline details
+router.get('/lease-contract-matrix', protect, async (req, res) => {
+  try {
+    const filterYear = req.query.year || '2026';
+    let startMonth = req.query.startMonth || req.query.fromMonth || null;
+    let endMonth = req.query.endMonth || req.query.toMonth || null;
+    const tenantIdFilter = req.query.tenantId || null;
+    const propertyIdFilter = req.query.propertyId || null;
+
+    // Normalize startMonth and endMonth if given as single or two-digit month
+    if (startMonth && !startMonth.includes('-') && filterYear !== 'all') {
+      startMonth = `${filterYear}-${String(startMonth).padStart(2, '0')}`;
+    }
+    if (endMonth && !endMonth.includes('-') && filterYear !== 'all') {
+      endMonth = `${filterYear}-${String(endMonth).padStart(2, '0')}`;
+    }
+
+    // 1. Fetch properties & units
+    let propQuery = {};
+    if (propertyIdFilter) {
+      propQuery._id = propertyIdFilter;
+    }
+    const properties = await Property.find(propQuery).sort({ displayOrder: 1, name: 1 }).lean();
+    
+    let unitQuery = {};
+    if (propertyIdFilter) {
+      unitQuery.propertyId = propertyIdFilter;
+    }
+    const units = await Unit.find(unitQuery).sort({ displayOrder: 1, unitCode: 1 }).lean();
+
+    // Map units to property
+    const propUnitsMap = {};
+    properties.forEach(p => {
+      propUnitsMap[p._id.toString()] = [];
+    });
+    units.forEach(u => {
+      const pid = u.propertyId?.toString();
+      if (propUnitsMap[pid]) {
+        propUnitsMap[pid].push(u);
+      }
+    });
+
+    // 2. Fetch all tenants for filter dropdown
+    const allTenants = await Tenant.find({}).select('name tenantCode phone isActive').sort({ name: 1 }).lean();
+
+    // 3. Fetch assignments
+    const assignQuery = {
+      status: { $nin: ['Terminated', 'Cancelled'] }
+    };
+    if (tenantIdFilter) {
+      assignQuery.tenantId = tenantIdFilter;
+    }
+    const assignments = await TenantAssignment.find(assignQuery)
+      .populate('tenantId', 'name tenantCode phone')
+      .sort({ startDate: 1 })
+      .lean();
+
+    // 4. Fetch rent agreements
+    const assignIds = assignments.map(a => a._id);
+    const agreements = await RentAgreement.find({ assignmentId: { $in: assignIds } })
+      .sort({ effectiveFrom: 1 })
+      .lean();
+
+    const agMap = {};
+    agreements.forEach(ag => {
+      const k = String(ag.assignmentId);
+      if (!agMap[k]) agMap[k] = [];
+      agMap[k].push(ag);
+    });
+
+    // 5. Gather all years from assignments for dropdown
+    const availableYearsSet = new Set(['2026', '2025', '2024', '2027']);
+    assignments.forEach(a => {
+      if (a.startDate) {
+        availableYearsSet.add(new Date(a.startDate).getUTCFullYear().toString());
+      }
+      if (a.endDate) {
+        availableYearsSet.add(new Date(a.endDate).getUTCFullYear().toString());
+      }
+    });
+    const availableYears = Array.from(availableYearsSet).sort().reverse();
+
+    // 6. Build month range
+    let sortedMonths = [];
+    if (filterYear !== 'all') {
+      sortedMonths = Array.from({ length: 12 }, (_, i) => `${filterYear}-${String(i + 1).padStart(2, '0')}`);
+    } else {
+      let minYear = 2024;
+      let maxYear = 2026;
+      assignments.forEach(a => {
+        if (a.startDate) minYear = Math.min(minYear, new Date(a.startDate).getUTCFullYear());
+        if (a.endDate) maxYear = Math.max(maxYear, new Date(a.endDate).getUTCFullYear());
+      });
+      for (let y = minYear; y <= maxYear; y++) {
+        for (let m = 1; m <= 12; m++) {
+          sortedMonths.push(`${y}-${String(m).padStart(2, '0')}`);
+        }
+      }
+    }
+
+    if (startMonth) {
+      sortedMonths = sortedMonths.filter(m => m >= startMonth);
+    }
+    if (endMonth) {
+      sortedMonths = sortedMonths.filter(m => m <= endMonth);
+    }
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthLabels = sortedMonths.map(m => {
+      const [y, mo] = m.split('-').map(Number);
+      return {
+        key: m,
+        label: `${monthNames[mo - 1]} ${y}`,
+        shortLabel: monthNames[mo - 1],
+        month: mo,
+        year: y
+      };
+    });
+
+    // Group assignments by unitId string
+    const assignsByUnit = {};
+    assignments.forEach(a => {
+      const uid = String(a.unitId);
+      if (!assignsByUnit[uid]) assignsByUnit[uid] = [];
+      assignsByUnit[uid].push(a);
+    });
+
+    // 7. Calculate cells for each unit & property
+    const columnTotals = {};
+    const columnOccupiedCounts = {};
+    const columnVacantCounts = {};
+    sortedMonths.forEach(m => {
+      columnTotals[m] = 0;
+      columnOccupiedCounts[m] = 0;
+      columnVacantCounts[m] = 0;
+    });
+
+    let grandTotalPeriodRent = 0;
+    let totalUnitSlots = 0;
+    let totalOccupiedSlots = 0;
+
+    const rows = properties.map(p => {
+      const pid = p._id.toString();
+      const pUnits = propUnitsMap[pid] || [];
+
+      const propMonthlyRent = {};
+      const propMonthlyOccupied = {};
+      const propMonthlyVacant = {};
+      sortedMonths.forEach(m => {
+        propMonthlyRent[m] = 0;
+        propMonthlyOccupied[m] = 0;
+        propMonthlyVacant[m] = 0;
+      });
+
+      let propPeriodTotal = 0;
+
+      const childUnits = pUnits.map(u => {
+        const uid = u._id.toString();
+        const uAssigns = assignsByUnit[uid] || [];
+
+        const monthlyCells = {};
+        let unitPeriodTotal = 0;
+        let occupiedMonths = 0;
+        let activeTenantsInPeriod = new Set();
+        let lastKnownTenant = '';
+        let lastKnownContractNo = '';
+
+        sortedMonths.forEach(m => {
+          totalUnitSlots++;
+          const [yr, mo] = m.split('-').map(Number);
+          const mStartStr = `${m}-01`;
+          const lastDay = new Date(Date.UTC(yr, mo, 0)).getUTCDate();
+          const mEndStr = `${m}-${String(lastDay).padStart(2, '0')}`;
+
+          // Find active assignment in month m
+          const matchingAssigns = uAssigns.filter(a => {
+            const sStr = a.startDate ? new Date(a.startDate).toISOString().slice(0, 10) : '0000-01-01';
+            const eStr = a.endDate ? new Date(a.endDate).toISOString().slice(0, 10) : '9999-12-31';
+            return sStr <= mEndStr && eStr >= mStartStr;
+          });
+
+          let activeAssign = null;
+          if (matchingAssigns.length > 0) {
+            matchingAssigns.sort((a, b) => {
+              if (a.status === 'Active' && b.status !== 'Active') return -1;
+              if (b.status === 'Active' && a.status !== 'Active') return 1;
+              const aStart = a.startDate ? new Date(a.startDate).getTime() : 0;
+              const bStart = b.startDate ? new Date(b.startDate).getTime() : 0;
+              return bStart - aStart;
+            });
+            activeAssign = matchingAssigns[0];
+          }
+
+          if (activeAssign) {
+            const uAgs = agMap[String(activeAssign._id)] || [];
+            let matchingAg = uAgs.find(ag => {
+              const agStart = ag.effectiveFrom ? new Date(ag.effectiveFrom).toISOString().slice(0, 10) : '0000-01-01';
+              const agEnd = ag.effectiveTo ? new Date(ag.effectiveTo).toISOString().slice(0, 10) : '9999-12-31';
+              return agStart <= mEndStr && agEnd >= mStartStr;
+            });
+
+            if (!matchingAg) {
+              matchingAg = uAgs.find(ag => ag.isCurrentRate) || uAgs[uAgs.length - 1];
+            }
+
+            const rate = matchingAg ? Number(matchingAg.monthlyRate || 0) : Number(u.monthlyRentExpected || 0);
+            const tenantName = activeAssign.tenantId ? activeAssign.tenantId.name : 'Unknown';
+            const contractNo = activeAssign.contractNo || '';
+
+            monthlyCells[m] = {
+              rate: rate,
+              tenantName: tenantName,
+              tenantCode: activeAssign.tenantId?.tenantCode || '',
+              tenantId: activeAssign.tenantId?._id ? activeAssign.tenantId._id.toString() : '',
+              contractNo: contractNo,
+              contractType: activeAssign.contractType || 'Rent',
+              startDate: activeAssign.startDate,
+              endDate: activeAssign.endDate,
+              status: activeAssign.status,
+              isVacant: false
+            };
+
+            unitPeriodTotal += rate;
+            occupiedMonths++;
+            totalOccupiedSlots++;
+            activeTenantsInPeriod.add(tenantName);
+            lastKnownTenant = tenantName;
+            lastKnownContractNo = contractNo;
+
+            propMonthlyRent[m] += rate;
+            propMonthlyOccupied[m] += 1;
+            columnTotals[m] += rate;
+            columnOccupiedCounts[m] += 1;
+          } else {
+            // Vacant / unleased
+            monthlyCells[m] = {
+              rate: null,
+              isVacant: true
+            };
+            propMonthlyVacant[m] += 1;
+            columnVacantCounts[m] += 1;
+          }
+        });
+
+        propPeriodTotal += unitPeriodTotal;
+        grandTotalPeriodRent += unitPeriodTotal;
+
+        const occupancyPct = sortedMonths.length > 0 
+          ? Math.round((occupiedMonths / sortedMonths.length) * 100) 
+          : 0;
+
+        return {
+          unitId: uid,
+          unitCode: u.unitCode,
+          subUnitPartition: u.subUnitPartition || u.unitName || u.unitCode,
+          unitName: u.unitName || u.subUnitPartition || u.unitCode,
+          areaSqFt: u.areaSqFt || 0,
+          expectedRate: u.monthlyRentExpected || 0,
+          monthlyCells,
+          totalPeriodRent: unitPeriodTotal,
+          occupiedMonths,
+          vacantMonths: sortedMonths.length - occupiedMonths,
+          occupancyPct,
+          tenants: Array.from(activeTenantsInPeriod),
+          currentTenant: lastKnownTenant || 'Vacant',
+          contractNo: lastKnownContractNo || '-'
+        };
+      });
+
+      const totalPropUnits = pUnits.length;
+      const propOccupancyPct = (totalPropUnits > 0 && sortedMonths.length > 0)
+        ? Math.round((Object.values(propMonthlyOccupied).reduce((s, c) => s + c, 0) / (totalPropUnits * sortedMonths.length)) * 100)
+        : 0;
+
+      return {
+        propertyId: pid,
+        propertyName: p.name,
+        propertyCode: p.propertyCode,
+        propertyType: p.propertyType,
+        totalAreaSqFt: p.totalAreaSqFt || 0,
+        unitsCount: totalPropUnits,
+        monthlyRent: propMonthlyRent,
+        monthlyOccupied: propMonthlyOccupied,
+        monthlyVacant: propMonthlyVacant,
+        totalPeriodRent: propPeriodTotal,
+        occupancyPct: propOccupancyPct,
+        units: childUnits
+      };
+    });
+
+    const averageOccupancyPct = totalUnitSlots > 0
+      ? Math.round((totalOccupiedSlots / totalUnitSlots) * 100)
+      : 0;
+
+    const columnSummary = sortedMonths.map(m => ({
+      key: m,
+      totalRent: columnTotals[m] || 0,
+      occupiedUnits: columnOccupiedCounts[m] || 0,
+      vacantUnits: columnVacantCounts[m] || 0,
+      totalUnits: (columnOccupiedCounts[m] || 0) + (columnVacantCounts[m] || 0),
+      occupancyPct: ((columnOccupiedCounts[m] || 0) + (columnVacantCounts[m] || 0)) > 0
+        ? Math.round(((columnOccupiedCounts[m] || 0) / ((columnOccupiedCounts[m] || 0) + (columnVacantCounts[m] || 0))) * 100)
+        : 0
+    }));
+
+    res.json({
+      success: true,
+      year: filterYear,
+      startMonth,
+      endMonth,
+      tenantId: tenantIdFilter,
+      propertyId: propertyIdFilter,
+      months: sortedMonths,
+      monthLabels,
+      availableYears,
+      tenants: allTenants,
+      properties: properties.map(p => ({ _id: p._id, name: p.name, propertyCode: p.propertyCode })),
+      rows,
+      summary: {
+        grandTotalPeriodRent,
+        totalProperties: properties.length,
+        totalUnits: units.length,
+        totalUnitSlots,
+        totalOccupiedSlots,
+        averageOccupancyPct,
+        columnSummary
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching lease contract matrix report:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route GET /api/reports/export-lease-contract-matrix
+// Export lease contract matrix to Excel spreadsheet
+router.get('/export-lease-contract-matrix', protect, async (req, res) => {
+  try {
+    const filterYear = req.query.year || '2026';
+    let startMonth = req.query.startMonth || req.query.fromMonth || null;
+    let endMonth = req.query.endMonth || req.query.toMonth || null;
+    const tenantIdFilter = req.query.tenantId || null;
+    const propertyIdFilter = req.query.propertyId || null;
+
+    if (startMonth && !startMonth.includes('-') && filterYear !== 'all') {
+      startMonth = `${filterYear}-${String(startMonth).padStart(2, '0')}`;
+    }
+    if (endMonth && !endMonth.includes('-') && filterYear !== 'all') {
+      endMonth = `${filterYear}-${String(endMonth).padStart(2, '0')}`;
+    }
+
+    let propQuery = {};
+    if (propertyIdFilter) propQuery._id = propertyIdFilter;
+    const properties = await Property.find(propQuery).sort({ displayOrder: 1, name: 1 }).lean();
+
+    let unitQuery = {};
+    if (propertyIdFilter) unitQuery.propertyId = propertyIdFilter;
+    const units = await Unit.find(unitQuery).sort({ displayOrder: 1, unitCode: 1 }).lean();
+
+    const propUnitsMap = {};
+    properties.forEach(p => { propUnitsMap[p._id.toString()] = []; });
+    units.forEach(u => {
+      const pid = u.propertyId?.toString();
+      if (propUnitsMap[pid]) propUnitsMap[pid].push(u);
+    });
+
+    const assignQuery = { status: { $nin: ['Terminated', 'Cancelled'] } };
+    if (tenantIdFilter) assignQuery.tenantId = tenantIdFilter;
+    const assignments = await TenantAssignment.find(assignQuery)
+      .populate('tenantId', 'name tenantCode')
+      .sort({ startDate: 1 })
+      .lean();
+
+    const assignIds = assignments.map(a => a._id);
+    const agreements = await RentAgreement.find({ assignmentId: { $in: assignIds } }).lean();
+    const agMap = {};
+    agreements.forEach(ag => {
+      const k = String(ag.assignmentId);
+      if (!agMap[k]) agMap[k] = [];
+      agMap[k].push(ag);
+    });
+
+    let sortedMonths = [];
+    if (filterYear !== 'all') {
+      sortedMonths = Array.from({ length: 12 }, (_, i) => `${filterYear}-${String(i + 1).padStart(2, '0')}`);
+    } else {
+      let minYear = 2024, maxYear = 2026;
+      assignments.forEach(a => {
+        if (a.startDate) minYear = Math.min(minYear, new Date(a.startDate).getUTCFullYear());
+        if (a.endDate) maxYear = Math.max(maxYear, new Date(a.endDate).getUTCFullYear());
+      });
+      for (let y = minYear; y <= maxYear; y++) {
+        for (let m = 1; m <= 12; m++) sortedMonths.push(`${y}-${String(m).padStart(2, '0')}`);
+      }
+    }
+
+    if (startMonth) sortedMonths = sortedMonths.filter(m => m >= startMonth);
+    if (endMonth) sortedMonths = sortedMonths.filter(m => m <= endMonth);
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthHeaders = sortedMonths.map(m => {
+      const [y, mo] = m.split('-').map(Number);
+      return `${monthNames[mo - 1]} ${y}`;
+    });
+
+    const assignsByUnit = {};
+    assignments.forEach(a => {
+      const uid = String(a.unitId);
+      if (!assignsByUnit[uid]) assignsByUnit[uid] = [];
+      assignsByUnit[uid].push(a);
+    });
+
+    const sheetRows = [];
+    // Title block
+    sheetRows.push([`LEASE CONTRACT REPORT - MONTHLY RATE TIMELINE (${filterYear})`]);
+    sheetRows.push([`Period: ${sortedMonths[0] || ''} to ${sortedMonths[sortedMonths.length - 1] || ''} | Generated: ${new Date().toLocaleDateString('en-GB')}`]);
+    sheetRows.push([]); // blank line
+
+    // Header row
+    sheetRows.push([
+      'Sr No',
+      'Property',
+      'Partition / Unit',
+      'Unit Code',
+      'Contract No',
+      'Tenant Name',
+      ...monthHeaders,
+      'Total Period Rent',
+      'Occupancy %'
+    ]);
+
+    const colTotals = {};
+    sortedMonths.forEach(m => { colTotals[m] = 0; });
+    let overallPeriodRent = 0;
+    let srNo = 1;
+
+    properties.forEach(p => {
+      const pid = p._id.toString();
+      const pUnits = propUnitsMap[pid] || [];
+      if (pUnits.length === 0) return;
+
+      pUnits.forEach(u => {
+        const uid = u._id.toString();
+        const uAssigns = assignsByUnit[uid] || [];
+        let unitTotal = 0;
+        let occupiedCount = 0;
+        let lastTenant = '';
+        let lastContract = '';
+
+        const monthVals = sortedMonths.map(m => {
+          const [yr, mo] = m.split('-').map(Number);
+          const mStartStr = `${m}-01`;
+          const lastDay = new Date(Date.UTC(yr, mo, 0)).getUTCDate();
+          const mEndStr = `${m}-${String(lastDay).padStart(2, '0')}`;
+
+          const matchingAssigns = uAssigns.filter(a => {
+            const sStr = a.startDate ? new Date(a.startDate).toISOString().slice(0, 10) : '0000-01-01';
+            const eStr = a.endDate ? new Date(a.endDate).toISOString().slice(0, 10) : '9999-12-31';
+            return sStr <= mEndStr && eStr >= mStartStr;
+          });
+
+          if (matchingAssigns.length > 0) {
+            matchingAssigns.sort((a, b) => (b.startDate ? new Date(b.startDate).getTime() : 0) - (a.startDate ? new Date(a.startDate).getTime() : 0));
+            const activeAssign = matchingAssigns[0];
+            const uAgs = agMap[String(activeAssign._id)] || [];
+            let matchingAg = uAgs.find(ag => {
+              const agStart = ag.effectiveFrom ? new Date(ag.effectiveFrom).toISOString().slice(0, 10) : '0000-01-01';
+              const agEnd = ag.effectiveTo ? new Date(ag.effectiveTo).toISOString().slice(0, 10) : '9999-12-31';
+              return agStart <= mEndStr && agEnd >= mStartStr;
+            }) || uAgs[0];
+
+            const rate = matchingAg ? Number(matchingAg.monthlyRate || 0) : Number(u.monthlyRentExpected || 0);
+            unitTotal += rate;
+            occupiedCount++;
+            colTotals[m] += rate;
+            lastTenant = activeAssign.tenantId?.name || '';
+            lastContract = activeAssign.contractNo || '';
+            return rate;
+          } else {
+            return ''; // Blank for vacant
+          }
+        });
+
+        overallPeriodRent += unitTotal;
+        const occPct = sortedMonths.length > 0 ? `${Math.round((occupiedCount / sortedMonths.length) * 100)}%` : '0%';
+
+        sheetRows.push([
+          srNo++,
+          p.name,
+          u.subUnitPartition || u.unitName || u.unitCode,
+          u.unitCode,
+          lastContract || '-',
+          lastTenant || 'Vacant',
+          ...monthVals,
+          unitTotal,
+          occPct
+        ]);
+      });
+    });
+
+    // Summary row
+    sheetRows.push([]);
+    sheetRows.push([
+      '',
+      'TOTAL CONTRACTED LEASE RENT',
+      '',
+      '',
+      '',
+      '',
+      ...sortedMonths.map(m => colTotals[m] || 0),
+      overallPeriodRent,
+      ''
+    ]);
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetRows);
+
+    ws['!cols'] = [
+      { wch: 8 },  // Sr No
+      { wch: 30 }, // Property
+      { wch: 25 }, // Partition
+      { wch: 14 }, // Unit Code
+      { wch: 16 }, // Contract No
+      { wch: 24 }, // Tenant
+      ...sortedMonths.map(() => ({ wch: 13 })),
+      { wch: 18 }, // Total Period Rent
+      { wch: 14 }  // Occupancy %
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Lease Contracts');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `Lease_Contract_Report_${filterYear}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error exporting lease contract matrix:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+
 
 
 module.exports = router;

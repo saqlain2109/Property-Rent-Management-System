@@ -21,7 +21,7 @@ export default function Sidebar({
 }) {
   const sidebarRef = useRef(null);
   const isMasterTab = ['masters', 'properties', 'partitions', 'tenants', 'contracts', 'expense_heads', 'pg'].includes(currentTab);
-  const isReportsTab = ['ledger_reports', 'month_wise_report', 'monthly', 'reports_month_wise', 'rent_report', 'reports_rent', 'reports_all_income', 'reports_all_expense', 'reports_matrix', 'reports_summary', 'reports_statement', 'reports_ledger', 'reports_export'].includes(currentTab);
+  const isReportsTab = ['ledger_reports', 'month_wise_report', 'monthly', 'reports_month_wise', 'rent_report', 'reports_rent', 'reports_lease_contract', 'lease_contract_report', 'reports_all_income', 'reports_all_expense', 'reports_matrix', 'reports_summary', 'reports_statement', 'reports_ledger', 'reports_export'].includes(currentTab);
   
   const [mastersExpanded, setMastersExpanded] = useState(true);
   const [reportsExpanded, setReportsExpanded] = useState(true);
@@ -114,6 +114,7 @@ export default function Sidebar({
   const reportsSubItems = [
     { id: 'reports_month_wise', label: 'Month wise Report', icon: Table },
     { id: 'reports_rent',       label: 'Rent report', icon: Table, badge: 'Paid For' },
+    { id: 'reports_lease_contract', label: 'Lease Contract Report', icon: FileText, badge: 'Contract' },
     { id: 'reports_all_income', label: 'All Income', icon: TrendingUp },
     { id: 'reports_all_expense', label: 'All Expense', icon: TrendingDown },
     { id: 'reports_matrix',     label: 'Property Monthly Matrix', icon: FileSpreadsheet, badge: 'Sheet 1' },
