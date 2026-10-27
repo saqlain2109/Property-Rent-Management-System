@@ -1851,7 +1851,7 @@ export default function PaymentsView() {
   }, 0);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 w-full min-w-0">
       {/* Top Header Card */}
       <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">

@@ -238,7 +238,7 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto overflow-x-hidden">
         {/* Mobile Header Bar */}
         <div className="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 text-white shrink-0">
           <div className="flex items-center gap-3">
@@ -325,7 +325,7 @@ export default function App() {
         )}
 
         {/* Dynamic Content Views */}
-        <div className="flex-1 p-2 sm:p-2.5 md:p-3 w-full max-w-[1920px] mx-auto transition-all duration-300">
+        <div className="flex-1 min-w-0 p-2 sm:p-2.5 md:p-3 w-full max-w-[1920px] mx-auto transition-all duration-300">
           <ErrorBoundary>
           {currentTab === 'dashboard' && (
             <Dashboard
@@ -377,7 +377,7 @@ export default function App() {
       {/* <FloatingChatbot /> */}
 
       {/* Global On-Screen Table Horizontal Scroll Navigator */}
-      <GlobalTableScrollNavigator />
+      {/* <GlobalTableScrollNavigator /> */}
     </div>
   );
 }

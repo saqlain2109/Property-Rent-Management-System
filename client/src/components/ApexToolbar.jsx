@@ -476,9 +476,9 @@ export default function ApexToolbar({
   return (
     <div className="space-y-2 relative z-50">
       {/* Top Toolbar Container - Aligned cleanly in One Single Line */}
-      <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-xs select-none relative z-50">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-xs select-none relative z-50 w-full min-w-0">
         {/* Left Side: Search, Rows dropdown, Actions Menu, Views, Wrap, Download */}
-        <div className="flex items-center gap-2 shrink-0 relative z-50">
+        <div className="flex flex-wrap items-center gap-2 relative z-50">
           {/* Search Box */}
           <div className="relative min-w-[150px] max-w-[220px]">
             <input
@@ -949,7 +949,7 @@ export default function ApexToolbar({
         </div>
 
         {/* Right Side: Quick Action (e.g. Filters) & Download in one clean line */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           {primaryAction}
 
           {/* On-Screen Horizontal Scroll Buttons */}
