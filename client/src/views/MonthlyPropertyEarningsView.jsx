@@ -335,6 +335,17 @@ export default function MonthlyPropertyEarningsView({
       if (key === 'property') {
         return mult * (a.propertyName || '').localeCompare(b.propertyName || '');
       }
+      if (key === 'propertyCode') {
+        return mult * (a.propertyCode || '').localeCompare(b.propertyCode || '');
+      }
+      if (key === 'propertyType') {
+        return mult * (a.propertyType || '').localeCompare(b.propertyType || '');
+      }
+      if (key === 'unitsCount') {
+        const countA = a.unitsCount !== undefined ? a.unitsCount : (a.childUnits?.length || 0);
+        const countB = b.unitsCount !== undefined ? b.unitsCount : (b.childUnits?.length || 0);
+        return mult * (countA - countB);
+      }
       if (key === 'total') {
         return mult * ((a.total || 0) - (b.total || 0));
       }

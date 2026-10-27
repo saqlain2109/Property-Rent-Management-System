@@ -250,6 +250,99 @@ export default function PropertyMonthlyMatrixReport() {
     }).filter(g => g.heads.length > 0);
   }, [reportData, search]);
 
+  // Sorted Rent Groups and Units
+  const sortedRentGroups = useMemo(() => {
+    let groups = [...filteredRentGroups];
+    if (!sortConfig.key || !sortConfig.direction) return groups;
+
+    const { key, direction } = sortConfig;
+    const isAsc = direction === 'asc';
+
+    return groups.map(grp => {
+      const sortedUnits = [...grp.units].sort((a, b) => {
+        let valA, valB;
+        if (key === 'partition') {
+          valA = a.label || '';
+          valB = b.label || '';
+        } else if (key === 'details') {
+          valA = a.tenant || grp.propertyName || '';
+          valB = b.tenant || grp.propertyName || '';
+        } else if (key === 'total') {
+          valA = a.total || 0;
+          valB = b.total || 0;
+        } else if (key === 'order') {
+          valA = a.srNo || 0;
+          valB = b.srNo || 0;
+        } else {
+          // Month column
+          valA = a.months?.[key] || 0;
+          valB = b.months?.[key] || 0;
+        }
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return isAsc ? valA - valB : valB - valA;
+        }
+        return isAsc 
+          ? String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' })
+          : String(valB).localeCompare(String(valA), undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      return {
+        ...grp,
+        units: sortedUnits
+      };
+    }).sort((a, b) => {
+      if (key === 'details') {
+        return isAsc
+          ? a.propertyName.localeCompare(b.propertyName)
+          : b.propertyName.localeCompare(a.propertyName);
+      }
+      if (key === 'total') {
+        const totA = a.units.reduce((s, u) => s + (u.total || 0), 0);
+        const totB = b.units.reduce((s, u) => s + (u.total || 0), 0);
+        return isAsc ? totA - totB : totB - totA;
+      }
+      return 0;
+    });
+  }, [filteredRentGroups, sortConfig]);
+
+  // Sorted Expense Groups and Heads
+  const sortedExpenseGroups = useMemo(() => {
+    let groups = [...filteredExpenseGroups];
+    if (!sortConfig.key || !sortConfig.direction) return groups;
+
+    const { key, direction } = sortConfig;
+    const isAsc = direction === 'asc';
+
+    return groups.map(grp => {
+      const sortedHeads = [...grp.heads].sort((a, b) => {
+        let valA, valB;
+        if (key === 'details' || key === 'partition') {
+          valA = a.headName || '';
+          valB = b.headName || '';
+        } else if (key === 'total') {
+          valA = a.total || 0;
+          valB = b.total || 0;
+        } else {
+          valA = a.months?.[key] || 0;
+          valB = b.months?.[key] || 0;
+        }
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return isAsc ? valA - valB : valB - valA;
+        }
+        return isAsc 
+          ? String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' })
+          : String(valB).localeCompare(String(valA), undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      return {
+        ...grp,
+        heads: sortedHeads
+      };
+    });
+  }, [filteredExpenseGroups, sortConfig]);
+
   // Overall KPI sums calculated across active (visible) months
   const kpis = useMemo(() => {
     if (!reportData) return { totalRent: 0, totalIncome: 0, totalExpenses: 0, difference: 0, closingBalance: 0 };
@@ -603,7 +696,7 @@ export default function PropertyMonthlyMatrixReport() {
                       </td>
                     </tr>
 
-                    {filteredRentGroups.map(grp => (
+                    {sortedRentGroups.map(grp => (
                       <React.Fragment key={`rent_grp_${grp.order}_${grp.propertyName}`}>
                         {/* Property Group Header Row */}
                         <tr className="bg-slate-100/90 font-extrabold text-slate-900 border-t border-b border-slate-300">
@@ -776,7 +869,7 @@ export default function PropertyMonthlyMatrixReport() {
                       </td>
                     </tr>
 
-                    {filteredExpenseGroups.map(grp => (
+                    {sortedExpenseGroups.map(grp => (
                       <React.Fragment key={`exp_grp_${grp.order}_${grp.groupName}`}>
                         {/* Expense Group Header Row */}
                         <tr className="bg-slate-100/90 font-extrabold text-slate-900 border-t border-b border-slate-300">

@@ -9,6 +9,7 @@ import {
   Users, Sparkles, X, Eye, EyeOff, FileText, Check, ShieldCheck, Table
 } from 'lucide-react';
 import ApexToolbar from '../components/ApexToolbar';
+import { cycleThreeStateSort } from '../utils/tableUtils';
 import { 
   useFrozenColumns, 
   getFrozenColumnStyle, 
@@ -84,10 +85,16 @@ export default function LeaseContractReportView() {
   const [selectedCellInfo, setSelectedCellInfo] = useState(null);
 
   // Column management & layout
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('lease_contract_freeze_v1', 0);
   const { autoWrap } = useTableAutoWrap();
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [visibleColumns, setVisibleColumns] = useState([]);
+
+  const handleHeaderSort = (colId) => {
+    if (colId === 'index') return;
+    setSortConfig(prev => cycleThreeStateSort(prev, colId));
+  };
 
   // Persist filters
   useEffect(() => {
@@ -236,6 +243,81 @@ export default function LeaseContractReportView() {
       };
     }).filter(p => p.matchesSearch || (p.units && p.units.length > 0));
   }, [reportData, searchTerm]);
+
+  // Sorted Rows & Units based on sortConfig
+  const sortedRows = useMemo(() => {
+    let rows = [...filteredRows];
+    if (!sortConfig.key || !sortConfig.direction) return rows;
+
+    const { key, direction } = sortConfig;
+    const isAsc = direction === 'asc';
+
+    return rows.map(p => {
+      const sortedUnits = [...(p.units || [])].sort((a, b) => {
+        let valA, valB;
+        if (key === 'partition') {
+          valA = a.subUnitPartition || '';
+          valB = b.subUnitPartition || '';
+        } else if (key === 'unitCode') {
+          valA = a.unitCode || '';
+          valB = b.unitCode || '';
+        } else if (key === 'tenant') {
+          valA = a.currentTenant || '';
+          valB = b.currentTenant || '';
+        } else if (key === 'contractNo') {
+          valA = a.contractNo || '';
+          valB = b.contractNo || '';
+        } else if (key === 'total') {
+          valA = a.totalPeriodRent || 0;
+          valB = b.totalPeriodRent || 0;
+        } else if (key === 'occupancy') {
+          valA = a.occupancyPct || 0;
+          valB = b.occupancyPct || 0;
+        } else {
+          // Month column
+          valA = a.monthlyCells?.[key]?.rate || 0;
+          valB = b.monthlyCells?.[key]?.rate || 0;
+        }
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return isAsc ? valA - valB : valB - valA;
+        }
+        return isAsc
+          ? String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' })
+          : String(valB).localeCompare(String(valA), undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      return {
+        ...p,
+        units: sortedUnits
+      };
+    }).sort((a, b) => {
+      let valA, valB;
+      if (key === 'partition') {
+        valA = a.propertyName || '';
+        valB = b.propertyName || '';
+      } else if (key === 'unitCode') {
+        valA = a.propertyCode || '';
+        valB = b.propertyCode || '';
+      } else if (key === 'total') {
+        valA = a.totalPeriodRent || 0;
+        valB = b.totalPeriodRent || 0;
+      } else if (key === 'occupancy') {
+        valA = a.occupancyPct || 0;
+        valB = b.occupancyPct || 0;
+      } else {
+        valA = a.monthlyRent?.[key] || 0;
+        valB = b.monthlyRent?.[key] || 0;
+      }
+
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return isAsc ? valA - valB : valB - valA;
+      }
+      return isAsc
+        ? String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' })
+        : String(valB).localeCompare(String(valA), undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [filteredRows, sortConfig]);
 
   // Toggle single property expand/collapse
   const toggleProperty = (propId) => {
@@ -603,6 +685,8 @@ export default function LeaseContractReportView() {
         onChangeVisibleColumns={setVisibleColumns}
         columnWidths={columnWidths}
         onResetWidths={resetColumnWidths}
+        sortConfig={sortConfig}
+        onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={() => setIsHeaderSticky(!isHeaderSticky)}
         frozenColumnCount={frozenColumnCount}
@@ -619,7 +703,7 @@ export default function LeaseContractReportView() {
             <p className="text-sm font-bold text-slate-800">Calculating lease contract matrix...</p>
             <p className="text-xs text-slate-400 mt-1">Retrieving contracted monthly rates and active assignments</p>
           </div>
-        ) : filteredRows.length === 0 ? (
+        ) : sortedRows.length === 0 ? (
           <div className="py-20 text-center text-slate-400">
             <Building2 className="w-10 h-10 mx-auto mb-2 text-slate-300" />
             <p className="text-sm font-bold text-slate-600">No matching lease records found</p>
@@ -637,29 +721,109 @@ export default function LeaseContractReportView() {
                   >
                     #
                   </th>
+
+                  {/* Partition / Property */}
                   <th 
                     style={{ width: columnWidths['partition'] || 240 }}
                     className="p-2.5 border-r border-slate-200 bg-slate-50 min-w-[200px]"
                   >
-                    Property / Partition
+                    <button
+                      type="button"
+                      onClick={() => handleHeaderSort('partition')}
+                      className="group/btn flex items-center gap-1.5 w-full text-left font-black cursor-pointer hover:text-emerald-700 transition-colors"
+                      title="Sort by Property / Partition"
+                    >
+                      <span className="truncate">Property / Partition</span>
+                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                        {sortConfig.key === 'partition' ? (
+                          sortConfig.direction === 'desc' ? (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↓</span>
+                          ) : (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↑</span>
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                      </span>
+                    </button>
                   </th>
+
+                  {/* Unit Code */}
                   <th 
                     style={{ width: columnWidths['unitCode'] || 120 }}
                     className="p-2.5 border-r border-slate-200 bg-slate-50 min-w-[110px]"
                   >
-                    Unit Code
+                    <button
+                      type="button"
+                      onClick={() => handleHeaderSort('unitCode')}
+                      className="group/btn flex items-center gap-1.5 w-full text-left font-black cursor-pointer hover:text-emerald-700 transition-colors"
+                      title="Sort by Unit Code"
+                    >
+                      <span className="truncate">Unit Code</span>
+                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                        {sortConfig.key === 'unitCode' ? (
+                          sortConfig.direction === 'desc' ? (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↓</span>
+                          ) : (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↑</span>
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                      </span>
+                    </button>
                   </th>
+
+                  {/* Current Tenant */}
                   <th 
                     style={{ width: columnWidths['tenant'] || 180 }}
                     className="p-2.5 border-r border-slate-200 bg-slate-50 min-w-[150px]"
                   >
-                    Current Tenant
+                    <button
+                      type="button"
+                      onClick={() => handleHeaderSort('tenant')}
+                      className="group/btn flex items-center gap-1.5 w-full text-left font-black cursor-pointer hover:text-emerald-700 transition-colors"
+                      title="Sort by Current Tenant"
+                    >
+                      <span className="truncate">Current Tenant</span>
+                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                        {sortConfig.key === 'tenant' ? (
+                          sortConfig.direction === 'desc' ? (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↓</span>
+                          ) : (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↑</span>
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                      </span>
+                    </button>
                   </th>
+
+                  {/* Contract No */}
                   <th 
                     style={{ width: columnWidths['contractNo'] || 140 }}
                     className="p-2.5 border-r border-slate-200 bg-slate-50 min-w-[130px]"
                   >
-                    Contract No
+                    <button
+                      type="button"
+                      onClick={() => handleHeaderSort('contractNo')}
+                      className="group/btn flex items-center gap-1.5 w-full text-left font-black cursor-pointer hover:text-emerald-700 transition-colors"
+                      title="Sort by Contract No"
+                    >
+                      <span className="truncate">Contract No</span>
+                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                        {sortConfig.key === 'contractNo' ? (
+                          sortConfig.direction === 'desc' ? (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↓</span>
+                          ) : (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↑</span>
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                      </span>
+                    </button>
                   </th>
 
                   {/* Monthly Columns */}
@@ -667,33 +831,90 @@ export default function LeaseContractReportView() {
                     <th
                       key={m.key}
                       style={{ width: columnWidths[m.key] || 125 }}
-                      className="p-2.5 text-center border-r border-slate-200 bg-slate-50/90 font-black min-w-[115px]"
+                      className="p-2 text-center border-r border-slate-200 bg-slate-50/90 font-black min-w-[115px]"
                     >
-                      <div className="leading-tight">
-                        <span className="block text-[11px] text-slate-900">{m.shortLabel}</span>
-                        <span className="text-[9px] font-bold text-slate-400">{m.year}</span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleHeaderSort(m.key)}
+                        className="group/btn inline-flex flex-col items-center justify-center w-full cursor-pointer hover:text-emerald-700 transition-colors"
+                        title={`Sort by ${m.label}`}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span className="block text-[11px] text-slate-900 leading-tight">{m.shortLabel}</span>
+                          <span className="inline-flex shrink-0 items-center justify-center w-3 h-3">
+                            {sortConfig.key === m.key ? (
+                              sortConfig.direction === 'desc' ? (
+                                <span className="text-emerald-700 font-extrabold text-[11px] leading-none">↓</span>
+                              ) : (
+                                <span className="text-emerald-700 font-extrabold text-[11px] leading-none">↑</span>
+                              )
+                            ) : (
+                              <ArrowUpDown className="w-2.5 h-2.5 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                            )}
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-400 leading-none">{m.year}</span>
+                      </button>
                     </th>
                   ))}
 
+                  {/* Total Leased Rent */}
                   <th 
                     style={{ width: columnWidths['total'] || 140 }}
                     className="p-2.5 text-right border-r border-slate-200 bg-emerald-50 text-emerald-950 font-black min-w-[130px]"
                   >
-                    Total Leased Rent
+                    <button
+                      type="button"
+                      onClick={() => handleHeaderSort('total')}
+                      className="group/btn flex items-center justify-end gap-1.5 w-full font-black cursor-pointer hover:text-emerald-700 transition-colors"
+                      title="Sort by Total Leased Rent"
+                    >
+                      <span className="truncate">Total Leased Rent</span>
+                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                        {sortConfig.key === 'total' ? (
+                          sortConfig.direction === 'desc' ? (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↓</span>
+                          ) : (
+                            <span className="text-emerald-700 font-extrabold text-[13px] leading-none">↑</span>
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                      </span>
+                    </button>
                   </th>
+
+                  {/* Occupancy % */}
                   <th 
                     style={{ width: columnWidths['occupancy'] || 110 }}
                     className="p-2.5 text-center bg-teal-50 text-teal-950 font-black min-w-[100px]"
                   >
-                    Occupancy
+                    <button
+                      type="button"
+                      onClick={() => handleHeaderSort('occupancy')}
+                      className="group/btn flex items-center justify-center gap-1.5 w-full font-black cursor-pointer hover:text-teal-700 transition-colors"
+                      title="Sort by Occupancy %"
+                    >
+                      <span className="truncate">Occupancy</span>
+                      <span className="inline-flex shrink-0 items-center justify-center w-3.5 h-3.5">
+                        {sortConfig.key === 'occupancy' ? (
+                          sortConfig.direction === 'desc' ? (
+                            <span className="text-teal-700 font-extrabold text-[13px] leading-none">↓</span>
+                          ) : (
+                            <span className="text-teal-700 font-extrabold text-[13px] leading-none">↑</span>
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                        )}
+                      </span>
+                    </button>
                   </th>
                 </tr>
               </thead>
 
               {/* Body */}
               <tbody className="divide-y divide-slate-200">
-                {filteredRows.map((prop, pIdx) => {
+                {sortedRows.map((prop, pIdx) => {
                   const isExpanded = !!expandedProperties[prop.propertyId];
                   const childUnits = prop.units || [];
 

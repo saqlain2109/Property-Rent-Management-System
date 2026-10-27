@@ -1,4 +1,4 @@
-import { formatDate } from './formatters';
+import { formatDate } from './formatters.js';
 
 /**
  * 3-State Sort Cycling:
@@ -103,32 +103,60 @@ export function evaluateFilterRule(srcVal, operator, filterVal) {
 
 /**
  * Generic sorting utility for table rows
+ * Supports:
+ * - sortDataRows(rows, sortConfig, valueExtractors)
+ * - sortDataRows(rows, sortKey, direction, customExtractor)
+ * - valueExtractors as an object of functions OR as a single extractor function (item, key) => val
  */
-export function sortDataRows(rows, sortConfig, valueExtractors = {}) {
-  if (!sortConfig || !sortConfig.key || !sortConfig.direction) {
+export function sortDataRows(rows, sortConfigOrKey, directionOrExtractors = {}, maybeExtractor = null) {
+  if (!rows || !Array.isArray(rows) || rows.length === 0) return [];
+
+  let key = null;
+  let direction = null;
+  let extractor = null;
+
+  if (typeof sortConfigOrKey === 'string') {
+    key = sortConfigOrKey;
+    direction = typeof directionOrExtractors === 'string' ? directionOrExtractors : 'asc';
+    extractor = maybeExtractor || (typeof directionOrExtractors === 'function' ? directionOrExtractors : null);
+  } else if (sortConfigOrKey && typeof sortConfigOrKey === 'object') {
+    key = sortConfigOrKey.key;
+    direction = sortConfigOrKey.direction;
+    extractor = directionOrExtractors;
+  }
+
+  if (!key || !direction) {
     return rows;
   }
 
-  const { key, direction } = sortConfig;
-  const isAsc = direction === 'asc';
+  const isAsc = String(direction).toLowerCase() === 'asc';
 
   return [...rows].sort((a, b) => {
     let valA;
     let valB;
 
-    if (valueExtractors[key]) {
-      valA = valueExtractors[key](a);
-      valB = valueExtractors[key](b);
+    if (typeof extractor === 'function') {
+      valA = extractor(a, key);
+      valB = extractor(b, key);
+    } else if (extractor && typeof extractor === 'object' && typeof extractor[key] === 'function') {
+      valA = extractor[key](a);
+      valB = extractor[key](b);
     } else {
-      valA = a[key];
-      valB = b[key];
+      valA = a ? a[key] : undefined;
+      valB = b ? b[key] : undefined;
     }
 
-    if (valA === null || valA === undefined) return isAsc ? 1 : -1;
-    if (valB === null || valB === undefined) return isAsc ? -1 : 1;
+    if (valA === valB) return 0;
+    if (valA === null || valA === undefined || valA === '') return isAsc ? 1 : -1;
+    if (valB === null || valB === undefined || valB === '') return isAsc ? -1 : 1;
 
-    // Check if both are dates or date strings
-    if (key === 'createdAt' || key === 'updatedAt' || key === 'startDate' || key === 'endDate' || key === 'receiptDate') {
+    // Both are numbers
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return isAsc ? valA - valB : valB - valA;
+    }
+
+    // Date check (Date instance or YYYY-MM / YYYY-MM-DD string)
+    if (valA instanceof Date || valB instanceof Date || (typeof valA === 'string' && /^\d{4}-\d{2}/.test(valA))) {
       const dateA = new Date(valA).getTime();
       const dateB = new Date(valB).getTime();
       if (!isNaN(dateA) && !isNaN(dateB)) {
@@ -136,19 +164,17 @@ export function sortDataRows(rows, sortConfig, valueExtractors = {}) {
       }
     }
 
-    // Check if both are numbers
-    const numA = typeof valA === 'number' ? valA : Number(String(valA).replace(/[^\d.-]/g, ''));
-    const numB = typeof valB === 'number' ? valB : Number(String(valB).replace(/[^\d.-]/g, ''));
-    if (!isNaN(numA) && !isNaN(numB) && typeof valA !== 'boolean' && typeof valB !== 'boolean' && String(valA).match(/\d/) && String(valB).match(/\d/)) {
-      return isAsc ? numA - numB : numB - numA;
+    // Number strings check (e.g. ₹9,500 vs ₹10,500)
+    const rawA = String(valA).replace(/^[₹$\s,]+|[₹$\s,]+$/g, '').replace(/,/g, '');
+    const rawB = String(valB).replace(/^[₹$\s,]+|[₹$\s,]+$/g, '').replace(/,/g, '');
+    if (rawA !== '' && rawB !== '' && !isNaN(Number(rawA)) && !isNaN(Number(rawB))) {
+      return isAsc ? Number(rawA) - Number(rawB) : Number(rawB) - Number(rawA);
     }
 
-    // String comparison
-    const strA = String(valA).toLowerCase();
-    const strB = String(valB).toLowerCase();
-    if (strA < strB) return isAsc ? -1 : 1;
-    if (strA > strB) return isAsc ? 1 : -1;
-    return 0;
+    // String comparison (natural numeric sort)
+    return isAsc
+      ? String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' })
+      : String(valB).localeCompare(String(valA), undefined, { numeric: true, sensitivity: 'base' });
   });
 }
 

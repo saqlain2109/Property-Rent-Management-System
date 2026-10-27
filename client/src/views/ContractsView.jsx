@@ -376,7 +376,7 @@ export default function ContractsView() {
 
     // 3. Sorting
     if (receiptSortConfig.key) {
-      rows = sortDataRows(rows, receiptSortConfig.key, receiptSortConfig.direction, (item, key) => {
+      rows = sortDataRows(rows, receiptSortConfig, (item, key) => {
         if (key === 'totalAmount') return Number(item.totalAmount) || 0;
         if (key === 'receiptDate') return item.receiptDate ? new Date(item.receiptDate).getTime() : 0;
         if (key === 'monthsCovered') return item.monthsCovered || (item.allocations && item.allocations.map(a => a.rentMonthYear).join(', ')) || '';

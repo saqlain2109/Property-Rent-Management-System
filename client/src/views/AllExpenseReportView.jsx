@@ -292,7 +292,7 @@ export default function AllExpenseReportView() {
 
     // 3. Sorting (supports all backend columns)
     if (sortConfig.key) {
-      rows = sortDataRows(rows, sortConfig.key, sortConfig.direction, (item, key) => {
+      rows = sortDataRows(rows, sortConfig, (item, key) => {
         if (key === 'amount') return Number(item.amount) || 0;
         if (['expenseDate', 'createdAt', 'updatedAt'].includes(key)) {
           return item[key] ? new Date(item[key]).getTime() : 0;

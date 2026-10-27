@@ -464,7 +464,7 @@ export default function AllIncomeReportView() {
 
     // 3. Sorting (supports all backend columns)
     if (sortConfig.key) {
-      rows = sortDataRows(rows, sortConfig.key, sortConfig.direction, (item, key) => {
+      rows = sortDataRows(rows, sortConfig, (item, key) => {
         if (['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(key)) {
           return Number(getIncomeFieldVal(item, key)) || 0;
         }
