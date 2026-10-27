@@ -1876,7 +1876,7 @@ export default function PaymentsView() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (activeTab !== 'sheet') return;
-      if (showPaymentModal || showLedgerModal || showColumnChooser || openMonthPickerRow) return;
+      if (showPaymentModal || selectedLedgerModal || showExpenseModal || openMonthPickerRow) return;
       if (selectedRowIndex === null) return;
       if (!paginatedSheetRows || paginatedSheetRows.length === 0) return;
 
@@ -1930,7 +1930,7 @@ export default function PaymentsView() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, selectedRowIndex, selectedColIndex, paginatedSheetRows, visibleSheetColumns, showPaymentModal, showLedgerModal, showColumnChooser, openMonthPickerRow]);
+  }, [activeTab, selectedRowIndex, selectedColIndex, paginatedSheetRows, visibleSheetColumns, showPaymentModal, selectedLedgerModal, showExpenseModal, openMonthPickerRow]);
 
   // Excel Export of the Monthly Grid
   const exportSheetToExcel = () => {
