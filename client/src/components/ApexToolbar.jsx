@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { 
   Columns3, Filter, Table, SlidersHorizontal, 
   Download, Bookmark, RotateCcw, X, Plus, Trash2, 
-  ChevronRight, Check, ArrowUpDown, ChevronDown,
+  ChevronLeft, ChevronRight, Check, ArrowUpDown, ChevronDown,
   Search, Pin, Star
 } from 'lucide-react';
 import { useAppFontSize, useTableAutoWrap, APP_FONT_SIZES } from './ColumnManager';
@@ -449,6 +449,26 @@ export default function ApexToolbar({
     });
     onFiltersChange?.(valid);
     setShowFilterModal(false);
+  };
+
+  const handleToolbarScroll = (direction, e) => {
+    let current = e?.currentTarget;
+    let target = null;
+    while (current && current !== document.body) {
+      target = current.parentElement?.querySelector('.overflow-x-auto, [data-table-scroll]');
+      if (target && target.scrollWidth > target.clientWidth + 10) break;
+      current = current.parentElement;
+    }
+    if (!target || target.scrollWidth <= target.clientWidth + 10) {
+      target = document.querySelector('main .overflow-x-auto, main [data-table-scroll], .overflow-x-auto');
+    }
+    if (target) {
+      const scrollAmount = Math.max(300, Math.floor(target.clientWidth * 0.65));
+      target.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
   };
 
   const filterableColumns = columns.filter(c => c.id !== 'actions');
@@ -931,6 +951,29 @@ export default function ApexToolbar({
         {/* Right Side: Quick Action (e.g. Filters) & Download in one clean line */}
         <div className="flex items-center gap-2 shrink-0">
           {primaryAction}
+
+          {/* On-Screen Horizontal Scroll Buttons */}
+          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-0.5 text-xs text-slate-700 shadow-2xs">
+            <button
+              type="button"
+              onClick={(e) => handleToolbarScroll('left', e)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-white hover:text-teal-700 text-slate-600 font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+              title="Scroll Table Left (◀)"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-teal-600" />
+              <span className="hidden md:inline">Left</span>
+            </button>
+            <div className="w-[1px] h-3.5 bg-slate-200 mx-0.5"></div>
+            <button
+              type="button"
+              onClick={(e) => handleToolbarScroll('right', e)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-white hover:text-teal-700 text-slate-600 font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+              title="Scroll Table Right (▶)"
+            >
+              <span className="hidden md:inline">Right</span>
+              <ChevronRight className="w-3.5 h-3.5 text-teal-600" />
+            </button>
+          </div>
 
           {(onExport || onExportExcel) && (
             <button

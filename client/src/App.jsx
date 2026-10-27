@@ -16,6 +16,7 @@ import LedgerReportsView from './views/LedgerReportsView';
 import MonthWiseReportView from './views/MonthWiseReportView';
 import API from './services/api';
 import ErrorBoundary from './components/ErrorBoundary';
+import GlobalTableScrollNavigator from './components/GlobalTableScrollNavigator';
 import { Menu, Building2 } from 'lucide-react';
 import { useAppFontSize, useTableAutoWrap, APP_FONT_SIZES } from './components/ColumnManager';
 import { useModalBackHandler } from './utils/useModalBackHandler';
@@ -374,6 +375,9 @@ export default function App() {
 
       {/* Intelligent Floating Assistant Bot (Temporarily Hidden) */}
       {/* <FloatingChatbot /> */}
+
+      {/* Global On-Screen Table Horizontal Scroll Navigator */}
+      <GlobalTableScrollNavigator />
     </div>
   );
 }
