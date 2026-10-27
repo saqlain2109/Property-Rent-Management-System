@@ -263,11 +263,22 @@ export default function Dashboard() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {data.recentReceipts.map((r) => (
-                    <tr key={r._id} className="hover:bg-slate-50/70">
-                      <td className="py-3 font-semibold text-slate-800 text-xs">{r.tenantId?.name}</td>
+                    <tr 
+                      key={r._id} 
+                      onClick={() => {
+                        const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+                        if (m) localStorage.setItem('payments_selected_month', m);
+                        localStorage.setItem('payments_edit_receipt_id', String(r._id));
+                        window.location.hash = '#/payments';
+                        window.dispatchEvent(new PopStateEvent('popstate'));
+                      }}
+                      className="hover:bg-teal-50/70 cursor-pointer transition-colors group/drow"
+                      title="Click to edit in Edit Month / Payment screen"
+                    >
+                      <td className="py-3 font-semibold text-slate-800 text-xs group-hover/drow:text-teal-700">{r.tenantId?.name}</td>
                       <td className="py-3 text-slate-500 text-xs">{r.unitId?.unitName}</td>
                       <td className="py-3 text-slate-400 text-xs">{formatDate(r.receiptDate)}</td>
-                      <td className="py-3 text-right font-bold text-emerald-600 text-xs">{formatCurrency(r.totalAmount)}</td>
+                      <td className="py-3 text-right font-bold text-emerald-600 text-xs group-hover/drow:underline">{formatCurrency(r.totalAmount)}</td>
                     </tr>
                   ))}
                 </tbody>

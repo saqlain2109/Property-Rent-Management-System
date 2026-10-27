@@ -212,6 +212,27 @@ export default function PropertyMonthlyMatrixReport() {
     }
   };
 
+  // Drilldown to Edit Month / Payment screen based on the last month paid for
+  const handleCellDrilldown = (u, mKey) => {
+    const detail = u.cellDetails?.[mKey];
+    const targetMonth = detail?.targetMonth || mKey;
+    localStorage.setItem('payments_selected_month', targetMonth);
+    if (detail?.receiptId) {
+      localStorage.setItem('payments_edit_receipt_id', String(detail.receiptId));
+    }
+    if (u.unitId) {
+      localStorage.setItem('payments_target_unit_id', String(u.unitId));
+    }
+    window.location.hash = '#/payments';
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
+  const handleGroupMonthClick = (mKey) => {
+    localStorage.setItem('payments_selected_month', mKey);
+    window.location.hash = '#/payments';
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
   // Filtered Groups by search
   const filteredRentGroups = useMemo(() => {
     if (!reportData?.rentPart?.rentGroups) return [];
@@ -712,7 +733,12 @@ export default function PropertyMonthlyMatrixReport() {
                           {activeMonths.map(m => {
                             const val = grp.propertyTotals?.[m.monthKey] || 0;
                             return (
-                              <td key={m.monthKey} className="px-3 py-2 text-right border-r border-slate-200 font-mono text-slate-600">
+                              <td
+                                key={m.monthKey}
+                                onClick={() => handleGroupMonthClick(m.monthKey)}
+                                className="px-3 py-2 text-right border-r border-slate-200 font-mono text-slate-600 cursor-pointer hover:bg-teal-100/50 transition-colors"
+                                title={`Click to open Rent & Payment for ${grp.propertyName} in ${m.shortLabel || m.monthName}`}
+                              >
                                 {val > 0 ? formatCurrency(val) : '—'}
                               </td>
                             );
@@ -741,13 +767,38 @@ export default function PropertyMonthlyMatrixReport() {
                               </td>
                               {activeMonths.map(m => {
                                 const val = u.months?.[m.monthKey] || 0;
+                                const detail = u.cellDetails?.[m.monthKey];
+                                const isMultiMonth = detail?.monthsCovered && detail.monthsCovered.length > 1;
+                                const tooltipText = detail?.note
+                                  ? `${detail.note} · Click to edit in Edit Month / Payment screen`
+                                  : val > 0
+                                    ? `${formatCurrency(val)} in ${m.shortLabel || m.monthName} · Click to edit in Edit Month / Payment screen`
+                                    : `Click to record rent for ${u.label} in ${m.shortLabel || m.monthName}`;
+
                                 return (
-                                  <td key={m.monthKey} className="px-3 py-2 text-right border-r border-slate-100 font-mono text-slate-700">
-                                    {val > 0 ? (
-                                      <span className="font-semibold text-slate-800">{formatCurrency(val)}</span>
-                                    ) : (
-                                      <span className="text-slate-300">0</span>
-                                    )}
+                                  <td
+                                    key={m.monthKey}
+                                    onClick={() => handleCellDrilldown(u, m.monthKey)}
+                                    className="px-2.5 py-1.5 text-right border-r border-slate-100 font-mono text-slate-700 cursor-pointer hover:bg-teal-50 transition-colors group/mcell"
+                                    title={tooltipText}
+                                  >
+                                    <div className="flex flex-col items-end justify-center">
+                                      {val > 0 ? (
+                                        <span className="font-bold text-slate-800 group-hover/mcell:text-teal-700 group-hover/mcell:underline decoration-teal-500/50 underline-offset-2">
+                                          {formatCurrency(val)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-300 group-hover/mcell:text-slate-500">0</span>
+                                      )}
+                                      {isMultiMonth && (
+                                        <span
+                                          className="text-[9px] font-sans font-bold text-teal-700 bg-teal-50 border border-teal-200/80 px-1 py-0.2 rounded leading-tight tracking-tight mt-0.5"
+                                          title={detail.coveredText}
+                                        >
+                                          Paid for {detail.coveredText}
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                 );
                               })}

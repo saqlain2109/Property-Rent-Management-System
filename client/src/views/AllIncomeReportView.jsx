@@ -512,6 +512,34 @@ export default function AllIncomeReportView() {
     }
   };
 
+  // Navigate directly to Edit Month / Payment screen
+  const navigateToEditPayment = (r) => {
+    let targetMonth = r.accountingMonth || '';
+    if (r.allocations && r.allocations.length > 0) {
+      const sorted = [...r.allocations].map(a => a.rentMonthYear).filter(Boolean).sort();
+      if (sorted.length > 0) targetMonth = sorted[sorted.length - 1];
+    } else if (r.monthsCovered || r.monthPaidFor) {
+      const raw = r.monthsCovered || r.monthPaidFor;
+      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const valid = parts.filter(p => /^\d{4}-\d{2}$/.test(p)).sort();
+      if (valid.length > 0) targetMonth = valid[valid.length - 1];
+    }
+    if (!targetMonth && r.receiptDate) {
+      targetMonth = new Date(r.receiptDate).toISOString().slice(0, 7);
+    }
+
+    if (targetMonth) {
+      localStorage.setItem('payments_selected_month', targetMonth);
+    }
+    localStorage.setItem('payments_edit_receipt_id', String(r._id));
+    const uId = r.unitId?._id || r.unitId;
+    if (uId) {
+      localStorage.setItem('payments_target_unit_id', String(uId));
+    }
+    window.location.hash = '#/payments';
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
   // Open Edit Modal - Single-Value Form for full record editing
   const openEditReceiptModal = (r) => {
     setEditingReceipt(r);
@@ -1021,7 +1049,14 @@ export default function AllIncomeReportView() {
                         if (colId === 'receiptNumber') {
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 font-mono font-bold text-teal-800 whitespace-nowrap">
-                              {r.receiptNumber}
+                              <button
+                                type="button"
+                                onClick={() => navigateToEditPayment(r)}
+                                className="hover:underline hover:text-teal-600 cursor-pointer font-mono font-bold text-left"
+                                title="Click to edit receipt in Edit Month / Payment screen"
+                              >
+                                {r.receiptNumber}
+                              </button>
                             </td>
                           );
                         }
@@ -1141,9 +1176,9 @@ export default function AllIncomeReportView() {
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 text-center whitespace-nowrap">
                               <button
                                 type="button"
-                                onClick={() => openEditReceiptModal(r)}
+                                onClick={() => navigateToEditPayment(r)}
                                 className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1.5 border border-teal-200/60 cursor-pointer shadow-2xs"
-                                title="Edit Receipt Details"
+                                title="Edit in Edit Month / Payment screen"
                               >
                                 <Edit2 className="w-3 h-3 text-teal-600" />
                                 <span>Edit</span>

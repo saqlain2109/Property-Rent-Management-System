@@ -604,8 +604,21 @@ export default function LedgerView() {
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {monthDetails.receipts.map((r) => (
-                              <tr key={r._id} className="hover:bg-slate-50/60">
-                                <td className="py-2.5 px-3 font-mono font-semibold text-slate-700">{r.receiptNumber}</td>
+                              <tr 
+                                key={r._id} 
+                                onClick={() => {
+                                  const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : selectedMonth);
+                                  if (m) localStorage.setItem('payments_selected_month', m);
+                                  localStorage.setItem('payments_edit_receipt_id', String(r._id));
+                                  setSelectedMonth(null);
+                                  setMonthDetails(null);
+                                  window.location.hash = '#/payments';
+                                  window.dispatchEvent(new PopStateEvent('popstate'));
+                                }}
+                                className="hover:bg-teal-50/70 cursor-pointer transition-colors group/lrow"
+                                title="Click to edit payment in Edit Month / Payment screen"
+                              >
+                                <td className="py-2.5 px-3 font-mono font-semibold text-teal-800 group-hover/lrow:underline">{r.receiptNumber}</td>
                                 <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{formatDate(r.receiptDate)}</td>
                                 <td className="py-2.5 px-3 font-medium text-slate-800">{r.tenantId?.name}</td>
                                 <td className="py-2.5 px-3 text-slate-500">{r.unitId?.unitName}</td>

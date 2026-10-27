@@ -312,6 +312,39 @@ export default function ReportDrilldownModal({
   if (!isOpen || !target) return null;
 
   // ---------------- Payment Receipt Edit Handlers ----------------
+  const navigateToEditPayment = (rec) => {
+    onClose();
+    let targetMonth = rec.accountingMonth || '';
+    if (rec.allocations && rec.allocations.length > 0) {
+      const sorted = [...rec.allocations].map(a => a.rentMonthYear).filter(Boolean).sort();
+      if (sorted.length > 0) targetMonth = sorted[sorted.length - 1];
+    } else if (rec.monthsCovered || rec.monthPaidFor) {
+      const raw = rec.monthsCovered || rec.monthPaidFor;
+      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const valid = parts.filter(p => /^\d{4}-\d{2}$/.test(p)).sort();
+      if (valid.length > 0) targetMonth = valid[valid.length - 1];
+    }
+    if (!targetMonth && rec.receiptDate) {
+      targetMonth = new Date(rec.receiptDate).toISOString().slice(0, 7);
+    }
+    if (!targetMonth) {
+      targetMonth = target?.month || '';
+    }
+
+    if (targetMonth) {
+      localStorage.setItem('payments_selected_month', targetMonth);
+    }
+    const recId = rec.receiptId || rec._id;
+    if (recId) {
+      localStorage.setItem('payments_edit_receipt_id', String(recId));
+    }
+    const uId = rec.unitId?._id || rec.unitId || rec.unit?._id || rec.unit?.unitId;
+    if (uId) {
+      localStorage.setItem('payments_target_unit_id', String(uId));
+    }
+    window.location.hash = '#/payments';
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
   const startEditingReceipt = (record) => {
     setErrorMsg('');
     setSuccessMsg('');
@@ -1230,26 +1263,18 @@ export default function ReportDrilldownModal({
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => startEditingReceipt(rec)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-700 text-xs font-semibold transition-all shadow-2xs group cursor-pointer"
-                              title="Edit record using full 3-column view"
+                              onClick={() => navigateToEditPayment(rec)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-600 hover:text-white text-teal-800 text-xs font-semibold transition-all shadow-2xs group cursor-pointer border border-teal-200/80"
+                              title="Edit in Edit Month / Payment screen"
                             >
-                              <Edit3 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+                              <Edit3 className="w-3.5 h-3.5 text-teal-600 group-hover:text-white" />
                               <span>Edit Record</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                onClose();
-                                const targetMonth = rec.accountingMonth || (rec.receiptDate ? String(rec.receiptDate).slice(0, 7) : target?.month);
-                                if (targetMonth) {
-                                  localStorage.setItem('payments_selected_month', targetMonth);
-                                }
-                                window.location.hash = '#/payments';
-                                window.dispatchEvent(new PopStateEvent('popstate'));
-                              }}
+                              onClick={() => navigateToEditPayment(rec)}
                               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
-                              title="Open Rent & Payment collection sheet for this month"
+                              title="Open in Edit Month / Payment screen for this month"
                             >
                               <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
                               <span>Rent & Payment</span>

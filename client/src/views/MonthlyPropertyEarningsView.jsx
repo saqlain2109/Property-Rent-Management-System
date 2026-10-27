@@ -884,6 +884,13 @@ export default function MonthlyPropertyEarningsView({
                                 maxWidth: `${columnWidths[m.key] || 115}px`
                               }}
                               onClick={() => {
+                                if (mode === 'rent_report') {
+                                  localStorage.setItem('payments_selected_month', m.key);
+                                  if (row.propertyId) localStorage.setItem('payments_prop_filter', row.propertyId);
+                                  window.location.hash = '#/payments';
+                                  window.dispatchEvent(new PopStateEvent('popstate'));
+                                  return;
+                                }
                                 openDrilldown({
                                   propertyId: row.propertyId,
                                   month: m.key,
@@ -990,6 +997,14 @@ export default function MonthlyPropertyEarningsView({
                                   maxWidth: `${columnWidths[m.key] || 115}px`
                                 }}
                                 onClick={() => {
+                                  if (mode === 'rent_report') {
+                                    localStorage.setItem('payments_selected_month', m.key);
+                                    if (row.propertyId) localStorage.setItem('payments_prop_filter', row.propertyId);
+                                    if (u.unitId) localStorage.setItem('payments_target_unit_id', u.unitId);
+                                    window.location.hash = '#/payments';
+                                    window.dispatchEvent(new PopStateEvent('popstate'));
+                                    return;
+                                  }
                                   openDrilldown({
                                     propertyId: row.propertyId,
                                     unitId: u.unitId,
@@ -1082,6 +1097,12 @@ export default function MonthlyPropertyEarningsView({
                         }}
                         onClick={() => {
                           if (colSum > 0) {
+                            if (mode === 'rent_report') {
+                              localStorage.setItem('payments_selected_month', m.key);
+                              window.location.hash = '#/payments';
+                              window.dispatchEvent(new PopStateEvent('popstate'));
+                              return;
+                            }
                             openDrilldown({
                               month: m.key,
                               title: `All Properties Portfolio · ${m.label}`,

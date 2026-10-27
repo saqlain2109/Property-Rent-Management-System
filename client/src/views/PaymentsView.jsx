@@ -1497,6 +1497,39 @@ export default function PaymentsView() {
     setShowPaymentModal(true);
   };
 
+  // Auto-open Edit Month / Payment modal if navigated from reports (Property Monthly Report, Rent Report, All Income, etc.)
+  useEffect(() => {
+    const checkIncomingEditRequest = () => {
+      const savedMonth = localStorage.getItem('payments_selected_month');
+      if (savedMonth && savedMonth !== selectedMonth) {
+        setSelectedMonth(savedMonth);
+      }
+
+      const targetReceiptId = localStorage.getItem('payments_edit_receipt_id');
+      if (targetReceiptId) {
+        localStorage.removeItem('payments_edit_receipt_id');
+        setEditingReceiptId(targetReceiptId);
+        setEditingReceiptObj(null);
+        setPaymentModalItem(null);
+        setShowPaymentModal(true);
+        return;
+      }
+
+      const targetUnitId = localStorage.getItem('payments_target_unit_id');
+      if (targetUnitId && outstandingData && outstandingData.length > 0) {
+        localStorage.removeItem('payments_target_unit_id');
+        const matched = outstandingData.find(d => String(d.unit?._id || d.unitId || '') === String(targetUnitId));
+        if (matched) {
+          openFastPaymentModal(matched);
+        }
+      }
+    };
+
+    checkIncomingEditRequest();
+    window.addEventListener('hashchange', checkIncomingEditRequest);
+    return () => window.removeEventListener('hashchange', checkIncomingEditRequest);
+  }, [selectedMonth, outstandingData]);
+
   // Cancel / Reverse Receipt
 
   const handleReverseReceipt = async (id) => {

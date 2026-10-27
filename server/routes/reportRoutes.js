@@ -1596,36 +1596,157 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     };
   });
 
+  // Canonical mapping from sheet1_baseline.json labels to unitCode
+  const CANONICAL_BASELINE_UNIT_MAP = {
+    'Kotak Godaown__a) Tenant No.1   - PG': 'KO-PG',
+    'Kotak Godaown__bisleri': 'KO-SMALL',
+    '65 no godown__a) Tenant 1 : Mahendra Bhai': '65-LARGE',
+    '65 no godown__b) Tenant 2 (Alka Industry)': '65-SMALL',
+    'Baranker room__Uttam': 'BAR-MEZZ',
+    'Baranker room__Attic-ANJANA ashok salunke': 'BAR-1ST',
+    'Dinesh Chaklani-bela  bera__Dinesh': 'ROOM-10',
+    'Garage__Tenant No1.Snip': 'GA-SHOP2',
+    'Garage__DG Cable': 'GA-SHOP1',
+    'Garage__Anand': 'GA-GODOWN',
+    'Garage__2nd Floor House Altaf': 'GA-CHIRA',
+    'Ennas Room__Bengali': 'ENNAS-RM',
+    'Mani mansion__Aswini Derad Monga': 'MANI-RM1',
+    'Mani mansion__With Snip Saloon': 'MANI-RM2',
+    'Goa Flat__a) Flat no 1': 'GOA-FLAT1',
+    'Goa Flat__b) Flat No.2.': 'GOA-FLAT2',
+    'Tonys room__DG/asgar': 'TONY-RM1',
+    'Tonys room__Hajra': 'TONY-RM2',
+    'Buyculla Club__First Floor Amir Kids': 'BY-1ST',
+    'Buyculla Club__Attic Romel': 'BY-MEZZ',
+    'Byculla Club__First Floor Amir Kids': 'BY-1ST',
+    'Byculla Club__Attic Romel': 'BY-MEZZ',
+    'Kandivili__Flat No 2108': 'KAND-2108',
+    'Kandivili__Flat No 2109': 'KAND-2109',
+    'Kandivli__Flat No 2108': 'KAND-2108',
+    'Kandivli__Flat No 2109': 'KAND-2109'
+  };
+
+  // Helper to parse months covered by a receipt into sorted array of 'YYYY-MM'
+  const parseMonthsPaidFor = (monthPaidForStr, allocations, fallbackMonth) => {
+    const mSet = new Set();
+    if (allocations && Array.isArray(allocations)) {
+      for (const a of allocations) {
+        if (a.rentMonthYear && /^\d{4}-\d{2}$/.test(a.rentMonthYear)) {
+          mSet.add(a.rentMonthYear);
+        }
+      }
+    }
+    if (monthPaidForStr && typeof monthPaidForStr === 'string') {
+      const parts = monthPaidForStr.split(',').map(s => s.trim()).filter(Boolean);
+      const monthNames = {
+        jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+        jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+      };
+      for (const p of parts) {
+        if (/^\d{4}-\d{2}$/.test(p)) {
+          mSet.add(p);
+        } else {
+          const match = p.match(/([a-zA-Z]+)[^\d]*(\d{4})/);
+          if (match) {
+            const mKey = match[1].slice(0, 3).toLowerCase();
+            const mNum = monthNames[mKey];
+            if (mNum) mSet.add(`${match[2]}-${mNum}`);
+          }
+        }
+      }
+    }
+    if (mSet.size === 0 && fallbackMonth && /^\d{4}-\d{2}$/.test(fallbackMonth)) {
+      mSet.add(fallbackMonth);
+    }
+    return Array.from(mSet).sort();
+  };
+
+  const formatMonthsList = (monthsArr) => {
+    if (!monthsArr || monthsArr.length === 0) return '';
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return monthsArr.map(m => {
+      const [y, mon] = m.split('-').map(Number);
+      return `${monthNames[mon - 1]} ${y}`;
+    }).join(', ');
+  };
+
   // Fetch DB units to map unitCode -> ObjectId
   const dbUnits = await Unit.find().populate('propertyId').lean();
   const codeToId = {};
   dbUnits.forEach(u => { if (u.unitCode) codeToId[u.unitCode] = String(u._id); });
 
   // Build MATRIX_UNIT_CODE_MAP: "propertyName__unitLabel" -> unitCode (for baseline.json cross-referencing)
-  const MATRIX_UNIT_CODE_MAP = {};
+  const MATRIX_UNIT_CODE_MAP = { ...CANONICAL_BASELINE_UNIT_MAP };
   dbUnits.forEach(u => {
     if (u.unitCode && u.propertyId) {
       const propName = u.propertyId.name || '';
       const unitLabel = u.unitName || u.unitCode || '';
-      const mapKey1 = `${propName}__${unitLabel}`;
-      const mapKey2 = `${propName}__${u.unitCode}`;
-      MATRIX_UNIT_CODE_MAP[mapKey1] = u.unitCode;
-      MATRIX_UNIT_CODE_MAP[mapKey2] = u.unitCode;
+      MATRIX_UNIT_CODE_MAP[`${propName}__${unitLabel}`] = u.unitCode;
+      MATRIX_UNIT_CODE_MAP[`${propName}__${u.unitCode}`] = u.unitCode;
+      if (u.subUnitPartition) {
+        MATRIX_UNIT_CODE_MAP[`${propName}__${u.subUnitPartition}`] = u.unitCode;
+      }
     }
   });
 
-  // Fetch PaymentAllocations from MongoDB (excluding reversed receipts)
-  const reversedReceipts = (await PaymentReceipt.find({ isReversed: true }).select('_id')).map(r => r._id);
-  const dbAllocations = await PaymentAllocation.find({
-    receiptId: { $nin: reversedReceipts },
-    rentMonthYear: { $in: months }
+  // Fetch PaymentAllocations & PaymentReceipts from MongoDB (excluding reversed receipts)
+  const reversedReceiptIds = (await PaymentReceipt.find({ isReversed: true }).select('_id')).map(r => r._id);
+  const activeReceipts = await PaymentReceipt.find({
+    isReversed: { $ne: true }
+  }).lean();
+  const allAllocations = await PaymentAllocation.find({
+    receiptId: { $nin: reversedReceiptIds }
   }).lean();
 
-  const allocByUnitAndMonth = {};
-  for (const a of dbAllocations) {
-    const uId = a.unitId?._id ? String(a.unitId._id) : String(a.unitId || '');
-    const k = `${uId}_${a.rentMonthYear}`;
-    allocByUnitAndMonth[k] = (allocByUnitAndMonth[k] || 0) + (a.allocatedAmount || 0);
+  const allocsByReceiptId = {};
+  for (const a of allAllocations) {
+    const rid = String(a.receiptId);
+    if (!allocsByReceiptId[rid]) allocsByReceiptId[rid] = [];
+    allocsByReceiptId[rid].push(a);
+  }
+
+  // Aggregate receipts by LAST month paid for:
+  // e.g., For REC-2026-00712 (months paid for Oct 2025, Nov 2025, Dec 2025),
+  // place full 150,000 into Dec 2025.
+  const unitMonthAmounts = {};
+  const unitMonthMeta = {};
+
+  for (const r of activeReceipts) {
+    const rAllocations = allocsByReceiptId[String(r._id)] || [];
+    const fallbackMonth = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : null);
+    const monthsSorted = parseMonthsPaidFor(r.monthPaidFor, rAllocations, fallbackMonth);
+    if (monthsSorted.length === 0) continue;
+
+    // Pick the LAST month chronologically
+    const targetMonth = monthsSorted[monthsSorted.length - 1];
+    const uId = r.unitId?._id ? String(r.unitId._id) : String(r.unitId || '');
+    if (!uId) continue;
+
+    const rentAmt = (r.rentAmount !== undefined && r.rentAmount !== null && r.rentAmount > 0)
+      ? Number(r.rentAmount)
+      : (Number(r.totalAmount) || 0);
+
+    const key = `${uId}_${targetMonth}`;
+    unitMonthAmounts[key] = (unitMonthAmounts[key] || 0) + rentAmt;
+
+    const coveredText = formatMonthsList(monthsSorted);
+    const noteText = monthsSorted.length > 1
+      ? `Rent paid for ${coveredText} (${r.receiptNumber})`
+      : (r.receiptNumber ? `Receipt ${r.receiptNumber}` : '');
+
+    if (!unitMonthMeta[key]) unitMonthMeta[key] = [];
+    unitMonthMeta[key].push({
+      receiptId: r._id,
+      receiptNumber: r.receiptNumber,
+      amount: rentAmt,
+      targetMonth,
+      monthsCovered: monthsSorted,
+      coveredText,
+      note: noteText,
+      monthPaidForRaw: r.monthPaidFor,
+      tenantId: r.tenantId,
+      unitId: uId
+    });
   }
 
   // Fetch DB Expenses
@@ -1658,18 +1779,30 @@ async function generateSheet1ReportData({ period, year, viewMode = 'received', p
     grp.propertyTotals = {};
     for (const u of grp.units) {
       u.months = u.months || {};
+      u.cellDetails = {};
       const mapKey = `${grp.propertyName}__${u.label}`;
-      const uCode = MATRIX_UNIT_CODE_MAP[mapKey];
+      const uCode = MATRIX_UNIT_CODE_MAP[mapKey] || u.unitCode;
       const uId = uCode ? codeToId[uCode] : null;
+      u.unitId = uId || null;
+
+      const unitNotes = [];
 
       for (const m of months) {
-        if (u.months[m] === undefined || u.months[m] === null) {
-          u.months[m] = uId ? (allocByUnitAndMonth[`${uId}_${m}`] || 0) : 0;
-        } else if (u.months[m] === 0 && uId && allocByUnitAndMonth[`${uId}_${m}`]) {
-          u.months[m] = allocByUnitAndMonth[`${uId}_${m}`];
+        const k = uId ? `${uId}_${m}` : null;
+        if (k && unitMonthAmounts[k] !== undefined && unitMonthAmounts[k] !== null) {
+          u.months[m] = unitMonthAmounts[k];
+          if (unitMonthMeta[k] && unitMonthMeta[k][0]) {
+            u.cellDetails[m] = unitMonthMeta[k][0];
+            if (unitMonthMeta[k][0].note) {
+              unitNotes.push(unitMonthMeta[k][0].note);
+            }
+          }
+        } else if (u.months[m] === undefined || u.months[m] === null) {
+          u.months[m] = 0;
         }
       }
       u.total = months.reduce((s, m) => s + (u.months[m] || 0), 0);
+      u.notes = Array.from(new Set(unitNotes)).join('; ');
     }
 
     for (const m of months) {
@@ -1870,7 +2003,7 @@ router.get('/export-property-monthly-matrix-excel', protect, async (req, res) =>
           ...monthKeys.map(m => u.months[m] || 0),
           u.total || 0,
           '',
-          ''
+          u.notes || ''
         ]);
       });
     });
