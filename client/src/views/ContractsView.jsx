@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import API from '../services/api';
 import * as XLSX from 'xlsx';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters';
 import SearchableSelect from '../components/SearchableSelect';
 import ApexToolbar from '../components/ApexToolbar';
 import { useModalBackHandler } from '../utils/useModalBackHandler';
