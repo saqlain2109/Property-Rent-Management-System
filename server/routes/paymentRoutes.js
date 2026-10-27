@@ -84,8 +84,13 @@ router.get('/', protect, async (req, res) => {
       const rAlloc = allocMap.get(r._id.toString()) || [];
       const derivedAccountingMonth = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
       const monthsPaidFor = rAlloc.map(a => a.rentMonthYear).join(', ') || r.monthPaidFor || derivedAccountingMonth;
+      const recRent = r.rentAmount !== undefined ? r.rentAmount : (r.totalAmount || 0);
+      const recDep = r.depositAmount !== undefined ? r.depositAmount : 0;
       receiptsWithAllocations[i] = {
         ...r,
+        rentAmount: recRent,
+        depositAmount: recDep,
+        totalAmount: r.totalAmount !== undefined ? r.totalAmount : (recRent + recDep),
         status: r.status || 'Rented',
         monthPaidFor: monthsPaidFor,
         monthsCovered: monthsPaidFor,
@@ -222,6 +227,8 @@ router.get('/outstanding-summary', protect, async (req, res) => {
           property: unit.propertyId,
           monthlyRentExpected: 0,
           actualPaidForMonth: 0,
+          rentAmountPaid: 0,
+          depositAmount: 0,
           paidTillMonth: 'Vacant',
           nextUnpaidMonth: 'None',
           totalExpected: 0,
@@ -247,11 +254,23 @@ router.get('/outstanding-summary', protect, async (req, res) => {
         const receiptPaidInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant' && unitMonthReceipt.totalAmount !== undefined)
           ? (Number(unitMonthReceipt.totalAmount) || 0)
           : null;
+        const receiptRentInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant')
+          ? (unitMonthReceipt.rentAmount !== undefined ? Number(unitMonthReceipt.rentAmount) : receiptPaidInMonth)
+          : null;
+        const receiptDepositInMonth = (unitMonthReceipt && unitMonthReceipt.status !== 'Vacant' && unitMonthReceipt.depositAmount !== undefined)
+          ? Number(unitMonthReceipt.depositAmount)
+          : 0;
         const actualPaidForMonth = isExplicitlyVacant
           ? 0
           : (receiptPaidInMonth !== null
               ? receiptPaidInMonth
               : (targetMonthData ? (targetMonthData.actualAllocated ?? targetMonthData.allocatedAmount ?? 0) : 0));
+        const actualRentForMonth = isExplicitlyVacant
+          ? 0
+          : (receiptRentInMonth !== null
+              ? receiptRentInMonth
+              : actualPaidForMonth);
+        const actualDepositForMonth = isExplicitlyVacant ? 0 : receiptDepositInMonth;
 
         summaries.push({
           assignmentId: assign._id,
@@ -269,6 +288,8 @@ router.get('/outstanding-summary', protect, async (req, res) => {
           property: unit.propertyId,
           monthlyRentExpected: isExplicitlyVacant ? 0 : (effectiveRate || unit.monthlyRentExpected || 0),
           actualPaidForMonth: actualPaidForMonth,
+          rentAmountPaid: actualRentForMonth,
+          depositAmount: actualDepositForMonth,
           paidTillMonth: isExplicitlyVacant ? 'Vacant' : (ledger.paidTillMonth || 'None'),
           nextUnpaidMonth: isExplicitlyVacant ? 'None' : (ledger.nextUnpaidMonth || 'Up to date'),
           totalExpected: isExplicitlyVacant ? 0 : ledger.totalExpected,
@@ -406,13 +427,20 @@ router.post('/', protect, authorize('admin', 'manager'), [
     const finalTenantId = status === 'Vacant' ? null : tenantId;
     const finalContractNo = status === 'Vacant' ? '' : (req.body.contractNo || '');
 
-    const parsedTotal = Number(totalAmount);
+    const parsedDeposit = Number(req.body.depositAmount) || 0;
+    let parsedRent = req.body.rentAmount !== undefined && req.body.rentAmount !== ''
+      ? Number(req.body.rentAmount)
+      : (totalAmount !== undefined && totalAmount !== ''
+          ? Math.max(0, Number(totalAmount) - parsedDeposit)
+          : 0);
+    const parsedTotal = parsedRent + parsedDeposit;
     const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
 
-    if (Math.abs(parsedTotal - sumAllocated) > 0.01) {
+    // Allocations allocate the rent portion across rent months (allow matching parsedRent or parsedTotal)
+    if (Math.abs(parsedRent - sumAllocated) > 0.01 && Math.abs(parsedTotal - sumAllocated) > 0.01) {
       return res.status(400).json({
         success: false,
-        message: `Sum of monthly allocations (₹${sumAllocated}) must equal receipt total amount (₹${parsedTotal})`
+        message: `Sum of monthly allocations (₹${sumAllocated}) must equal rent amount paid (₹${parsedRent})`
       });
     }
 
@@ -449,6 +477,8 @@ router.post('/', protect, authorize('admin', 'manager'), [
       existingReceipt.status = status;
       existingReceipt.tenantId = finalTenantId;
       existingReceipt.contractNo = finalContractNo;
+      existingReceipt.rentAmount = parsedRent;
+      existingReceipt.depositAmount = parsedDeposit;
       existingReceipt.totalAmount = parsedTotal;
       if (receiptDate) existingReceipt.receiptDate = receiptDate;
       if (referenceNumber !== undefined) existingReceipt.referenceNumber = referenceNumber;
@@ -518,6 +548,8 @@ router.post('/', protect, authorize('admin', 'manager'), [
       status,
       tenantId: finalTenantId,
       unitId,
+      rentAmount: parsedRent,
+      depositAmount: parsedDeposit,
       totalAmount: parsedTotal,
       referenceNumber: referenceNumber || '',
       comments: comments || '',
@@ -605,7 +637,20 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       status
     } = req.body;
 
-    const parsedTotal = totalAmount !== undefined ? Number(totalAmount) : receipt.totalAmount;
+    const parsedDeposit = req.body.depositAmount !== undefined && req.body.depositAmount !== ''
+      ? Number(req.body.depositAmount)
+      : (receipt.depositAmount || 0);
+
+    let parsedRent = req.body.rentAmount !== undefined && req.body.rentAmount !== ''
+      ? Number(req.body.rentAmount)
+      : (totalAmount !== undefined && totalAmount !== ''
+          ? Math.max(0, Number(totalAmount) - parsedDeposit)
+          : (receipt.rentAmount !== undefined ? receipt.rentAmount : (receipt.totalAmount - parsedDeposit)));
+
+    const parsedTotal = (totalAmount !== undefined && req.body.rentAmount === undefined && req.body.depositAmount === undefined)
+      ? Number(totalAmount)
+      : (parsedRent + parsedDeposit);
+
     const newStatus = status !== undefined ? status : (receipt.status || 'Rented');
     const targetTenantId = newStatus === 'Vacant' ? null : (tenantId !== undefined ? tenantId : receipt.tenantId);
     const targetUnitId = unitId || receipt.unitId;
@@ -613,10 +658,10 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
 
     if (allocations && Array.isArray(allocations)) {
       const sumAllocated = allocations.reduce((sum, a) => sum + Number(a.allocatedAmount || 0), 0);
-      if (Math.abs(parsedTotal - sumAllocated) > 0.01) {
+      if (Math.abs(parsedRent - sumAllocated) > 0.01 && Math.abs(parsedTotal - sumAllocated) > 0.01) {
         return res.status(400).json({
           success: false,
-          message: `Sum of monthly allocations (₹${sumAllocated}) must equal receipt total amount (₹${parsedTotal})`
+          message: `Sum of monthly allocations (₹${sumAllocated}) must equal rent amount paid (₹${parsedRent})`
         });
       }
 
@@ -648,7 +693,9 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     receipt.unitId = targetUnitId;
     if (receiptNumber && receiptNumber.trim()) receipt.receiptNumber = receiptNumber.trim();
     if (receiptDate) receipt.receiptDate = receiptDate;
-    if (totalAmount !== undefined) receipt.totalAmount = parsedTotal;
+    receipt.rentAmount = parsedRent;
+    receipt.depositAmount = parsedDeposit;
+    receipt.totalAmount = parsedTotal;
     if (referenceNumber !== undefined) receipt.referenceNumber = referenceNumber;
     if (comments !== undefined) receipt.comments = comments;
     receipt.contractNo = targetContractNo;

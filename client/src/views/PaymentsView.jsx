@@ -28,7 +28,9 @@ const RENT_SHEET_COLUMNS_DEF = [
   { id: 'paidUpTo', label: 'Paid Up To', defaultVisible: true },
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
   { id: 'paidForMonth', label: 'Month Paid For', defaultVisible: true },
-  { id: 'amount', label: 'Amount Paid', defaultVisible: true },
+  { id: 'rentAmount', label: 'Rent Amount Paid', defaultVisible: true },
+  { id: 'depositAmount', label: 'Deposit Amount', defaultVisible: true },
+  { id: 'amount', label: 'Total Amount Paid', defaultVisible: true },
   { id: 'actions', label: 'Actions', defaultVisible: true },
   { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
   { id: 'adjustedOutstanding', label: 'Adjusted Outstanding (₹)', defaultVisible: false },
@@ -67,6 +69,8 @@ const RECEIPTS_COLUMNS_DEF = [
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
   { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
   { id: 'paidForMonth', label: 'Paid for Month', defaultVisible: false },
+  { id: 'rentAmount', label: 'Rent Amount Paid', defaultVisible: true },
+  { id: 'depositAmount', label: 'Deposit Amount', defaultVisible: true },
   { id: 'totalAmount', label: 'Total Amount Paid', defaultVisible: true },
   { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
   { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
@@ -102,7 +106,9 @@ const DEFAULT_SHEET_COLUMN_WIDTHS = {
   paidUpTo: 105,
   accountingMonth: 140,
   paidForMonth: 150,
-  amount: 115,
+  rentAmount: 125,
+  depositAmount: 115,
+  amount: 125,
   actions: 235,
   adjustmentAmount: 130,
   adjustedOutstanding: 140,
@@ -142,6 +148,8 @@ const DEFAULT_RECEIPTS_COLUMN_WIDTHS = {
   accountingMonth: 140,
   monthsCovered: 150,
   paidForMonth: 150,
+  rentAmount: 125,
+  depositAmount: 115,
   totalAmount: 135,
   adjustmentAmount: 130,
   adjustmentDescription: 180,
@@ -334,7 +342,7 @@ export default function PaymentsView() {
   const [receiptActiveViewId, setReceiptActiveViewId] = useState(null);
 
   const handleSheetHeaderSort = (colId) => {
-    if (['actions', 'paidForMonth', 'amount'].includes(colId)) return;
+    if (['actions', 'paidForMonth', 'amount', 'rentAmount', 'depositAmount'].includes(colId)) return;
     setSheetSortConfig(prev => cycleThreeStateSort(prev, colId));
   };
 
@@ -615,13 +623,26 @@ export default function PaymentsView() {
           ? directAllocated
           : (monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : (item.actualPaidForMonth || 0)));
 
-    // Amount Paid displays the actual collected amount for this month; if 0, leave blank for clean editing
-    const defaultAmount = paidThisMonth > 0 ? paidThisMonth : '';
+    const existingRent = (existingReceipt && !existingReceipt.isReversed && existingReceipt.rentAmount !== undefined && existingReceipt.status !== 'Vacant')
+      ? Number(existingReceipt.rentAmount)
+      : null;
+    const existingDeposit = (existingReceipt && !existingReceipt.isReversed && existingReceipt.depositAmount !== undefined && existingReceipt.status !== 'Vacant')
+      ? Number(existingReceipt.depositAmount)
+      : 0;
+
+    const defaultTotal = paidThisMonth > 0 ? String(paidThisMonth) : '';
+    const defaultDeposit = existingDeposit > 0 ? String(existingDeposit) : '0';
+    const defaultRent = existingRent !== null
+      ? (existingRent > 0 ? String(existingRent) : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : ''))
+      : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : '');
+
     const rowStatus = existingReceipt?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
 
     return {
       status: rowStatus,
-      amount: rowStatus === 'Vacant' ? '0' : defaultAmount,
+      rentAmount: rowStatus === 'Vacant' ? '0' : defaultRent,
+      depositAmount: rowStatus === 'Vacant' ? '0' : defaultDeposit,
+      amount: rowStatus === 'Vacant' ? '0' : defaultTotal,
       selectedMonths: [selectedMonth],
       referenceNumber: ''
     };
@@ -630,16 +651,45 @@ export default function PaymentsView() {
   const updateRowDraft = (rowKey, patch, item) => {
     setRowDrafts(prev => {
       const current = prev[rowKey] || (item ? getRowDraft(item) : {
+        rentAmount: '',
+        depositAmount: '0',
         amount: '',
         selectedMonths: [selectedMonth],
-          referenceNumber: ''
+        referenceNumber: ''
       });
+
+      const merged = { ...current, ...patch };
+
+      // If rentAmount changed directly, update amount (Total Amount Paid = rentAmount + depositAmount)
+      if (patch.rentAmount !== undefined && patch.amount === undefined) {
+        const rVal = patch.rentAmount === '' ? '' : Number(patch.rentAmount) || 0;
+        const dVal = Number(merged.depositAmount) || 0;
+        merged.amount = (patch.rentAmount === '' && (!merged.depositAmount || merged.depositAmount === '0'))
+          ? ''
+          : String((patch.rentAmount === '' ? 0 : rVal) + dVal);
+      }
+      // If depositAmount changed directly, update amount (Total Amount Paid = rentAmount + depositAmount)
+      else if (patch.depositAmount !== undefined && patch.amount === undefined) {
+        const rVal = Number(merged.rentAmount) || 0;
+        const dVal = patch.depositAmount === '' ? '' : Number(patch.depositAmount) || 0;
+        merged.amount = (merged.rentAmount === '' && patch.depositAmount === '')
+          ? ''
+          : String(rVal + (patch.depositAmount === '' ? 0 : dVal));
+      }
+      // If amount (Total Amount Paid) changed directly, default into rentAmount
+      else if (patch.amount !== undefined && patch.rentAmount === undefined) {
+        if (patch.amount === '') {
+          merged.rentAmount = '';
+        } else {
+          const tVal = Number(patch.amount) || 0;
+          const dVal = Number(merged.depositAmount) || 0;
+          merged.rentAmount = String(Math.max(0, tVal - dVal));
+        }
+      }
+
       return {
         ...prev,
-        [rowKey]: {
-          ...current,
-          ...patch
-        }
+        [rowKey]: merged
       };
     });
   };
@@ -785,7 +835,7 @@ export default function PaymentsView() {
 
     updateRowDraft(rowKey, { 
       status: newStatus,
-      ...(isVacant ? { amount: '0', contractNo: '' } : {})
+      ...(isVacant ? { rentAmount: '0', depositAmount: '0', amount: '0', contractNo: '' } : {})
     }, item);
 
     const existingReceipt = findReceiptForUnitAndMonth(item, selectedMonth);
@@ -795,20 +845,26 @@ export default function PaymentsView() {
     try {
       setSavingRows(prev => ({ ...prev, [rowKey]: true }));
       if (existingReceipt) {
+        const prevRent = isVacant ? 0 : Number(existingReceipt.rentAmount ?? existingReceipt.totalAmount ?? 0);
+        const prevDep = isVacant ? 0 : Number(existingReceipt.depositAmount || 0);
+        const prevTot = isVacant ? 0 : Number(existingReceipt.totalAmount || 0);
         await API.put(`/payments/${existingReceipt._id}`, {
           status: newStatus,
           tenantId: isVacant ? null : (item.tenant?._id || item.tenantId || null),
           contractNo: isVacant ? '' : (item.contractNo || ''),
-          totalAmount: isVacant ? 0 : Number(existingReceipt.totalAmount || 0),
+          rentAmount: prevRent,
+          depositAmount: prevDep,
+          totalAmount: prevTot,
           accountingMonth: targetMonth,
           allocations: [{
             rentMonthYear: targetMonth,
-            allocatedAmount: isVacant ? 0 : Number(existingReceipt.totalAmount || 0),
+            allocatedAmount: prevRent,
             contractNo: isVacant ? '' : (item.contractNo || ''),
             notes: isVacant ? 'Unit marked as vacant' : `Rent collection for ${formatMonthYear(targetMonth)}`
           }]
         });
       } else {
+        const expRent = isVacant ? 0 : (item.monthlyRentExpected || 0);
         await API.post('/payments', {
           unitId,
           tenantId: isVacant ? null : (item.tenant?._id || item.tenantId || null),
@@ -816,10 +872,12 @@ export default function PaymentsView() {
           status: newStatus,
           receiptDate: `${targetMonth}-15`,
           accountingMonth: targetMonth,
-          totalAmount: isVacant ? 0 : (item.monthlyRentExpected || 0),
+          rentAmount: expRent,
+          depositAmount: 0,
+          totalAmount: expRent,
           allocations: [{
             rentMonthYear: targetMonth,
-            allocatedAmount: isVacant ? 0 : (item.monthlyRentExpected || 0),
+            allocatedAmount: expRent,
             contractNo: isVacant ? '' : (item.contractNo || ''),
             notes: isVacant ? 'Unit marked as vacant' : `Rent collection for ${formatMonthYear(targetMonth)}`
           }]
@@ -920,12 +978,17 @@ export default function PaymentsView() {
       ? new Date().toISOString().split('T')[0] 
       : `${selectedMonth}-15`;
 
+    const enteredDeposit = Number(draft.depositAmount) || 0;
+    const enteredRent = draft.rentAmount !== undefined && draft.rentAmount !== ''
+      ? Number(draft.rentAmount)
+      : Math.max(0, enteredTotal - enteredDeposit);
+
     try {
       let singleAllocation = [{
         rentMonthYear: targetMonth,
-        allocatedAmount: enteredTotal,
+        allocatedAmount: enteredRent,
         contractNo: resolvedContractNo,
-        notes: `Rent collection for ${formatMonthYear(targetMonth)}`
+        notes: enteredRent > 0 ? `Rent collection for ${formatMonthYear(targetMonth)}` : 'Security deposit'
       }];
 
       if (existingReceipt) {
@@ -935,12 +998,12 @@ export default function PaymentsView() {
           if (prevAlloc.length === 1) {
             singleAllocation = [{
               rentMonthYear: prevAlloc[0].rentMonthYear,
-              allocatedAmount: enteredTotal,
+              allocatedAmount: enteredRent,
               contractNo: resolvedContractNo || prevAlloc[0].contractNo || '',
               notes: prevAlloc[0].notes || `Rent collection for ${formatMonthYear(prevAlloc[0].rentMonthYear)}`
             }];
           } else {
-            let rem = enteredTotal;
+            let rem = enteredRent;
             singleAllocation = prevAlloc.map((a, idx) => {
               const amt = idx === prevAlloc.length - 1 ? rem : Math.min(rem, Number(a.allocatedAmount || 0));
               rem = Math.max(0, rem - amt);
@@ -957,6 +1020,8 @@ export default function PaymentsView() {
         // EDIT EXISTING RECORD IN PLACE - NEVER ADD TO RECORD (with fallback if 404)
         try {
           await API.put(`/payments/${existingReceipt._id}`, {
+            rentAmount: enteredRent,
+            depositAmount: enteredDeposit,
             totalAmount: enteredTotal,
             referenceNumber: draft.referenceNumber !== undefined ? draft.referenceNumber : (existingReceipt.referenceNumber || ''),
             contractNo: resolvedContractNo || existingReceipt.contractNo,
@@ -972,6 +1037,8 @@ export default function PaymentsView() {
               contractNo: resolvedContractNo,
               receiptDate,
               accountingMonth: targetMonth,
+              rentAmount: enteredRent,
+              depositAmount: enteredDeposit,
               totalAmount: enteredTotal,
               referenceNumber: draft.referenceNumber || '',
               status: item.tenant ? 'Rented' : 'Vacant',
@@ -1002,6 +1069,8 @@ export default function PaymentsView() {
           contractNo: resolvedContractNo,
           receiptDate,
           accountingMonth: targetMonth,
+          rentAmount: enteredRent,
+          depositAmount: enteredDeposit,
           totalAmount: enteredTotal,
           referenceNumber: draft.referenceNumber || '',
           status: item.tenant ? 'Rented' : 'Vacant',
@@ -1420,6 +1489,8 @@ export default function PaymentsView() {
           fieldVal = `${acctM} ${formatMonthYear(acctM)}`;
         }
         else if (f.columnId === 'monthsCovered' || f.columnId === 'paidForMonth') fieldVal = months;
+        else if (f.columnId === 'rentAmount') fieldVal = String(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount || 0);
+        else if (f.columnId === 'depositAmount') fieldVal = String(r.depositAmount || 0);
         else if (f.columnId === 'totalAmount') fieldVal = amount;
         else if (f.columnId === 'status') fieldVal = statusMatch;
         else if (f.columnId === 'referenceNumber') fieldVal = refMatch;
@@ -1446,6 +1517,8 @@ export default function PaymentsView() {
       receiptDate: r => r.receiptDate,
       tenant: r => r.tenantId?.name || '',
       monthsCovered: r => r.monthsCovered || '',
+      rentAmount: r => Number(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount) || 0,
+      depositAmount: r => Number(r.depositAmount) || 0,
       totalAmount: r => Number(r.totalAmount) || 0,
       status: r => r.status || 'Rented',
       referenceNumber: r => r.referenceNumber || '',
@@ -1485,6 +1558,8 @@ export default function PaymentsView() {
       'Property': r.unitId?.propertyId?.name || '—',
       'Sub-Unit': r.unitId?.subUnitPartition || r.unitId?.unitName || '—',
       'Month Paid For': r.monthsCovered ? r.monthsCovered.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '—',
+      'Rent Amount Paid (₹)': r.rentAmount !== undefined ? Number(r.rentAmount) : Number(r.totalAmount || 0),
+      'Deposit Amount (₹)': Number(r.depositAmount) || 0,
       'Total Amount Paid (₹)': Number(r.totalAmount) || 0,
       'Status': r.status || 'Rented',
       'Ref / UTR #': r.referenceNumber || '—',
@@ -1596,6 +1671,29 @@ export default function PaymentsView() {
             : (monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : (item.actualPaidForMonth || 0)));
 
       return sum + paid;
+    }, 0);
+  }, [filteredOut, selectedMonth, receipts]);
+
+  const totalRentSum = React.useMemo(() => {
+    return filteredOut.reduce((sum, item) => {
+      const existingReceipt = findReceiptForUnitAndMonth(item, selectedMonth);
+      if (existingReceipt && !existingReceipt.isReversed && existingReceipt.status !== 'Vacant') {
+        const rVal = existingReceipt.rentAmount !== undefined ? Number(existingReceipt.rentAmount) : Number(existingReceipt.totalAmount || 0);
+        return sum + rVal;
+      }
+      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
+      const paid = monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : (item.actualPaidForMonth || 0);
+      return sum + paid;
+    }, 0);
+  }, [filteredOut, selectedMonth, receipts]);
+
+  const totalDepositSum = React.useMemo(() => {
+    return filteredOut.reduce((sum, item) => {
+      const existingReceipt = findReceiptForUnitAndMonth(item, selectedMonth);
+      if (existingReceipt && !existingReceipt.isReversed && existingReceipt.status !== 'Vacant') {
+        return sum + (Number(existingReceipt.depositAmount) || 0);
+      }
+      return sum;
     }, 0);
   }, [filteredOut, selectedMonth, receipts]);
 
@@ -1746,6 +1844,8 @@ export default function PaymentsView() {
         'Paid Up To': item.paidTillMonth && item.paidTillMonth !== 'None' ? formatMonthYear(item.paidTillMonth) : 'None',
         'Accounting Month': formatMonthYear(selectedMonth),
         'Month Paid For': formatMonthYear(selectedMonth),
+        'Rent Amount Paid': item.rentAmountPaid !== undefined ? item.rentAmountPaid : paidThisMonth,
+        'Deposit Amount': item.depositAmount || 0,
         'Total Amount Paid': paidThisMonth,
         'Created Date': item.createdAt ? formatDate(item.createdAt) : '',
         'Modified Date': item.updatedAt ? formatDate(item.updatedAt) : ''
@@ -1961,7 +2061,9 @@ export default function PaymentsView() {
                         else if (colId === 'paidUpTo') { label = 'Paid Up To'; align = 'text-center'; }
                         else if (colId === 'accountingMonth') { label = 'Accounting Month'; align = 'text-center'; }
                         else if (colId === 'paidForMonth') { label = 'Month Paid For'; }
-                        else if (colId === 'amount') { label = 'Amount Paid'; }
+                        else if (colId === 'rentAmount') { label = 'Rent Amount Paid'; align = 'text-right'; }
+                        else if (colId === 'depositAmount') { label = 'Deposit Amount'; align = 'text-right'; }
+                        else if (colId === 'amount') { label = 'Total Amount Paid'; align = 'text-right'; }
                         else if (colId === 'tenantPhone') { label = 'Tenant Phone'; }
                         else if (colId === 'propertyType') { label = 'Property Type'; }
                         else if (colId === 'subUnitArea') { label = 'Area (Sq Ft)'; align = 'text-right'; }
@@ -1977,7 +2079,7 @@ export default function PaymentsView() {
                           if (colDef?.label) label = colDef.label;
                         }
 
-                        const isSortable = !['actions', 'paidForMonth', 'amount'].includes(colId);
+                        const isSortable = !['actions', 'paidForMonth', 'amount', 'rentAmount', 'depositAmount'].includes(colId);
 
                         return (
                           <th
@@ -2372,6 +2474,48 @@ export default function PaymentsView() {
                                 </td>
                               );
                             }
+                            if (colId === 'rentAmount') {
+                              return (
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
+                                  <div className="relative flex items-center">
+                                    <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
+                                    <input
+                                      type="number"
+                                      value={draft.rentAmount ?? ''}
+                                      disabled={savingRows[rowKey]}
+                                      onChange={(e) => updateRowDraft(rowKey, { rentAmount: e.target.value }, item)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleDirectSaveRow(item);
+                                      }}
+                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-extrabold text-emerald-800 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      placeholder="Rent ₹"
+                                      title="Rent Amount Paid (Default). Press Enter to Save."
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            }
+                            if (colId === 'depositAmount') {
+                              return (
+                                <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
+                                  <div className="relative flex items-center">
+                                    <span className="absolute left-2.5 text-slate-400 text-xs font-semibold">₹</span>
+                                    <input
+                                      type="number"
+                                      value={draft.depositAmount ?? ''}
+                                      disabled={savingRows[rowKey]}
+                                      onChange={(e) => updateRowDraft(rowKey, { depositAmount: e.target.value }, item)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleDirectSaveRow(item);
+                                      }}
+                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-bold text-amber-800 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      placeholder="0"
+                                      title="Deposit Amount. Press Enter to Save."
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            }
                             if (colId === 'amount') {
                               return (
                                 <td key={colId} style={frozenStyle} className="px-3 py-3 border-r border-slate-100">
@@ -2385,9 +2529,9 @@ export default function PaymentsView() {
                                       onKeyDown={(e) => {
                                         if (e.key === 'Enter') handleDirectSaveRow(item);
                                       }}
-                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      placeholder="Amount ₹"
-                                      title="Direct editable rent amount. Type custom amount & press Enter to Save."
+                                      className="w-full pl-6 pr-2 py-1.5 text-xs font-black text-slate-900 bg-teal-50/50 border border-teal-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono shadow-xs disabled:bg-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      placeholder="Total ₹"
+                                      title="Total Amount Paid = Rent + Deposit. Press Enter to Save."
                                     />
                                   </div>
                                 </td>
@@ -2688,14 +2832,38 @@ export default function PaymentsView() {
                         else if (colId === 'tenant') content = <span>Total Earning ({formatMonthYear(selectedMonth)})</span>;
                         else if (colId === 'monthlyRent') content = <span title="Total Expected Rent">{formatCurrency(totalExpectedSum)}</span>;
                         else if (colId === 'outstanding') content = <span className="text-rose-700" title="Total Outstanding">{formatCurrency(totalOutstandingSum)}</span>;
-                        else if (colId === 'amount') {
+                        else if (colId === 'rentAmount') {
                             content = (
                               <div className="text-right">
                                 <span className="text-emerald-800 text-xs font-black block font-mono">
-                                  {formatCurrency(totalPaidSum)}
+                                  {formatCurrency(totalRentSum)}
                                 </span>
                                 <span className="text-[10px] text-emerald-600 font-bold block">
-                                  Actual Collected
+                                  Rent Paid
+                                </span>
+                              </div>
+                            );
+                          }
+                        else if (colId === 'depositAmount') {
+                            content = (
+                              <div className="text-right">
+                                <span className="text-amber-800 text-xs font-black block font-mono">
+                                  {formatCurrency(totalDepositSum)}
+                                </span>
+                                <span className="text-[10px] text-amber-600 font-bold block">
+                                  Deposit
+                                </span>
+                              </div>
+                            );
+                          }
+                        else if (colId === 'amount') {
+                            content = (
+                              <div className="text-right">
+                                <span className="text-teal-950 text-xs font-black block font-mono">
+                                  {formatCurrency(totalPaidSum)}
+                                </span>
+                                <span className="text-[10px] text-teal-700 font-bold block">
+                                  Total Paid
                                 </span>
                               </div>
                             );
@@ -2707,7 +2875,7 @@ export default function PaymentsView() {
                             key={colId}
                             style={{ ...frozenStyle, width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
                             className={`py-2.5 px-3 border-r border-emerald-200/60 ${
-                              ['amount', 'monthlyRent', 'outstanding'].includes(colId) ? 'text-right font-mono' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'
+                              ['amount', 'rentAmount', 'depositAmount', 'monthlyRent', 'outstanding'].includes(colId) ? 'text-right font-mono' : colId === 'index' || colId === 'actions' ? 'text-center' : 'text-left'
                             }`}
                           >
                             {content}
@@ -3513,11 +3681,13 @@ export default function PaymentsView() {
                       const frozenStyle = getFrozenColumnStyle(colIndex, frozenReceiptsCount, visibleReceiptsColumns, receiptsWidths, true);
                       let label = colId;
                       let align = 'text-left';
-                      if (['totalAmount', 'actions'].includes(colId)) align = 'text-right';
+                      if (['totalAmount', 'rentAmount', 'depositAmount', 'actions'].includes(colId)) align = 'text-right';
                       if (colId === 'receiptDate') label = 'Date';
                       else if (colId === 'tenant') label = 'Tenant & Sub-Unit';
                       else if (colId === 'accountingMonth') { label = 'Accounting Month'; align = 'text-center'; }
                       else if (colId === 'monthsCovered' || colId === 'paidForMonth') label = 'Month Paid For';
+                      else if (colId === 'rentAmount') label = 'Rent Amount Paid';
+                      else if (colId === 'depositAmount') label = 'Deposit Amount';
                       else if (colId === 'totalAmount') label = 'Total Amount Paid';
                       else if (colId === 'status') label = 'Status';
                       else if (colId === 'referenceNumber') label = 'Ref / UTR #';
@@ -3639,6 +3809,22 @@ export default function PaymentsView() {
                               <span className="inline-flex px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-semibold">
                                 {formatted}
                               </span>
+                            </td>
+                          );
+                        }
+                        if (colId === 'rentAmount') {
+                          const rentVal = r.rentAmount !== undefined ? r.rentAmount : (r.totalAmount || 0);
+                          return (
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-right font-bold text-emerald-800 text-xs font-mono">
+                              {formatCurrency(rentVal)}
+                            </td>
+                          );
+                        }
+                        if (colId === 'depositAmount') {
+                          const depVal = r.depositAmount || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="px-5 py-4 text-right font-bold text-amber-800 text-xs font-mono">
+                              {depVal > 0 ? formatCurrency(depVal) : '—'}
                             </td>
                           );
                         }

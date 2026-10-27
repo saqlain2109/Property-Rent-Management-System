@@ -8785,45 +8785,6 @@
     "__v": 0
   },
   {
-    "_id": "6adf57ac8b915f07e213fc34",
-    "receiptId": "6adf57ac8b915f07e213fc33",
-    "tenantId": "6ada066dd7c483f46dca039c",
-    "unitId": "6ada066dd7c483f46dca037e",
-    "rentMonthYear": "2026-01",
-    "allocatedAmount": 9500,
-    "contractNo": "Rehan-2026",
-    "notes": "Rent for Jan 2026",
-    "createdAt": "2026-10-26T13:37:48.777Z",
-    "updatedAt": "2026-10-26T13:37:48.777Z",
-    "__v": 0
-  },
-  {
-    "_id": "6adf57ac8b915f07e213fc35",
-    "receiptId": "6adf57ac8b915f07e213fc33",
-    "tenantId": "6ada066dd7c483f46dca039c",
-    "unitId": "6ada066dd7c483f46dca037e",
-    "rentMonthYear": "2026-02",
-    "allocatedAmount": 9500,
-    "contractNo": "Rehan-2026",
-    "notes": "Rent for Feb 2026",
-    "createdAt": "2026-10-26T13:37:48.779Z",
-    "updatedAt": "2026-10-26T13:37:48.779Z",
-    "__v": 0
-  },
-  {
-    "_id": "6adf57ac8b915f07e213fc36",
-    "receiptId": "6adf57ac8b915f07e213fc33",
-    "tenantId": "6ada066dd7c483f46dca039c",
-    "unitId": "6ada066dd7c483f46dca037e",
-    "rentMonthYear": "2026-03",
-    "allocatedAmount": 9500,
-    "contractNo": "Rehan-2026",
-    "notes": "Rent for Mar 2026",
-    "createdAt": "2026-10-26T13:37:48.781Z",
-    "updatedAt": "2026-10-26T13:37:48.781Z",
-    "__v": 0
-  },
-  {
     "_id": "6adf587e8b915f07e213fc39",
     "receiptId": "6adf587e8b915f07e213fc38",
     "tenantId": "6ada066dd7c483f46dca039c",

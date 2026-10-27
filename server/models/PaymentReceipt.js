@@ -30,6 +30,14 @@ const paymentReceiptSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  rentAmount: {
+    type: Number,
+    default: 0,
+  },
+  depositAmount: {
+    type: Number,
+    default: 0,
+  },
   totalAmount: {
     type: Number,
     required: true,

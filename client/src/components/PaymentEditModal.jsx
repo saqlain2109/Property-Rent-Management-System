@@ -51,6 +51,8 @@ export default function PaymentEditModal({
     contractNo: '',
     receiptDate: new Date().toISOString().split('T')[0],
     accountingMonth: activeMonth,
+    rentAmount: '',
+    depositAmount: '',
     totalAmount: '',
     referenceNumber: '',
     comments: '',
@@ -80,11 +82,11 @@ export default function PaymentEditModal({
     return '';
   };
 
-  // Sync selected months, total amount and dynamic comments
+  // Sync selected months, rent amount, deposit amount, total amount and dynamic comments
   const syncPaymentState = (newSelectedMap, tenantId, unitId) => {
     setSelectedMonthsMap(newSelectedMap);
 
-    const total = Object.values(newSelectedMap).reduce((s, v) => s + Number(v || 0), 0);
+    const rentTotal = Object.values(newSelectedMap).reduce((s, v) => s + Number(v || 0), 0);
     const activeMonths = Object.keys(newSelectedMap).sort();
 
     let autoComment = '';
@@ -93,9 +95,12 @@ export default function PaymentEditModal({
     }
 
     setPaymentForm(prev => {
+      const depNum = Number(prev.depositAmount) || 0;
+      const combinedTotal = rentTotal + depNum;
       const updated = {
         ...prev,
-        totalAmount: String(total),
+        rentAmount: String(rentTotal),
+        totalAmount: String(combinedTotal),
         comments: (!prev.comments || prev.comments.startsWith('Rent collection for') || prev.comments.startsWith('Rent payment for')) ? autoComment : prev.comments
       };
       if (tenantId !== undefined) updated.tenantId = tenantId;
@@ -228,6 +233,8 @@ export default function PaymentEditModal({
           const activeContract = recData?.contractNo || resolveContractForTargetMonth(tenantId, unitId, activeMonth, curAssignments) || '';
           const receiptDateStr = recData?.receiptDate ? new Date(recData.receiptDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
           const recTotal = recData?.totalAmount ?? recData?.receiptTotalAmount ?? 0;
+          const recDep = recData?.depositAmount !== undefined ? Number(recData.depositAmount) : 0;
+          const recRent = recData?.rentAmount !== undefined ? Number(recData.rentAmount) : (recTotal - recDep);
 
           setPaymentForm({
             status: recData?.status || 'Rented',
@@ -236,6 +243,8 @@ export default function PaymentEditModal({
             contractNo: activeContract,
             receiptDate: receiptDateStr,
             accountingMonth: recData?.accountingMonth || activeMonth,
+            rentAmount: String(recRent),
+            depositAmount: String(recDep),
             totalAmount: String(recTotal),
             referenceNumber: recData?.referenceNumber || '',
             comments: recData?.comments || `Rent payment for ${formatMonthYear(activeMonth)}`,
@@ -295,6 +304,8 @@ export default function PaymentEditModal({
             contractNo: activeContract,
             receiptDate,
             accountingMonth: activeMonth,
+            rentAmount: String(defaultAmt),
+            depositAmount: '0',
             totalAmount: String(defaultAmt),
             referenceNumber: '',
             comments: `Rent collection for ${formatMonthYear(activeMonth)}`,
@@ -323,6 +334,9 @@ export default function PaymentEditModal({
         status: 'Vacant',
         tenantId: '',
         contractNo: '',
+        rentAmount: '0',
+        depositAmount: '0',
+        totalAmount: '0',
         comments: `Unit marked vacant for ${formatMonthYear(activeMonth)}`
       }));
       setSelectedMonthsMap({});
@@ -390,26 +404,25 @@ export default function PaymentEditModal({
     const updated = { ...selectedMonthsMap, [monthYear]: val };
     setSelectedMonthsMap(updated);
 
-    const total = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
-    setPaymentForm(f => ({
-      ...f,
-      totalAmount: String(total)
-    }));
+    const rentTotal = Object.values(updated).reduce((s, v) => s + Number(v || 0), 0);
+    setPaymentForm(f => {
+      const depNum = Number(f.depositAmount) || 0;
+      return {
+        ...f,
+        rentAmount: String(rentTotal),
+        totalAmount: String(rentTotal + depNum)
+      };
+    });
   };
 
-  const handleTotalAmountChange = (newVal) => {
-    setPaymentForm(f => ({ ...f, totalAmount: newVal }));
-
-    if (newVal === '') return;
-    const enteredNum = Number(newVal);
-    if (isNaN(enteredNum) || enteredNum < 0) return;
-
-    // Distribute enteredNum across active selected months so allocations always match
+  // Helper to distribute rent amount across active selected months
+  const distributeRentAcrossMonths = (enteredRentNum) => {
+    if (isNaN(enteredRentNum) || enteredRentNum < 0) return;
     const activeMonths = Object.keys(selectedMonthsMap).sort();
     if (activeMonths.length === 1) {
-      setSelectedMonthsMap({ [activeMonths[0]]: enteredNum });
+      setSelectedMonthsMap({ [activeMonths[0]]: enteredRentNum });
     } else if (activeMonths.length > 1) {
-      let rem = enteredNum;
+      let rem = enteredRentNum;
       const updated = {};
       const defaultRate = selectedTenantInfo?.monthlyRate || 22000;
       activeMonths.forEach((m, idx) => {
@@ -423,10 +436,73 @@ export default function PaymentEditModal({
       });
       setSelectedMonthsMap(updated);
     } else {
-      // Auto-allocate entered amount to earliest unpaid month or active month
       const targetMonth = unpaidMonthsList.length > 0 ? unpaidMonthsList[0].monthYear : activeMonth;
-      setSelectedMonthsMap({ [targetMonth]: enteredNum });
+      setSelectedMonthsMap({ [targetMonth]: enteredRentNum });
     }
+  };
+
+  // Handle changes to Rent Amount Paid
+  const handleRentAmountChange = (newRentVal) => {
+    const rentNum = newRentVal === '' ? 0 : Number(newRentVal);
+    const depNum = Number(paymentForm.depositAmount) || 0;
+    const calculatedTotal = (newRentVal === '' && (!paymentForm.depositAmount || paymentForm.depositAmount === '0'))
+      ? ''
+      : String((isNaN(rentNum) ? 0 : rentNum) + depNum);
+
+    setPaymentForm(f => ({
+      ...f,
+      rentAmount: newRentVal,
+      totalAmount: calculatedTotal
+    }));
+
+    if (newRentVal !== '' && !isNaN(rentNum)) {
+      distributeRentAcrossMonths(rentNum);
+    }
+  };
+
+  // Handle changes to Deposit Amount
+  const handleDepositAmountChange = (newDepVal) => {
+    const rentNum = Number(paymentForm.rentAmount) || 0;
+    const depNum = newDepVal === '' ? 0 : Number(newDepVal);
+    const calculatedTotal = (paymentForm.rentAmount === '' && newDepVal === '')
+      ? ''
+      : String(rentNum + (isNaN(depNum) ? 0 : depNum));
+
+    setPaymentForm(f => ({
+      ...f,
+      depositAmount: newDepVal,
+      totalAmount: calculatedTotal
+    }));
+  };
+
+  // Handle changes to Total Amount Paid (defaults into Rent Amount Paid)
+  const handleTotalAmountChange = (newVal) => {
+    if (newVal === '') {
+      setPaymentForm(f => ({
+        ...f,
+        totalAmount: '',
+        rentAmount: ''
+      }));
+      distributeRentAcrossMonths(0);
+      return;
+    }
+    const enteredNum = Number(newVal);
+    if (isNaN(enteredNum) || enteredNum < 0) {
+      setPaymentForm(f => ({ ...f, totalAmount: newVal }));
+      return;
+    }
+
+    // By default, all payments received will come in Rent Amount Paid:
+    const depNum = Number(paymentForm.depositAmount) || 0;
+    const calculatedRent = Math.max(0, enteredNum - depNum);
+
+    setPaymentForm(f => ({
+      ...f,
+      totalAmount: newVal,
+      rentAmount: String(calculatedRent)
+    }));
+
+    distributeRentAcrossMonths(calculatedRent);
   };
 
   const handleAddAdvanceMonth = (monthStr) => {
@@ -498,7 +574,9 @@ export default function PaymentEditModal({
       return;
     }
 
-    const enteredTotal = Number(paymentForm.totalAmount) || 0;
+    const enteredRent = Number(paymentForm.rentAmount) || 0;
+    const enteredDeposit = Number(paymentForm.depositAmount) || 0;
+    const enteredTotal = enteredRent + enteredDeposit;
 
     // SCENARIO: User wants to make amount paid zero / remove payment
     if (enteredTotal === 0) {
@@ -559,7 +637,7 @@ export default function PaymentEditModal({
     if (paymentForm.status === 'Vacant' && allocations.length === 0) {
       allocations = [{
         rentMonthYear: activeMonth,
-        allocatedAmount: Number(paymentForm.totalAmount) || 0,
+        allocatedAmount: 0,
         contractNo: '',
         notes: 'Vacant unit record'
       }];
@@ -574,9 +652,9 @@ export default function PaymentEditModal({
 
         allocations = [{
           rentMonthYear: fallbackMonth,
-          allocatedAmount: enteredTotal,
+          allocatedAmount: enteredRent,
           contractNo: matchedContract,
-          notes: `Rent collection for ${formatMonthYear(fallbackMonth)}`
+          notes: enteredRent > 0 ? `Rent collection for ${formatMonthYear(fallbackMonth)}` : 'Security deposit'
         }];
       } else {
         alert('Please enter a valid amount paid.');
@@ -586,9 +664,9 @@ export default function PaymentEditModal({
 
     const totalAllocated = allocations.reduce((s, a) => s + a.allocatedAmount, 0);
 
-    // Auto-balance if there is any minor rounding/difference so user is never blocked
-    if (allocations.length > 0 && Math.abs(enteredTotal - totalAllocated) > 0.01) {
-      allocations[allocations.length - 1].allocatedAmount += (enteredTotal - totalAllocated);
+    // Auto-balance rent allocations against enteredRent so user is never blocked
+    if (allocations.length > 0 && Math.abs(enteredRent - totalAllocated) > 0.01) {
+      allocations[allocations.length - 1].allocatedAmount += (enteredRent - totalAllocated);
     }
 
     try {
@@ -603,6 +681,8 @@ export default function PaymentEditModal({
         contractNo: isVacant ? '' : (paymentForm.contractNo || ''),
         receiptDate: paymentForm.receiptDate,
         accountingMonth: paymentForm.accountingMonth || activeMonth,
+        rentAmount: enteredRent,
+        depositAmount: enteredDeposit,
         totalAmount: enteredTotal,
         referenceNumber: paymentForm.referenceNumber || '',
         comments: paymentForm.comments || '',
@@ -1043,24 +1123,80 @@ export default function PaymentEditModal({
                 </div>
               </div>
 
-              {/* AMOUNT PAID (₹) & QUICK 1-CLICK BUTTONS */}
-              <div className="space-y-1.5">
+              {/* RENT AMOUNT PAID & DEPOSIT AMOUNT (TWO FIELDS) */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* 1. Rent Amount Paid */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
+                      Rent Amount Paid (₹) <span className="text-rose-500">*</span>
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-2 text-slate-400 font-bold text-xs">₹</span>
+                    <input
+                      type="number"
+                      value={paymentForm.rentAmount ?? ''}
+                      onChange={(e) => handleRentAmountChange(e.target.value)}
+                      placeholder="e.g. 22000"
+                      className="w-full pl-6 pr-2 py-1.5 rounded-xl border-2 border-emerald-500 bg-white text-xs font-extrabold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-mono shadow-2xs"
+                    />
+                  </div>
+                  <span className="text-[10px] text-emerald-700 font-medium block">
+                    Default receiver of payments
+                  </span>
+                </div>
+
+                {/* 2. Deposit Amount */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
+                      Deposit Amount (₹)
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-2 text-slate-400 font-bold text-xs">₹</span>
+                    <input
+                      type="number"
+                      value={paymentForm.depositAmount ?? ''}
+                      onChange={(e) => handleDepositAmountChange(e.target.value)}
+                      placeholder="0"
+                      className="w-full pl-6 pr-2 py-1.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono shadow-2xs"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-medium block">
+                    Security / advance deposit
+                  </span>
+                </div>
+              </div>
+
+              {/* 3. Total Amount Paid (Total of Rent Amount Paid + Deposit Amount) */}
+              <div className="p-2.5 rounded-xl bg-teal-50/60 border border-teal-200/80 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
-                    Amount Paid (₹) <span className="text-rose-500">*</span>
+                  <label className="block text-xs font-black text-teal-950 uppercase tracking-wider">
+                    Total Amount Paid (₹) <span className="text-rose-500">*</span>
                   </label>
-                  <span className="text-[10px] text-slate-400">Total collection amount</span>
+                  <span className="text-[10px] text-teal-700 font-bold font-mono">
+                    Rent + Deposit
+                  </span>
                 </div>
                 <div className="relative">
-                  <span className="absolute left-3 top-2 text-slate-400 font-bold text-sm">₹</span>
+                  <span className="absolute left-3 top-2 text-teal-600 font-bold text-sm">₹</span>
                   <input
                     type="number"
                     required
-                    value={paymentForm.totalAmount}
+                    value={paymentForm.totalAmount ?? ''}
                     onChange={(e) => handleTotalAmountChange(e.target.value)}
-                    placeholder="e.g. 22000"
-                    className="w-full pl-7 pr-3 py-1.5 rounded-xl border-2 border-emerald-400 bg-white text-sm font-extrabold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-mono shadow-2xs"
+                    placeholder="Total amount"
+                    className="w-full pl-7 pr-3 py-1.5 rounded-xl border-2 border-teal-500 bg-white text-sm font-black text-teal-950 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono shadow-2xs"
                   />
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono text-slate-600 px-1">
+                  <span>Rent: <b className="text-emerald-700">{formatCurrency(Number(paymentForm.rentAmount) || 0)}</b></span>
+                  <span>+</span>
+                  <span>Deposit: <b className="text-amber-700">{formatCurrency(Number(paymentForm.depositAmount) || 0)}</b></span>
+                  <span>=</span>
+                  <span>Total: <b className="text-teal-900 font-black">{formatCurrency(Number(paymentForm.totalAmount) || 0)}</b></span>
                 </div>
                 {paymentForm.status === 'Vacant' && (
                   <div className="pt-0.5">
@@ -1314,8 +1450,10 @@ export default function PaymentEditModal({
                 {(() => {
                   const activeMonths = Object.keys(selectedMonthsMap);
                   const totalAlloc = activeMonths.reduce((s, m) => s + Number(selectedMonthsMap[m] || 0), 0);
+                  const enteredRent = Number(paymentForm.rentAmount) || 0;
+                  const enteredDep = Number(paymentForm.depositAmount) || 0;
                   const enteredTot = Number(paymentForm.totalAmount) || 0;
-                  const diff = Math.abs(enteredTot - totalAlloc);
+                  const diff = Math.abs(enteredRent - totalAlloc);
                   const isMatch = diff < 0.01;
 
                   return (
@@ -1325,21 +1463,21 @@ export default function PaymentEditModal({
                         : 'bg-amber-50/80 border-amber-300 text-amber-900'
                     }`}>
                       <div className="flex items-center justify-between font-bold">
-                        <span>Allocated: {formatCurrency(totalAlloc)}</span>
-                        <span>Total Paid: {formatCurrency(enteredTot)}</span>
+                        <span>Allocated Rent: {formatCurrency(totalAlloc)}</span>
+                        <span>Rent Paid: {formatCurrency(enteredRent)}</span>
                       </div>
                       <div className="text-[10px] mt-1 flex items-center justify-between">
                         {isMatch ? (
                           <span className="text-emerald-700 font-extrabold flex items-center gap-1">
-                            <Check className="w-3 h-3" /> Allocations match receipt total
+                            <Check className="w-3 h-3" /> Rent allocations match
                           </span>
                         ) : (
                           <span className="text-amber-800 font-extrabold">
-                            Difference: {formatCurrency(diff)} ({enteredTot > totalAlloc ? 'under-allocated' : 'over-allocated'})
+                            Difference: {formatCurrency(diff)} ({enteredRent > totalAlloc ? 'under-allocated' : 'over-allocated'})
                           </span>
                         )}
                         <span className="font-mono text-slate-500">
-                          {activeMonths.length} Month(s)
+                          Total: {formatCurrency(enteredTot)}{enteredDep > 0 ? ` (incl ₹${enteredDep} deposit)` : ''}
                         </span>
                       </div>
                     </div>

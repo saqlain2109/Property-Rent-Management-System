@@ -65,7 +65,9 @@ const ALL_INCOME_COLUMNS_DEF = [
   { id: 'deposit', label: 'Security Deposit (₹)', defaultVisible: false },
   { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
   { id: 'status', label: 'Status', defaultVisible: true },
-  { id: 'totalAmount', label: 'Amount (₹)', defaultVisible: true },
+  { id: 'rentAmount', label: 'Rent Amount Paid (₹)', defaultVisible: true },
+  { id: 'depositAmount', label: 'Deposit Amount (₹)', defaultVisible: true },
+  { id: 'totalAmount', label: 'Total Amount Paid (₹)', defaultVisible: true },
   { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
   { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
   { id: 'referenceNumber', label: 'Ref / Cheque #', defaultVisible: true },
@@ -91,6 +93,8 @@ const DEFAULT_INCOME_COLS = [
   'status',
   'referenceNumber',
   'comments',
+  'rentAmount',
+  'depositAmount',
   'totalAmount',
   'actions'
 ];
@@ -128,6 +132,8 @@ const DEFAULT_INCOME_COLUMN_WIDTHS = {
   deposit: 130,
   monthsCovered: 150,
   status: 95,
+  rentAmount: 130,
+  depositAmount: 120,
   totalAmount: 130,
   adjustmentAmount: 140,
   adjustmentDescription: 180,
@@ -184,6 +190,8 @@ const getIncomeFieldVal = (r, colId) => {
       return rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '';
     }
     case 'status': return r.status || 'Rented';
+    case 'rentAmount': return Number(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount) || 0;
+    case 'depositAmount': return Number(r.depositAmount) || 0;
     case 'totalAmount': return Number(r.totalAmount) || 0;
     case 'adjustmentAmount': return Number(r.adjustmentAmount) || 0;
     case 'adjustmentDescription': return r.adjustmentDescription || '';
@@ -365,7 +373,7 @@ export default function AllIncomeReportView() {
     // 3. Sorting (supports all backend columns)
     if (sortConfig.key) {
       rows = sortDataRows(rows, sortConfig.key, sortConfig.direction, (item, key) => {
-        if (['totalAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(key)) {
+        if (['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(key)) {
           return Number(getIncomeFieldVal(item, key)) || 0;
         }
         if (['receiptDate', 'createdAt', 'updatedAt', 'reversalDate'].includes(key)) {
@@ -395,7 +403,7 @@ export default function AllIncomeReportView() {
         exportCols.forEach(col => {
           if (col.id === 'index') return;
           const val = getIncomeFieldVal(r, col.id);
-          row[col.label] = ['totalAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(col.id)
+          row[col.label] = ['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(col.id)
             ? (Number(val) || 0)
             : val;
         });
@@ -432,6 +440,8 @@ export default function AllIncomeReportView() {
       customContractNo: '',
       isCustomContract: false,
       status: r.status || 'Rented',
+      rentAmount: String(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount || 0),
+      depositAmount: String(r.depositAmount || 0),
       totalAmount: String(r.totalAmount || 0),
       referenceNumber: r.referenceNumber || '',
       comments: r.comments || ''
@@ -487,7 +497,11 @@ export default function AllIncomeReportView() {
     try {
       setSavingReceipt(true);
       const targetMonth = editForm.rentMonthYear || editForm.receiptDate.slice(0, 7);
-      const amountNum = Number(editForm.totalAmount);
+      const depNum = Number(editForm.depositAmount) || 0;
+      const rentNum = editForm.rentAmount !== undefined && editForm.rentAmount !== ''
+        ? Number(editForm.rentAmount)
+        : Math.max(0, (Number(editForm.totalAmount) || 0) - depNum);
+      const totalNum = rentNum + depNum;
       const resolvedContractNo = editForm.status === 'Vacant' ? '' : (editForm.isCustomContract
         ? (editForm.customContractNo || editForm.contractNo) : editForm.contractNo);
 
@@ -495,7 +509,9 @@ export default function AllIncomeReportView() {
         receiptNumber: editForm.receiptNumber.trim(),
         receiptDate: editForm.receiptDate,
         status: editForm.status || 'Rented',
-        totalAmount: amountNum,
+        rentAmount: rentNum,
+        depositAmount: depNum,
+        totalAmount: totalNum,
         referenceNumber: editForm.referenceNumber,
         contractNo: resolvedContractNo,
         tenantId: editForm.status === 'Vacant' ? null : (editForm.tenantId || undefined),
@@ -504,7 +520,7 @@ export default function AllIncomeReportView() {
         allocations: [
           {
             rentMonthYear: targetMonth,
-            allocatedAmount: amountNum,
+            allocatedAmount: rentNum,
             contractNo: resolvedContractNo,
             notes: editForm.comments || ''
           }
@@ -632,7 +648,7 @@ export default function AllIncomeReportView() {
 
                     const isActions = colId === 'actions';
                     const isIndex = colId === 'index';
-                    const isAmount = colId === 'totalAmount';
+                    const isAmount = ['totalAmount', 'rentAmount', 'depositAmount', 'monthlyRentExpected', 'adjustmentAmount', 'deposit'].includes(colId);
                     const align = isActions || isIndex ? 'text-center' : isAmount ? 'text-right' : 'text-left';
 
                     return (
@@ -807,6 +823,24 @@ export default function AllIncomeReportView() {
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-slate-600 text-[11px] max-w-xs truncate" title={r.comments}>
                               {r.comments || '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'rentAmount') {
+                          const rVal = r.rentAmount !== undefined ? r.rentAmount : (r.totalAmount || 0);
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono font-bold text-emerald-800 whitespace-nowrap">
+                              {formatCurrency(rVal)}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'depositAmount') {
+                          const dVal = r.depositAmount || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono font-bold text-amber-800 whitespace-nowrap">
+                              {dVal > 0 ? formatCurrency(dVal) : '—'}
                             </td>
                           );
                         }
@@ -1165,18 +1199,68 @@ export default function AllIncomeReportView() {
                     />
                   </div>
 
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Rent Amount Paid (₹) <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editForm.rentAmount ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditForm(f => ({
+                            ...f,
+                            rentAmount: val,
+                            totalAmount: String((Number(val) || 0) + (Number(f.depositAmount) || 0))
+                          }));
+                        }}
+                        className="w-full px-2.5 py-1.5 text-xs font-bold rounded-xl border border-emerald-300 text-emerald-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        placeholder="e.g. 25000"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Deposit Amount (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editForm.depositAmount ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditForm(f => ({
+                            ...f,
+                            depositAmount: val,
+                            totalAmount: String((Number(f.rentAmount) || 0) + (Number(val) || 0))
+                          }));
+                        }}
+                        className="w-full px-2.5 py-1.5 text-xs font-bold rounded-xl border border-slate-300 text-amber-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Amount (₹) <span className="text-rose-500">*</span>
+                      Total Amount Paid (₹) <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="number"
                       required
                       min="0"
                       value={editForm.totalAmount}
-                      onChange={(e) => setEditForm({ ...editForm, totalAmount: e.target.value })}
-                      className="w-full px-3 py-1.5 text-sm font-black rounded-xl border border-slate-300 text-emerald-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                      placeholder="e.g. 25000"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditForm(f => ({
+                          ...f,
+                          totalAmount: val,
+                          rentAmount: String(Math.max(0, (Number(val) || 0) - (Number(f.depositAmount) || 0)))
+                        }));
+                      }}
+                      className="w-full px-3 py-1.5 text-sm font-black rounded-xl border-2 border-teal-500 text-teal-900 bg-teal-50/30 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      placeholder="Total amount"
                     />
                   </div>
                 </div>
