@@ -349,6 +349,75 @@ export default function PaymentsView() {
     setReceiptSortConfig(prev => cycleThreeStateSort(prev, colId));
   };
 
+  // Locate existing receipt for a unit in a given month (strictly ONE receipt per unit per month)
+  const findReceiptForUnitAndMonth = (item, targetMonth = selectedMonth) => {
+    const unitIdStr = String(item?.unit?._id || item?.unitId?._id || item?.unitId || item?.unit || '');
+    if (!unitIdStr) return null;
+    const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
+
+    const matchesMonth = (r) => {
+      if (r.allocations && r.allocations.some(a => a.rentMonthYear === targetMonth)) return true;
+      if (r.accountingMonth === targetMonth) return true;
+      if (typeof r.accountingMonth === 'string' && r.accountingMonth.startsWith(targetMonth)) return true;
+      if (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) return true;
+      return false;
+    };
+
+    // Priority 1: Match unit, contractNo, and month
+    if (contractNoStr) {
+      const contractMatch = receipts.find(r => {
+        if (r.isReversed) return false;
+        if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
+        const rContract = String(r.contractNo || '').trim().toLowerCase();
+        if (rContract === contractNoStr) {
+          return matchesMonth(r);
+        }
+        return false;
+      });
+      if (contractMatch) return contractMatch;
+    }
+
+    // Priority 2: Strict Rule - Only ONE receipt per property unit per month
+    return receipts.find(r => {
+      if (r.isReversed) return false;
+      if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
+      return matchesMonth(r);
+    }) || null;
+  };
+
+  // Resolve accurate month(s) paid for a unit/item from existing receipt or allocations
+  const resolveSelectedMonthsForItem = (item, targetMonth = selectedMonth, existingReceipt = null) => {
+    const rec = existingReceipt || findReceiptForUnitAndMonth(item, targetMonth);
+    if (rec?.allocations && Array.isArray(rec.allocations) && rec.allocations.length > 0) {
+      const positiveAllocMonths = rec.allocations
+        .filter(a => Number(a.allocatedAmount ?? a.actualAllocated ?? 0) > 0 && a.rentMonthYear)
+        .map(a => a.rentMonthYear);
+      if (positiveAllocMonths.length > 0) {
+        return [...new Set(positiveAllocMonths)];
+      }
+      const allAllocMonths = rec.allocations.filter(a => a.rentMonthYear).map(a => a.rentMonthYear);
+      if (allAllocMonths.length > 0) {
+        return [...new Set(allAllocMonths)];
+      }
+    }
+
+    if (rec?.monthPaidFor) {
+      const mList = String(rec.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
+      if (mList.length > 0) {
+        return [...new Set(mList)];
+      }
+    }
+
+    if (item?.monthPaidFor) {
+      const mList = String(item.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
+      if (mList.length > 0) {
+        return [...new Set(mList)];
+      }
+    }
+
+    return [targetMonth];
+  };
+
   const sheetFilterSuggestions = React.useMemo(() => {
     return {
       accountingMonth: [formatMonthYear(selectedMonth)],
@@ -536,39 +605,6 @@ export default function PaymentsView() {
       isOverdue: false,
       isCurrentPaid: true
     };
-  };
-
-  // Resolve accurate month(s) paid for a unit/item from existing receipt or allocations
-  const resolveSelectedMonthsForItem = (item, targetMonth = selectedMonth, existingReceipt = null) => {
-    const rec = existingReceipt || findReceiptForUnitAndMonth(item, targetMonth);
-    if (rec?.allocations && Array.isArray(rec.allocations) && rec.allocations.length > 0) {
-      const positiveAllocMonths = rec.allocations
-        .filter(a => Number(a.allocatedAmount ?? a.actualAllocated ?? 0) > 0 && a.rentMonthYear)
-        .map(a => a.rentMonthYear);
-      if (positiveAllocMonths.length > 0) {
-        return [...new Set(positiveAllocMonths)];
-      }
-      const allAllocMonths = rec.allocations.filter(a => a.rentMonthYear).map(a => a.rentMonthYear);
-      if (allAllocMonths.length > 0) {
-        return [...new Set(allAllocMonths)];
-      }
-    }
-
-    if (rec?.monthPaidFor) {
-      const mList = String(rec.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
-      if (mList.length > 0) {
-        return [...new Set(mList)];
-      }
-    }
-
-    if (item?.monthPaidFor) {
-      const mList = String(item.monthPaidFor).split(',').map(s => s.trim()).filter(Boolean);
-      if (mList.length > 0) {
-        return [...new Set(mList)];
-      }
-    }
-
-    return [targetMonth];
   };
 
   // Get all payable months for a tenant (unpaid overdue months + active month if unpaid + upcoming advance months)
@@ -801,42 +837,6 @@ export default function PaymentsView() {
       selectedMonths: nextMonths,
       amount: totalAmt
     }, item);
-  };
-
-  // Locate existing receipt for a unit in a given month (strictly ONE receipt per unit per month)
-  const findReceiptForUnitAndMonth = (item, targetMonth = selectedMonth) => {
-    const unitIdStr = String(item?.unit?._id || item?.unitId?._id || item?.unitId || item?.unit || '');
-    if (!unitIdStr) return null;
-    const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
-
-    const matchesMonth = (r) => {
-      if (r.allocations && r.allocations.some(a => a.rentMonthYear === targetMonth)) return true;
-      if (r.accountingMonth === targetMonth) return true;
-      if (typeof r.accountingMonth === 'string' && r.accountingMonth.startsWith(targetMonth)) return true;
-      if (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) return true;
-      return false;
-    };
-
-    // Priority 1: Match unit, contractNo, and month
-    if (contractNoStr) {
-      const contractMatch = receipts.find(r => {
-        if (r.isReversed) return false;
-        if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
-        const rContract = String(r.contractNo || '').trim().toLowerCase();
-        if (rContract === contractNoStr) {
-          return matchesMonth(r);
-        }
-        return false;
-      });
-      if (contractMatch) return contractMatch;
-    }
-
-    // Priority 2: Strict Rule - Only ONE receipt per property unit per month
-    return receipts.find(r => {
-      if (r.isReversed) return false;
-      if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
-      return matchesMonth(r);
-    }) || null;
   };
 
   // Permanently delete payment receipt for a row on the collection screen
