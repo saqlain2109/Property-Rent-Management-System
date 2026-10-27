@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import API from '../services/api';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, formatDate } from '../utils/formatters';
 import { 
   Building2, Calendar, Download, RefreshCw, Filter, 
   Search, CheckSquare, Square, FileSpreadsheet,
   CheckCircle2, AlertCircle, ArrowUpDown, ChevronDown, ChevronRight,
   Layers, Wallet, IndianRupee, PieChart, TrendingUp, TrendingDown,
-  Users, Sparkles, X, Eye, EyeOff, FileText, Check, ShieldCheck, Table
+  Users, Sparkles, X, Eye, EyeOff, FileText, Check, ShieldCheck, Table,
+  Phone, MapPin
 } from 'lucide-react';
 import ApexToolbar from '../components/ApexToolbar';
 import { cycleThreeStateSort } from '../utils/tableUtils';
@@ -41,40 +42,32 @@ function getTenantTheme(tenantIdOrName) {
   return TENANT_COLOR_PALETTES[idx];
 }
 
-const MONTH_NAMES = [
-  { num: '01', name: 'Jan' },
-  { num: '02', name: 'Feb' },
-  { num: '03', name: 'Mar' },
-  { num: '04', name: 'Apr' },
-  { num: '05', name: 'May' },
-  { num: '06', name: 'Jun' },
-  { num: '07', name: 'Jul' },
-  { num: '08', name: 'Aug' },
-  { num: '09', name: 'Sep' },
-  { num: '10', name: 'Oct' },
-  { num: '11', name: 'Nov' },
-  { num: '12', name: 'Dec' },
-];
+const formatMonthLabel = (m) => {
+  if (!m) return '';
+  const [y, mm] = m.split('-');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const idx = parseInt(mm, 10) - 1;
+  return `${months[idx] || mm} ${y}`;
+};
 
 export default function LeaseContractReportView() {
-  // Filters State
+  // Filters State (Month Wise Report Style)
   const [selectedYear, setSelectedYear] = useState(() => {
-    return localStorage.getItem('lease_contract_year') || '2026';
+    return localStorage.getItem('lease_contract_year_v2') || 'all';
   });
   const [startMonth, setStartMonth] = useState(() => {
-    return localStorage.getItem('lease_contract_start_month') || '01';
+    return localStorage.getItem('lease_contract_start_month_v2') || '';
   });
   const [endMonth, setEndMonth] = useState(() => {
-    return localStorage.getItem('lease_contract_end_month') || '12';
+    return localStorage.getItem('lease_contract_end_month_v2') || '';
   });
   const [selectedTenantFilter, setSelectedTenantFilter] = useState(() => {
-    return localStorage.getItem('lease_contract_tenant_filter') || '';
+    return localStorage.getItem('lease_contract_tenant_filter_v2') || '';
   });
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState(() => {
-    return localStorage.getItem('lease_contract_prop_filter') || '';
+    return localStorage.getItem('lease_contract_prop_filter_v2') || '';
   });
 
-  const [viewMode, setViewMode] = useState('graphical'); // 'graphical' | 'matrix'
   const [searchTerm, setSearchTerm] = useState('');
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,23 +91,23 @@ export default function LeaseContractReportView() {
 
   // Persist filters
   useEffect(() => {
-    localStorage.setItem('lease_contract_year', selectedYear);
+    localStorage.setItem('lease_contract_year_v2', selectedYear);
   }, [selectedYear]);
 
   useEffect(() => {
-    localStorage.setItem('lease_contract_start_month', startMonth);
+    localStorage.setItem('lease_contract_start_month_v2', startMonth);
   }, [startMonth]);
 
   useEffect(() => {
-    localStorage.setItem('lease_contract_end_month', endMonth);
+    localStorage.setItem('lease_contract_end_month_v2', endMonth);
   }, [endMonth]);
 
   useEffect(() => {
-    localStorage.setItem('lease_contract_tenant_filter', selectedTenantFilter);
+    localStorage.setItem('lease_contract_tenant_filter_v2', selectedTenantFilter);
   }, [selectedTenantFilter]);
 
   useEffect(() => {
-    localStorage.setItem('lease_contract_prop_filter', selectedPropertyFilter);
+    localStorage.setItem('lease_contract_prop_filter_v2', selectedPropertyFilter);
   }, [selectedPropertyFilter]);
 
   // Fetch report data
@@ -159,7 +152,17 @@ export default function LeaseContractReportView() {
 
   // Available filters from backend
   const availableYears = useMemo(() => {
-    return reportData?.availableYears || ['2026', '2025', '2024', '2027'];
+    return reportData?.availableYears || ['2027', '2026', '2025', '2024', '2023', '2022', '2021'];
+  }, [reportData]);
+
+  const availableMonths = useMemo(() => {
+    if (reportData?.availableMonths && reportData.availableMonths.length > 0) {
+      return reportData.availableMonths;
+    }
+    if (reportData?.months && reportData.months.length > 0) {
+      return reportData.months;
+    }
+    return [];
   }, [reportData]);
 
   const tenantsList = useMemo(() => {
@@ -368,35 +371,24 @@ export default function LeaseContractReportView() {
 
   // Quick preset handlers
   const applyPreset = (presetType) => {
+    const yr = selectedYear !== 'all' ? selectedYear : '2026';
     if (presetType === 'full') {
-      setStartMonth('01');
-      setEndMonth('12');
-    } else if (presetType === 'q1') {
-      setStartMonth('01');
-      setEndMonth('03');
-    } else if (presetType === 'q2') {
-      setStartMonth('04');
-      setEndMonth('06');
-    } else if (presetType === 'q3') {
-      setStartMonth('07');
-      setEndMonth('09');
-    } else if (presetType === 'q4') {
-      setStartMonth('10');
-      setEndMonth('12');
+      setStartMonth(`${yr}-01`);
+      setEndMonth(`${yr}-12`);
     } else if (presetType === 'h1') {
-      setStartMonth('01');
-      setEndMonth('06');
+      setStartMonth(`${yr}-01`);
+      setEndMonth(`${yr}-06`);
     } else if (presetType === 'h2') {
-      setStartMonth('07');
-      setEndMonth('12');
+      setStartMonth(`${yr}-07`);
+      setEndMonth(`${yr}-12`);
     }
   };
 
   // Reset all filters
   const resetFilters = () => {
-    setSelectedYear('2026');
-    setStartMonth('01');
-    setEndMonth('12');
+    setSelectedYear('all');
+    setStartMonth('');
+    setEndMonth('');
     setSelectedTenantFilter('');
     setSelectedPropertyFilter('');
     setSearchTerm('');
@@ -405,260 +397,157 @@ export default function LeaseContractReportView() {
   const summary = reportData?.summary;
 
   return (
-    <div className="space-y-3 pb-12">
-      {/* Top Banner & KPI Metrics */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                Lease Contract Matrix
-              </span>
-              <span className="text-xs text-slate-500 font-bold">
-                Direct from Lease Agreements
-              </span>
-            </div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight mt-1 flex items-center gap-2">
-              <span>Lease Contract Report</span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                {selectedYear !== 'all' ? `CY ${selectedYear}` : 'All Years'}
-              </span>
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Monthly contracted lease rates in timeline line format. Vacant months are shown blank.
-            </p>
+    <div className="space-y-2.5 pb-12">
+      {/* Organized One-Line Filter Strip (Month Wise Report Style) */}
+      <div className="bg-white p-2.5 rounded-2xl shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Starting Month Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs shadow-2xs">
+            <Calendar className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+            <label className="font-bold text-slate-500 whitespace-nowrap">From:</label>
+            <select
+              value={startMonth}
+              onChange={(e) => {
+                const val = e.target.value;
+                setStartMonth(val);
+                if (val && endMonth && endMonth < val) {
+                  setEndMonth(val);
+                }
+              }}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">Earliest Month</option>
+              {availableMonths.map(m => (
+                <option key={m} value={m}>
+                  {formatMonthLabel(m)} ({m})
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Quick Actions & View Switcher */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* View Mode Toggle */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setViewMode('graphical')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  viewMode === 'graphical'
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Graphical Timeline Line View (connected lines with monthly amounts)"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Line / Timeline</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('matrix')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  viewMode === 'matrix'
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Numeric Matrix View"
-              >
-                <Table className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Numeric Matrix</span>
-              </button>
-            </div>
+          {/* Ending Month Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs shadow-2xs">
+            <Calendar className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+            <label className="font-bold text-slate-500 whitespace-nowrap">To:</label>
+            <select
+              value={endMonth}
+              onChange={(e) => {
+                const val = e.target.value;
+                setEndMonth(val);
+                if (val && startMonth && startMonth > val) {
+                  setStartMonth(val);
+                }
+              }}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">Latest Month</option>
+              {availableMonths.map(m => (
+                <option key={m} value={m}>
+                  {formatMonthLabel(m)} ({m})
+                </option>
+              ))}
+            </select>
+          </div>
 
-            {/* Refresh */}
+          {/* Quick Year Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs shadow-2xs">
+            <span className="text-slate-400 font-medium">Year:</span>
+            <select
+              value={selectedYear}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedYear(val);
+                if (val !== 'all') {
+                  setStartMonth('');
+                  setEndMonth('');
+                }
+              }}
+              className="bg-transparent font-bold text-slate-700 focus:outline-none cursor-pointer"
+            >
+              <option value="all">All Years</option>
+              {availableYears.map(y => (
+                <option key={y} value={y}>Year {y}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Property Filter Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs shadow-2xs">
+            <Building2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+            <label className="font-bold text-slate-500 whitespace-nowrap">Property:</label>
+            <select
+              value={selectedPropertyFilter}
+              onChange={(e) => setSelectedPropertyFilter(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer max-w-[200px] truncate"
+            >
+              <option value="">All Properties ({propertiesList.length})</option>
+              {propertiesList.map(p => (
+                <option key={p._id} value={p._id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tenant Filter Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs shadow-2xs">
+            <Users className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+            <label className="font-bold text-slate-500 whitespace-nowrap">Tenant:</label>
+            <select
+              value={selectedTenantFilter}
+              onChange={(e) => setSelectedTenantFilter(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer max-w-[200px] truncate"
+            >
+              <option value="">All Tenants ({tenantsList.length})</option>
+              {tenantsList.map(t => (
+                <option key={t._id} value={t._id}>
+                  {t.name} {t.tenantCode ? `(${t.tenantCode})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Reset Filters Button */}
+          {(startMonth || endMonth || selectedYear !== 'all' || selectedPropertyFilter || selectedTenantFilter) && (
             <button
               type="button"
-              onClick={fetchReport}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
-              title="Refresh report data"
+              onClick={resetFilters}
+              className="px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200/60 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+              title="Clear all filters"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
-              <span>Refresh</span>
+              <X className="w-3.5 h-3.5" />
+              <span>Reset</span>
             </button>
+          )}
 
-            {/* Export Excel */}
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              disabled={downloading}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black transition-all shadow-xs cursor-pointer disabled:opacity-50"
-              title="Export complete Lease Contract Report to Excel"
-            >
-              <Download className={`w-3.5 h-3.5 ${downloading ? 'animate-bounce' : ''}`} />
-              <span>{downloading ? 'Exporting...' : 'Export Excel'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* KPI Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mt-4 pt-3 border-t border-slate-100">
-          <div className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-200/60">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total Portfolio</span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-base font-black text-slate-900">{summary?.totalProperties || 0}</span>
-              <span className="text-[11px] font-bold text-slate-500">props / {summary?.totalUnits || 0} units</span>
-            </div>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200/60">
-            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Period Contracted Lease</span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-base font-black text-emerald-900">
-                {formatCurrency(summary?.grandTotalPeriodRent || 0)}
-              </span>
-            </div>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-teal-50/60 border border-teal-200/60">
-            <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wider block">Average Occupancy</span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-base font-black text-teal-900">{summary?.averageOccupancyPct || 0}%</span>
-              <span className="text-[11px] font-medium text-teal-700">across period</span>
-            </div>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-blue-50/60 border border-blue-200/60">
-            <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">Occupied Unit-Months</span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-base font-black text-blue-900">{summary?.totalOccupiedSlots || 0}</span>
-              <span className="text-[11px] font-medium text-slate-500">/ {summary?.totalUnitSlots || 0} slots</span>
-            </div>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-amber-50/60 border border-amber-200/60">
-            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">Vacant Unit-Months</span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-base font-black text-amber-900">
-                {(summary?.totalUnitSlots || 0) - (summary?.totalOccupiedSlots || 0)}
-              </span>
-              <span className="text-[11px] font-medium text-amber-700">vacancies</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter Control Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Main Filters: Year, Start Month, End Month, Tenant, Property */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Year Selector */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Year:</label>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="px-2.5 py-1 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              >
-                {availableYears.map(yr => (
-                  <option key={yr} value={yr}>{yr}</option>
-                ))}
-                <option value="all">All Available Years</option>
-              </select>
-            </div>
-
-            {/* From Month */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">From:</label>
-              <select
-                value={startMonth}
-                onChange={(e) => setStartMonth(e.target.value)}
-                className="px-2.5 py-1 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              >
-                {MONTH_NAMES.map(m => (
-                  <option key={m.num} value={m.num}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* To Month */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">To:</label>
-              <select
-                value={endMonth}
-                onChange={(e) => setEndMonth(e.target.value)}
-                className="px-2.5 py-1 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              >
-                {MONTH_NAMES.map(m => (
-                  <option key={m.num} value={m.num}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Tenant Filter */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Tenant:</label>
-              <select
-                value={selectedTenantFilter}
-                onChange={(e) => setSelectedTenantFilter(e.target.value)}
-                className="max-w-[190px] px-2.5 py-1 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
-              >
-                <option value="">All Tenants</option>
-                {tenantsList.map(t => (
-                  <option key={t._id} value={t._id}>
-                    {t.name} {t.tenantCode ? `(${t.tenantCode})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Property Filter */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Property:</label>
-              <select
-                value={selectedPropertyFilter}
-                onChange={(e) => setSelectedPropertyFilter(e.target.value)}
-                className="max-w-[210px] px-2.5 py-1 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
-              >
-                <option value="">All Properties</option>
-                {propertiesList.map(p => (
-                  <option key={p._id} value={p._id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Reset Button */}
-            {(selectedTenantFilter || selectedPropertyFilter || startMonth !== '01' || endMonth !== '12' || selectedYear !== '2026') && (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold border border-rose-200 transition-colors cursor-pointer"
-                title="Reset all filters"
-              >
-                <X className="w-3 h-3" />
-                <span>Reset</span>
-              </button>
-            )}
-          </div>
-
-          {/* Quick Presets & Expand / Collapse Buttons */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">Presets:</span>
+          {/* Presets & Expand / Collapse */}
+          <div className="flex items-center gap-1.5 flex-wrap ml-1">
             <button
               type="button"
               onClick={() => applyPreset('full')}
-              className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
             >
               Full Year
             </button>
             <button
               type="button"
               onClick={() => applyPreset('h1')}
-              className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
             >
-              H1 (Jan-Jun)
+              H1
             </button>
             <button
               type="button"
               onClick={() => applyPreset('h2')}
-              className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
             >
-              H2 (Jul-Dec)
+              H2
             </button>
-
-            <div className="h-4 w-px bg-slate-200 mx-1" />
-
+            <div className="h-4 w-px bg-slate-200 mx-0.5" />
             <button
               type="button"
               onClick={expandAll}
-              className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
               title="Expand all properties"
             >
               Expand All
@@ -666,12 +555,94 @@ export default function LeaseContractReportView() {
             <button
               type="button"
               onClick={collapseAll}
-              className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all cursor-pointer"
               title="Collapse all properties"
             >
               Collapse All
             </button>
           </div>
+        </div>
+
+        {/* Right side: Refresh & Export buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={fetchReport}
+            disabled={loading}
+            className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+            title="Refresh Matrix"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={downloading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+            title="Export complete Lease Contract Report to Excel"
+          >
+            <Download className={`w-3.5 h-3.5 ${downloading ? 'animate-bounce' : ''}`} />
+            <span>{downloading ? 'Exporting...' : 'Export Excel'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Sleek Compact KPI Summary Strip (Matching Month Wise Report Style) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Portfolio</span>
+            <span className="text-base font-black text-slate-900">
+              {summary?.totalProperties || 0} <span className="text-xs font-bold text-slate-500">props / {summary?.totalUnits || 0} units</span>
+            </span>
+          </div>
+          <span className="p-1.5 rounded-lg bg-slate-50 text-slate-600">
+            <Building2 className="w-3.5 h-3.5" />
+          </span>
+        </div>
+
+        <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Period Contracted Lease</span>
+            <span className="text-base font-black text-emerald-700">{formatCurrency(summary?.grandTotalPeriodRent || 0)}</span>
+          </div>
+          <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
+            <TrendingUp className="w-3.5 h-3.5" />
+          </span>
+        </div>
+
+        <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Average Occupancy</span>
+            <span className="text-base font-black text-teal-700">{summary?.averageOccupancyPct || 0}%</span>
+          </div>
+          <span className="p-1.5 rounded-lg bg-teal-50 text-teal-600">
+            <PieChart className="w-3.5 h-3.5" />
+          </span>
+        </div>
+
+        <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Occupied Slots</span>
+            <span className="text-base font-black text-blue-700">
+              {summary?.totalOccupiedSlots || 0} <span className="text-xs font-medium text-slate-400">/ {summary?.totalUnitSlots || 0}</span>
+            </span>
+          </div>
+          <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          </span>
+        </div>
+
+        <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Vacant Slots</span>
+            <span className="text-base font-black text-amber-600">
+              {(summary?.totalUnitSlots || 0) - (summary?.totalOccupiedSlots || 0)}
+            </span>
+          </div>
+          <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
+            <AlertCircle className="w-3.5 h-3.5" />
+          </span>
         </div>
       </div>
 
@@ -976,7 +947,22 @@ export default function LeaseContractReportView() {
                           return (
                             <td 
                               key={m.key} 
-                              className="p-2 text-center border-r border-slate-200 font-black text-slate-900 bg-slate-50/50"
+                              onClick={() => {
+                                setSelectedCellInfo({
+                                  isPropertySummary: true,
+                                  property: prop,
+                                  propertyName: prop.propertyName,
+                                  propertyCode: prop.propertyCode,
+                                  month: m.label,
+                                  monthKey: m.key,
+                                  val,
+                                  occCount,
+                                  totalUnits: prop.unitsCount,
+                                  breakdown: prop.monthlyBreakdown?.[m.key] || []
+                                });
+                              }}
+                              className="p-2 text-center border-r border-slate-200 font-black text-slate-900 bg-slate-50/50 hover:bg-emerald-50/70 cursor-pointer transition-colors"
+                              title={`Click to view ${prop.propertyName} units in ${m.label}`}
                             >
                               {val > 0 ? (
                                 <div>
@@ -1053,17 +1039,28 @@ export default function LeaseContractReportView() {
                               const cell = unit.monthlyCells[m.key];
                               const isVacant = !cell || cell.isVacant || cell.rate === null;
 
-                              // If vacant: display completely blank cell as requested!
+                              // If vacant: display completely blank cell with click-to-view
                               if (isVacant) {
                                 return (
                                   <td 
                                     key={m.key} 
-                                    className="p-1 border-r border-slate-200 text-center bg-slate-50/20"
-                                    title={`${unit.subUnitPartition}: Vacant in ${m.label}`}
+                                    onClick={() => setSelectedCellInfo({
+                                      isVacant: true,
+                                      month: m.label,
+                                      unit,
+                                      propertyName: prop.propertyName,
+                                      propertyCode: prop.propertyCode,
+                                      unitName: unit.subUnitPartition,
+                                      unitCode: unit.unitCode,
+                                      areaSqFt: unit.areaSqFt,
+                                      expectedRate: unit.expectedRate
+                                    })}
+                                    className="p-1 border-r border-slate-200 text-center bg-slate-50/20 hover:bg-amber-50/40 cursor-pointer transition-colors"
+                                    title={`${unit.subUnitPartition}: Vacant in ${m.label} (Click for details)`}
                                   >
                                     <div className="h-8 flex items-center justify-center">
                                       {/* Clean blank space indicating vacancy */}
-                                      <span className="text-slate-200 text-[10px] select-none">·</span>
+                                      <span className="text-slate-200 text-[10px] select-none hover:text-slate-400 font-bold">·</span>
                                     </div>
                                   </td>
                                 );
@@ -1083,28 +1080,18 @@ export default function LeaseContractReportView() {
 
                               const theme = getTenantTheme(cell.tenantId || cell.tenantName);
 
-                              if (viewMode === 'matrix') {
-                                // Numeric Matrix View
-                                return (
-                                  <td 
-                                    key={m.key}
-                                    onClick={() => setSelectedCellInfo({ ...cell, month: m.label, unit })}
-                                    className="p-2 text-center border-r border-slate-200 font-bold text-slate-900 bg-white hover:bg-emerald-50/50 cursor-pointer transition-colors"
-                                    title={`${cell.tenantName} (${cell.contractNo}): ${formatCurrency(cell.rate)}`}
-                                  >
-                                    <span className="text-xs font-black text-slate-900">
-                                      {formatCurrency(cell.rate)}
-                                    </span>
-                                  </td>
-                                );
-                              }
-
                               // Graphical Timeline Line Format (Continuous connecting line/bar with amount)
                               return (
                                 <td 
                                   key={m.key}
                                   className="p-0 border-r border-slate-200 relative"
-                                  onClick={() => setSelectedCellInfo({ ...cell, month: m.label, unit })}
+                                  onClick={() => setSelectedCellInfo({
+                                    ...cell,
+                                    month: m.label,
+                                    unit,
+                                    propertyName: prop.propertyName,
+                                    propertyCode: prop.propertyCode
+                                  })}
                                 >
                                   <div 
                                     className={`h-8 flex items-center justify-center transition-all cursor-pointer border-y ${theme.border} ${theme.bg} ${
@@ -1112,14 +1099,14 @@ export default function LeaseContractReportView() {
                                     } ${
                                       isNextConnected ? 'rounded-r-none border-r-0' : 'rounded-r-md border-r pr-1'
                                     } hover:brightness-95 hover:shadow-xs group`}
-                                    title={`${cell.tenantName} | Contract: ${cell.contractNo || 'N/A'} | Rent: ${formatCurrency(cell.rate)}`}
+                                    title={`Click for lease contract details: ${cell.tenantName} | ${cell.contractNo || 'N/A'} | ${formatCurrency(cell.rate)}`}
                                   >
                                     {/* Monthly Amount Display */}
                                     <div className="flex items-center gap-1">
                                       {!isPrevConnected && (
                                         <span className={`w-1.5 h-1.5 rounded-full ${theme.dot} shrink-0`} />
                                       )}
-                                      <span className={`text-[11px] font-black ${theme.text} tracking-tight`}>
+                                      <span className={`text-[11px] font-black tracking-tight ${theme.text}`}>
                                         {formatCurrency(cell.rate)}
                                       </span>
                                     </div>
@@ -1217,71 +1204,264 @@ export default function LeaseContractReportView() {
         )}
       </div>
 
-      {/* Contract & Rate Details Modal */}
+      {/* Drilldown Modal: Comprehensive Lease Contract Detail, Vacant Detail, or Property Summary */}
       {selectedCellInfo && (
-        <div className="fixed inset-0 bg-slate-950/60 z-50 flex items-center justify-center p-4 backdrop-blur-2xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-950/60 z-50 flex items-center justify-center p-4 backdrop-blur-2xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-slate-100 pb-3 mb-3">
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  Lease Contract Detail
-                </span>
-                <h3 className="text-base font-black text-slate-900 mt-1">
-                  {selectedCellInfo.unit?.subUnitPartition}
+              <div className="min-w-0 pr-2">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+                    selectedCellInfo.isPropertySummary 
+                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                      : selectedCellInfo.isVacant 
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  }`}>
+                    {selectedCellInfo.isPropertySummary 
+                      ? 'Property Lease Summary' 
+                      : selectedCellInfo.isVacant 
+                        ? 'Vacant Unit Detail' 
+                        : 'Lease Contract Detail'}
+                  </span>
+                  <span className="text-xs font-bold text-slate-500">
+                    {selectedCellInfo.month}
+                  </span>
+                </div>
+                <h3 className="text-base font-black text-slate-900 mt-1 truncate">
+                  {selectedCellInfo.isPropertySummary 
+                    ? selectedCellInfo.propertyName 
+                    : (selectedCellInfo.unitName || selectedCellInfo.unit?.subUnitPartition || 'Unit')}
                 </h3>
-                <p className="text-xs text-slate-500 font-medium">
-                  {selectedCellInfo.month} | Unit Code: {selectedCellInfo.unit?.unitCode}
+                <p className="text-xs text-slate-500 font-medium truncate">
+                  {selectedCellInfo.propertyName && !selectedCellInfo.isPropertySummary && (
+                    <span>{selectedCellInfo.propertyName} · </span>
+                  )}
+                  <span>Unit Code: {selectedCellInfo.unitCode || selectedCellInfo.unit?.unitCode || '—'}</span>
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedCellInfo(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-50 border border-slate-200/60">
-                <span className="text-slate-500 font-semibold">Tenant Name:</span>
-                <span className="font-black text-slate-900">{selectedCellInfo.tenantName}</span>
-              </div>
+            {/* Modal Body */}
+            {selectedCellInfo.isPropertySummary ? (
+              // CASE 1: Property monthly units breakdown
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Contracted Rent</span>
+                    <span className="text-base font-black text-emerald-800">{formatCurrency(selectedCellInfo.val)}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Occupancy</span>
+                    <span className="text-base font-black text-slate-900">
+                      {selectedCellInfo.occCount} / {selectedCellInfo.totalUnits} <span className="text-xs font-bold text-slate-500">units</span>
+                    </span>
+                  </div>
+                </div>
 
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-50 border border-slate-200/60">
-                <span className="text-slate-500 font-semibold">Contract Number:</span>
-                <span className="font-mono font-bold text-slate-900">{selectedCellInfo.contractNo || 'N/A'}</span>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-slate-100 px-3 py-1.5 font-bold text-slate-700 text-[11px] border-b border-slate-200">
+                    Units Breakdown ({selectedCellInfo.month})
+                  </div>
+                  <div className="max-h-60 overflow-y-auto divide-y divide-slate-100">
+                    {selectedCellInfo.breakdown?.map((cu, i) => (
+                      <div 
+                        key={cu.unitId || i}
+                        onClick={() => {
+                          if (!cu.isVacant) {
+                            const uObj = selectedCellInfo.property?.units?.find(u => u.unitId === cu.unitId);
+                            const mCell = uObj?.monthlyCells?.[selectedCellInfo.monthKey];
+                            if (mCell) {
+                              setSelectedCellInfo({
+                                ...mCell,
+                                month: selectedCellInfo.month,
+                                unit: uObj,
+                                propertyName: selectedCellInfo.propertyName
+                              });
+                            }
+                          }
+                        }}
+                        className={`p-2.5 flex items-center justify-between gap-2 transition-colors ${
+                          !cu.isVacant ? 'hover:bg-emerald-50/50 cursor-pointer' : 'bg-slate-50/50'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-extrabold text-slate-900">{cu.unitName}</div>
+                          <div className="text-[10px] text-slate-500 font-medium">
+                            {cu.tenantName !== 'Vacant' ? cu.tenantName : 'No active tenant'} · {cu.contractNo !== '—' ? cu.contractNo : 'Uncontracted'}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className={`font-black ${!cu.isVacant ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {cu.rate ? formatCurrency(cu.rate) : 'Vacant'}
+                          </div>
+                          <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                            !cu.isVacant ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {cu.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
+            ) : selectedCellInfo.isVacant ? (
+              // CASE 2: Vacant unit in this month
+              <div className="space-y-2.5 text-xs">
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                  <div className="flex items-center gap-2 font-black text-amber-950 text-sm mb-1">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Unit is Vacant for {selectedCellInfo.month}</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 font-medium">
+                    There was no active lease contract or tenant assignment covering this period. The property was unleased.
+                  </p>
+                </div>
 
-              <div className="flex justify-between items-center p-2 rounded-lg bg-emerald-50 border border-emerald-200/60">
-                <span className="text-emerald-800 font-bold">Contracted Monthly Rent:</span>
-                <span className="text-base font-black text-emerald-950">
-                  {formatCurrency(selectedCellInfo.rate)}
-                </span>
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Sub-Property / Partition:</span>
+                    <span className="font-black text-slate-900">{selectedCellInfo.unitName || selectedCellInfo.unit?.subUnitPartition}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Unit Code:</span>
+                    <span className="font-mono font-bold text-slate-800">{selectedCellInfo.unitCode || selectedCellInfo.unit?.unitCode}</span>
+                  </div>
+                  {selectedCellInfo.areaSqFt > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-semibold">Area:</span>
+                      <span className="font-bold text-slate-800">{selectedCellInfo.areaSqFt} sq ft</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Expected Standard Rent:</span>
+                    <span className="font-black text-slate-900">{formatCurrency(selectedCellInfo.expectedRate || selectedCellInfo.unit?.expectedRate || 0)}</span>
+                  </div>
+                </div>
               </div>
+            ) : (
+              // CASE 3: Active Lease Contract Detail
+              <div className="space-y-2.5 text-xs">
+                {/* Contract Header Highlight */}
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">Contracted Monthly Rate</span>
+                    <span className="text-xl font-black text-emerald-950 font-mono">
+                      {formatCurrency(selectedCellInfo.rate)}
+                      <span className="text-xs font-semibold text-emerald-700"> / month</span>
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="px-2.5 py-1 rounded-lg bg-white border border-emerald-300 font-mono font-black text-emerald-900 text-xs shadow-2xs block">
+                      {selectedCellInfo.contractNo || selectedCellInfo.assignmentCode || 'No Contract #'}
+                    </span>
+                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      {selectedCellInfo.status || 'Active'}
+                    </span>
+                  </div>
+                </div>
 
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-50 border border-slate-200/60">
-                <span className="text-slate-500 font-semibold">Contract Period:</span>
-                <span className="font-bold text-slate-700">
-                  {selectedCellInfo.startDate ? new Date(selectedCellInfo.startDate).toLocaleDateString('en-GB') : 'Open'}
-                  {' to '}
-                  {selectedCellInfo.endDate ? new Date(selectedCellInfo.endDate).toLocaleDateString('en-GB') : 'Ongoing'}
-                </span>
+                {/* Tenant Card */}
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Tenant Name:</span>
+                    <span className="font-black text-slate-900 text-sm">{selectedCellInfo.tenantName}</span>
+                  </div>
+                  {selectedCellInfo.tenantCode && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-semibold">Tenant Code:</span>
+                      <span className="font-mono font-bold text-slate-800">{selectedCellInfo.tenantCode}</span>
+                    </div>
+                  )}
+                  {selectedCellInfo.tenantPhone && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-semibold">Contact Phone:</span>
+                      <span className="font-bold text-slate-800">{selectedCellInfo.tenantPhone}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Contract Details */}
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Contract Type:</span>
+                    <span className="font-bold text-slate-800">{selectedCellInfo.contractType || 'Rent Agreement'}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Lease Period:</span>
+                    <span className="font-black text-slate-900">
+                      {selectedCellInfo.startDate ? formatDate(selectedCellInfo.startDate) : 'Open'}
+                      {' → '}
+                      {selectedCellInfo.endDate ? formatDate(selectedCellInfo.endDate) : 'Ongoing'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">Security Deposit:</span>
+                    <span className="font-bold text-slate-800">
+                      {selectedCellInfo.securityDeposit ? formatCurrency(selectedCellInfo.securityDeposit) : 'None'}
+                    </span>
+                  </div>
+                  {selectedCellInfo.noticePeriodMonths != null && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-semibold">Notice Period:</span>
+                      <span className="font-bold text-slate-800">{selectedCellInfo.noticePeriodMonths} month(s)</span>
+                    </div>
+                  )}
+                  {selectedCellInfo.rentDueDay != null && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-semibold">Rent Due Day:</span>
+                      <span className="font-bold text-slate-800">Day {selectedCellInfo.rentDueDay} of month</span>
+                    </div>
+                  )}
+                  {(selectedCellInfo.terms || selectedCellInfo.notes) && (
+                    <div className="pt-1.5 border-t border-slate-200">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Terms / Notes:</span>
+                      <p className="text-slate-700 font-medium italic mt-0.5">{selectedCellInfo.terms || selectedCellInfo.notes}</p>
+                    </div>
+                  )}
+                </div>
               </div>
+            )}
 
-              <div className="flex justify-between items-center p-2 rounded-lg bg-slate-50 border border-slate-200/60">
-                <span className="text-slate-500 font-semibold">Contract Status:</span>
-                <span className={`px-2 py-0.5 rounded-full font-bold text-[11px] ${
-                  selectedCellInfo.status === 'Active'
-                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                    : 'bg-slate-200 text-slate-700'
-                }`}>
-                  {selectedCellInfo.status || 'Active'}
-                </span>
+            {/* Modal Footer */}
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+              <div>
+                {!selectedCellInfo.isPropertySummary && !selectedCellInfo.isVacant && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCellInfo(null);
+                      window.location.hash = '#/contracts';
+                    }}
+                    className="flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-900 hover:underline cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-teal-600" />
+                    <span>View in Lease Contracts</span>
+                  </button>
+                )}
+                {selectedCellInfo.isVacant && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCellInfo(null);
+                      window.location.hash = '#/contracts';
+                    }}
+                    className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Create New Lease Contract</span>
+                  </button>
+                )}
               </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
               <button
                 type="button"
                 onClick={() => setSelectedCellInfo(null)}

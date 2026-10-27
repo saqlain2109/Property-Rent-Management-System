@@ -2081,22 +2081,24 @@ router.get('/lease-contract-matrix', protect, async (req, res) => {
     });
     const availableYears = Array.from(availableYearsSet).sort().reverse();
 
+    const allYearsNum = Array.from(availableYearsSet).map(Number);
+    let minYear = Math.min(...allYearsNum);
+    let maxYear = Math.max(...allYearsNum);
+
+    // Build all available continuous months across portfolio years
+    const allAvailableMonths = [];
+    for (let y = minYear; y <= maxYear; y++) {
+      for (let m = 1; m <= 12; m++) {
+        allAvailableMonths.push(`${y}-${String(m).padStart(2, '0')}`);
+      }
+    }
+
     // 6. Build month range
     let sortedMonths = [];
     if (filterYear !== 'all') {
       sortedMonths = Array.from({ length: 12 }, (_, i) => `${filterYear}-${String(i + 1).padStart(2, '0')}`);
     } else {
-      let minYear = 2024;
-      let maxYear = 2026;
-      assignments.forEach(a => {
-        if (a.startDate) minYear = Math.min(minYear, new Date(a.startDate).getUTCFullYear());
-        if (a.endDate) maxYear = Math.max(maxYear, new Date(a.endDate).getUTCFullYear());
-      });
-      for (let y = minYear; y <= maxYear; y++) {
-        for (let m = 1; m <= 12; m++) {
-          sortedMonths.push(`${y}-${String(m).padStart(2, '0')}`);
-        }
-      }
+      sortedMonths = [...allAvailableMonths];
     }
 
     if (startMonth) {
@@ -2212,12 +2214,26 @@ router.get('/lease-contract-matrix', protect, async (req, res) => {
               rate: rate,
               tenantName: tenantName,
               tenantCode: activeAssign.tenantId?.tenantCode || '',
+              tenantPhone: activeAssign.tenantId?.phone || '',
               tenantId: activeAssign.tenantId?._id ? activeAssign.tenantId._id.toString() : '',
               contractNo: contractNo,
               contractType: activeAssign.contractType || 'Rent',
               startDate: activeAssign.startDate,
               endDate: activeAssign.endDate,
               status: activeAssign.status,
+              assignmentId: activeAssign._id ? activeAssign._id.toString() : '',
+              assignmentCode: activeAssign.assignmentCode || '',
+              securityDeposit: activeAssign.securityDeposit || 0,
+              noticePeriodMonths: activeAssign.noticePeriodMonths || 1,
+              rentDueDay: activeAssign.rentDueDay || 1,
+              terms: activeAssign.terms || '',
+              notes: activeAssign.notes || '',
+              unitName: u.subUnitPartition || u.unitName || u.unitCode,
+              unitCode: u.unitCode,
+              propertyName: p.name,
+              propertyCode: p.propertyCode,
+              areaSqFt: u.areaSqFt || 0,
+              expectedRate: u.monthlyRentExpected || 0,
               isVacant: false
             };
 
@@ -2236,7 +2252,13 @@ router.get('/lease-contract-matrix', protect, async (req, res) => {
             // Vacant / unleased
             monthlyCells[m] = {
               rate: null,
-              isVacant: true
+              isVacant: true,
+              unitName: u.subUnitPartition || u.unitName || u.unitCode,
+              unitCode: u.unitCode,
+              propertyName: p.name,
+              propertyCode: p.propertyCode,
+              areaSqFt: u.areaSqFt || 0,
+              expectedRate: u.monthlyRentExpected || 0
             };
             propMonthlyVacant[m] += 1;
             columnVacantCounts[m] += 1;
@@ -2273,6 +2295,21 @@ router.get('/lease-contract-matrix', protect, async (req, res) => {
         ? Math.round((Object.values(propMonthlyOccupied).reduce((s, c) => s + c, 0) / (totalPropUnits * sortedMonths.length)) * 100)
         : 0;
 
+      // Property monthly units breakdown
+      const propMonthlyBreakdown = {};
+      sortedMonths.forEach(m => {
+        propMonthlyBreakdown[m] = childUnits.map(cu => ({
+          unitId: cu.unitId,
+          unitName: cu.subUnitPartition,
+          unitCode: cu.unitCode,
+          rate: cu.monthlyCells[m]?.rate,
+          isVacant: cu.monthlyCells[m]?.isVacant,
+          tenantName: cu.monthlyCells[m]?.tenantName || 'Vacant',
+          contractNo: cu.monthlyCells[m]?.contractNo || '—',
+          status: cu.monthlyCells[m]?.status || 'Vacant'
+        }));
+      });
+
       return {
         propertyId: pid,
         propertyName: p.name,
@@ -2283,6 +2320,7 @@ router.get('/lease-contract-matrix', protect, async (req, res) => {
         monthlyRent: propMonthlyRent,
         monthlyOccupied: propMonthlyOccupied,
         monthlyVacant: propMonthlyVacant,
+        monthlyBreakdown: propMonthlyBreakdown,
         totalPeriodRent: propPeriodTotal,
         occupancyPct: propOccupancyPct,
         units: childUnits
@@ -2314,6 +2352,7 @@ router.get('/lease-contract-matrix', protect, async (req, res) => {
       months: sortedMonths,
       monthLabels,
       availableYears,
+      availableMonths: allAvailableMonths,
       tenants: allTenants,
       properties: properties.map(p => ({ _id: p._id, name: p.name, propertyCode: p.propertyCode })),
       rows,
