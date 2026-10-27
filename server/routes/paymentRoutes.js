@@ -340,6 +340,38 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
+/**
+ * Collision-proof receipt number generator.
+ * Finds highest numeric sequence for the year and guarantees uniqueness.
+ */
+async function getNextReceiptNumber(receiptDate) {
+  const d = receiptDate ? new Date(receiptDate) : new Date();
+  const year = isNaN(d.getFullYear()) ? new Date().getFullYear() : d.getFullYear();
+  const prefix = "REC-" + year + "-";
+
+  const allYearReceipts = await PaymentReceipt.find({
+    receiptNumber: new RegExp("^REC-" + year + "-")
+  }).select('receiptNumber').lean();
+
+  let maxNum = 0;
+  for (const r of allYearReceipts) {
+    if (r.receiptNumber) {
+      const parts = r.receiptNumber.split('-');
+      const num = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    }
+  }
+
+  let nextSeq = maxNum + 1;
+  while (await PaymentReceipt.exists({ receiptNumber: prefix + String(nextSeq).padStart(5, '0') })) {
+    nextSeq++;
+  }
+
+  return prefix + String(nextSeq).padStart(5, '0');
+}
+
 // @route POST /api/payments
 // Create receipt and allocate amount to rent months
 router.post('/', protect, authorize('admin', 'manager'), [
@@ -384,19 +416,105 @@ router.post('/', protect, authorize('admin', 'manager'), [
       });
     }
 
-    // Generate receipt number
-    const count = await PaymentReceipt.countDocuments();
-    const d = new Date(receiptDate);
-    const receiptNumber = `REC-${d.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
+    const allocMonthsList = (allocations || []).map(a => a.rentMonthYear).filter(Boolean);
+    const targetMonth = allocMonthsList[0] || req.body.accountingMonth || req.body.monthPaidFor || (receiptDate ? new Date(receiptDate).toISOString().slice(0, 7) : getCurrentMonthYear());
+    const finalMonthPaidFor = allocMonthsList.join(', ') || targetMonth;
 
-    const allocMonths = (allocations || []).map(a => a.rentMonthYear).filter(Boolean).join(', ');
-    const finalMonthPaidFor = allocMonths || req.body.monthPaidFor || req.body.accountingMonth || (receiptDate ? new Date(receiptDate).toISOString().slice(0, 7) : getCurrentMonthYear());
+    // RULE: Only one receipt per property unit per month.
+    // If an active receipt already exists for this unit & month, update it in place!
+    let existingReceipt = null;
+
+    const existingAlloc = await PaymentAllocation.findOne({
+      unitId,
+      rentMonthYear: targetMonth
+    });
+    if (existingAlloc && existingAlloc.receiptId) {
+      existingReceipt = await PaymentReceipt.findById(existingAlloc.receiptId);
+      if (existingReceipt && existingReceipt.isReversed) existingReceipt = null;
+    }
+
+    if (!existingReceipt) {
+      existingReceipt = await PaymentReceipt.findOne({
+        unitId,
+        isReversed: false,
+        $or: [
+          { accountingMonth: targetMonth },
+          { monthPaidFor: { $regex: targetMonth } }
+        ]
+      });
+    }
+
+    if (existingReceipt) {
+      // UPDATE EXISTING RECEIPT IN PLACE
+      existingReceipt.status = status;
+      existingReceipt.tenantId = finalTenantId;
+      existingReceipt.contractNo = finalContractNo;
+      existingReceipt.totalAmount = parsedTotal;
+      if (receiptDate) existingReceipt.receiptDate = receiptDate;
+      if (referenceNumber !== undefined) existingReceipt.referenceNumber = referenceNumber;
+      if (comments !== undefined) existingReceipt.comments = comments;
+      existingReceipt.accountingMonth = targetMonth;
+      existingReceipt.monthPaidFor = finalMonthPaidFor;
+      if (req.body.adjustmentAmount !== undefined) existingReceipt.adjustmentAmount = Number(req.body.adjustmentAmount) || 0;
+      if (req.body.adjustmentDescription !== undefined) existingReceipt.adjustmentDescription = req.body.adjustmentDescription || '';
+      await existingReceipt.save();
+
+      await PaymentAllocation.deleteMany({ receiptId: existingReceipt._id });
+      const createdAllocations = [];
+      for (const alloc of allocations) {
+        const created = await PaymentAllocation.create({
+          receiptId: existingReceipt._id,
+          tenantId: finalTenantId,
+          unitId,
+          rentMonthYear: alloc.rentMonthYear,
+          allocatedAmount: Number(alloc.allocatedAmount),
+          contractNo: finalContractNo,
+          notes: alloc.notes || ''
+        });
+        createdAllocations.push(created);
+      }
+
+      // Clean up any extra duplicate receipts for this unit & month
+      const duplicates = await PaymentReceipt.find({
+        _id: { $ne: existingReceipt._id },
+        unitId,
+        isReversed: false,
+        $or: [
+          { accountingMonth: targetMonth },
+          { monthPaidFor: targetMonth }
+        ]
+      });
+      for (const dup of duplicates) {
+        await PaymentAllocation.deleteMany({ receiptId: dup._id });
+        await PaymentReceipt.findByIdAndDelete(dup._id);
+      }
+
+      await logAudit({
+        userId: req.user._id,
+        action: 'UPDATE_PAYMENT',
+        entityType: 'PaymentReceipt',
+        entityId: existingReceipt._id,
+        description: `Updated single monthly receipt ${existingReceipt.receiptNumber} of ₹${parsedTotal} for ${targetMonth}`,
+        req
+      });
+
+      setImmediate(() => syncMonthlyLedgers().catch(console.error));
+
+      return res.json({
+        success: true,
+        message: 'Payment updated successfully',
+        data: { receipt: existingReceipt, allocations: createdAllocations }
+      });
+    }
+
+    // No existing receipt: create new with collision-proof receipt number
+    const receiptNumber = await getNextReceiptNumber(receiptDate);
 
     const receipt = await PaymentReceipt.create({
       receiptNumber,
       receiptDate,
       monthPaidFor: finalMonthPaidFor,
-      accountingMonth: finalMonthPaidFor,
+      accountingMonth: targetMonth,
       status,
       tenantId: finalTenantId,
       unitId,
@@ -413,11 +531,11 @@ router.post('/', protect, authorize('admin', 'manager'), [
     for (const alloc of allocations) {
       const created = await PaymentAllocation.create({
         receiptId: receipt._id,
-        tenantId,
+        tenantId: finalTenantId,
         unitId,
         rentMonthYear: alloc.rentMonthYear,
         allocatedAmount: Number(alloc.allocatedAmount),
-        contractNo: req.body.contractNo || '',
+        contractNo: finalContractNo,
         notes: alloc.notes || ''
       });
       createdAllocations.push(created);

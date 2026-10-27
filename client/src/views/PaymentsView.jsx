@@ -700,43 +700,37 @@ export default function PaymentsView() {
     });
   };
 
-  // Locate existing receipt for a unit in a given month (prioritizing matching contract)
+  // Locate existing receipt for a unit in a given month (strictly ONE receipt per unit per month)
   const findReceiptForUnitAndMonth = (item, targetMonth = selectedMonth) => {
     const unitIdStr = String(item?.unit?._id || item?.unitId?._id || item?.unitId || item?.unit || '');
     if (!unitIdStr) return null;
-    const tenantIdStr = String(item?.tenant?._id || item?.tenantId?._id || item?.tenantId || item?.tenant || '');
     const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
 
-    // Priority 1: Match unit, contractNo, and month allocation/accountingMonth
-    const match = receipts.find(r => {
-      if (r.isReversed) return false;
-      const rUnitStr = String(r.unitId?._id || r.unitId || '');
-      if (rUnitStr !== unitIdStr) return false;
+    // Priority 1: Match unit, contractNo, and month
+    if (contractNoStr) {
+      const contractMatch = receipts.find(r => {
+        if (r.isReversed) return false;
+        if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
+        const rContract = String(r.contractNo || '').trim().toLowerCase();
+        if (rContract === contractNoStr) {
+          return r.allocations?.some(a => a.rentMonthYear === targetMonth) ||
+                 r.accountingMonth === targetMonth ||
+                 (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) ||
+                 (r.receiptDate && r.receiptDate.slice(0, 7) === targetMonth);
+        }
+        return false;
+      });
+      if (contractMatch) return contractMatch;
+    }
 
-      const rContractStr = String(r.contractNo || '').trim().toLowerCase();
-      if (contractNoStr && rContractStr && rContractStr === contractNoStr) {
-        if (r.allocations?.some(a => a.rentMonthYear === targetMonth)) return true;
-        if (r.accountingMonth === targetMonth || (r.receiptDate && r.receiptDate.slice(0, 7) === targetMonth)) return true;
-      }
-      return false;
-    });
-    if (match) return match;
-
-    // Priority 2: Match unit and target month allocation/accountingMonth
+    // Priority 2: Strict Rule - Only ONE receipt per property unit per month
     return receipts.find(r => {
       if (r.isReversed) return false;
-      const rUnitStr = String(r.unitId?._id || r.unitId || '');
-      if (rUnitStr !== unitIdStr) return false;
-
-      const hasMonth = r.allocations?.some(a => a.rentMonthYear === targetMonth);
-      const matchesAcct = (r.accountingMonth === targetMonth) || (r.receiptDate && r.receiptDate.slice(0, 7) === targetMonth);
-      if (!hasMonth && !matchesAcct) return false;
-
-      if (tenantIdStr && r.tenantId) {
-        const rTenantStr = String(r.tenantId?._id || r.tenantId || '');
-        if (rTenantStr && rTenantStr !== tenantIdStr) return false;
-      }
-      return true;
+      if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
+      return r.allocations?.some(a => a.rentMonthYear === targetMonth) ||
+             r.accountingMonth === targetMonth ||
+             (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) ||
+             (r.receiptDate && r.receiptDate.slice(0, 7) === targetMonth);
     });
   };
 
