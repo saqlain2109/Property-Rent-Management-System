@@ -856,16 +856,26 @@ export default function PaymentsView() {
     // Check if an existing payment receipt already exists for this unit & month
     const existingReceipt = findReceiptForUnitAndMonth(item, targetMonth);
 
-    // If entered amount is 0 or empty and an existing receipt exists, offer to remove it
-    if ((enteredRaw === '' || isNaN(enteredTotal) || enteredTotal <= 0) && existingReceipt) {
-      const confirmDelete = window.confirm(
-        `Amount is set to 0. Do you want to remove the existing payment receipt of ₹${Number(existingReceipt.totalAmount).toLocaleString('en-IN')} for ${formatMonthYear(targetMonth)}?`
-      );
-      if (!confirmDelete) return;
-
+    // Case 1: Amount is explicitly set to 0 or cleared -> Set payment to 0 cleanly
+    if (enteredRaw === '0' || (!isNaN(enteredTotal) && enteredTotal === 0) || (enteredRaw === '' && existingReceipt)) {
       try {
         setSavingRows(prev => ({ ...prev, [rowKey]: true }));
-        await API.delete(`/payments/${existingReceipt._id}`);
+        const unitIdStr = String(item.unit?._id || item.unitId || '');
+        const targetReceipts = receipts.filter(r => 
+          !r.isReversed &&
+          String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+          (r.allocations?.some(a => a.rentMonthYear === targetMonth) || r.accountingMonth === targetMonth)
+        );
+
+        const toDelete = targetReceipts.length > 0 ? targetReceipts : (existingReceipt ? [existingReceipt] : []);
+        for (const r of toDelete) {
+          try {
+            await API.delete(`/payments/${r._id}`);
+          } catch (e) {
+            console.warn('Silent delete fallback:', e);
+          }
+        }
+
         setSavedFeedback(prev => ({ ...prev, [rowKey]: true }));
         setTimeout(() => setSavedFeedback(prev => ({ ...prev, [rowKey]: false })), 2500);
         setRowDrafts(prev => {
@@ -875,15 +885,15 @@ export default function PaymentsView() {
         });
         await fetchData(selectedMonth, { silent: true });
       } catch (err) {
-        alert(err.response?.data?.message || 'Error removing payment');
+        console.error('Error setting payment to 0:', err);
       } finally {
         setSavingRows(prev => ({ ...prev, [rowKey]: false }));
       }
       return;
     }
 
-    if (!enteredTotal || enteredTotal <= 0) {
-      alert('Please enter a valid amount greater than 0.');
+    if (isNaN(enteredTotal) || enteredTotal < 0) {
+      alert('Please enter a valid amount (0 or greater).');
       return;
     }
 
@@ -950,15 +960,34 @@ export default function PaymentsView() {
           }
         }
 
-        // EDIT EXISTING RECORD IN PLACE - NEVER ADD TO RECORD
-        await API.put(`/payments/${existingReceipt._id}`, {
-          totalAmount: enteredTotal,
-          referenceNumber: draft.referenceNumber !== undefined ? draft.referenceNumber : (existingReceipt.referenceNumber || ''),
-          contractNo: resolvedContractNo || existingReceipt.contractNo,
-          accountingMonth: targetMonth,
-          status: existingReceipt.status || (item.tenant ? 'Rented' : 'Vacant'),
-          allocations: singleAllocation
-        });
+        // EDIT EXISTING RECORD IN PLACE - NEVER ADD TO RECORD (with fallback if 404)
+        try {
+          await API.put(`/payments/${existingReceipt._id}`, {
+            totalAmount: enteredTotal,
+            referenceNumber: draft.referenceNumber !== undefined ? draft.referenceNumber : (existingReceipt.referenceNumber || ''),
+            contractNo: resolvedContractNo || existingReceipt.contractNo,
+            accountingMonth: targetMonth,
+            status: existingReceipt.status || (item.tenant ? 'Rented' : 'Vacant'),
+            allocations: singleAllocation
+          });
+        } catch (putErr) {
+          if (putErr.response?.status === 404) {
+            await API.post('/payments', {
+              tenantId: item.tenant?._id || null,
+              unitId: item.unit?._id,
+              contractNo: resolvedContractNo,
+              receiptDate,
+              accountingMonth: targetMonth,
+              totalAmount: enteredTotal,
+              referenceNumber: draft.referenceNumber || '',
+              status: item.tenant ? 'Rented' : 'Vacant',
+              comments: `Direct collection for ${formatMonthYear(targetMonth)}`,
+              allocations: singleAllocation
+            });
+          } else {
+            throw putErr;
+          }
+        }
 
         // Clean up any extra duplicate receipts for this exact unit and month to keep single-entry integrity
         const unitIdStr = String(item.unit?._id || item.unitId || '');
@@ -2564,7 +2593,7 @@ export default function PaymentsView() {
                               );
                             }
                             if (colId === 'actions') {
-                              const hasEnteredAmount = Boolean(draft.amount && Number(draft.amount) > 0);
+                              const hasEnteredAmount = draft.amount !== undefined && draft.amount !== '' && !isNaN(Number(draft.amount)) && Number(draft.amount) >= 0;
                               const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
                               const canSaveRow = hasEnteredAmount || Boolean(existingReceiptForRow);
                               const isRowDeleting = deletingRowKey === rowKey;

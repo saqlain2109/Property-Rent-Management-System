@@ -458,8 +458,16 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
   }
 
   try {
-    const receipt = await PaymentReceipt.findById(req.params.id);
+    let receipt = await PaymentReceipt.findById(req.params.id);
     if (!receipt) {
+      const parsedTotal = req.body.totalAmount !== undefined ? Number(req.body.totalAmount) : 0;
+      if (parsedTotal === 0) {
+        await PaymentAllocation.deleteMany({
+          $or: [{ receiptId: req.params.id }, { _id: req.params.id }]
+        });
+        setImmediate(() => syncMonthlyLedgers().catch(console.error));
+        return res.json({ success: true, message: 'Payment set to zero', data: { totalAmount: 0, allocations: [] } });
+      }
       return res.status(404).json({ success: false, message: 'Receipt not found' });
     }
     if (receipt.isReversed) {
@@ -574,7 +582,7 @@ router.post('/:id/reverse', protect, authorize('admin'), [
   body('reversalReason').trim().notEmpty().withMessage('Reversal reason is required')
 ], async (req, res) => {
   try {
-    const receipt = await PaymentReceipt.findById(req.params.id);
+    let receipt = await PaymentReceipt.findById(req.params.id);
     if (!receipt) {
       return res.status(404).json({ success: false, message: 'Receipt not found' });
     }
@@ -608,13 +616,20 @@ router.post('/:id/reverse', protect, authorize('admin'), [
 // Hard delete payment receipt and allocations
 const deletePaymentHandler = async (req, res) => {
   try {
-    const receipt = await PaymentReceipt.findById(req.params.id);
-    if (!receipt) {
-      return res.status(404).json({ success: false, message: 'Receipt not found' });
+    const receiptId = req.params.id;
+    if (receiptId) {
+      await PaymentAllocation.deleteMany({
+        $or: [{ receiptId: receiptId }, { _id: receiptId }]
+      });
     }
 
-    await PaymentAllocation.deleteMany({ receiptId: receipt._id });
-    await PaymentReceipt.findByIdAndDelete(req.params.id);
+    const receipt = await PaymentReceipt.findById(receiptId);
+    if (!receipt) {
+      setImmediate(() => syncMonthlyLedgers().catch(console.error));
+      return res.json({ success: true, message: 'Payment receipt is already removed' });
+    }
+
+    await PaymentReceipt.findByIdAndDelete(receipt._id);
 
     await logAudit({
       userId: req.user._id,

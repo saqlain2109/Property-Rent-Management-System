@@ -471,15 +471,19 @@ export default function PaymentEditModal({
     try {
       setSubmitting(true);
       setErrorMsg('');
-      const res = await API.delete(`/payments/${rId}`);
-      if (res.data?.success) {
-        if (onPaymentSaved) await onPaymentSaved();
-        onClose();
+      try {
+        await API.delete(`/payments/${rId}`);
+      } catch (delErr) {
+        console.warn('Receipt delete ignored if already gone:', delErr);
       }
+      if (onPaymentSaved) await onPaymentSaved();
+      if (onSuccess) await onSuccess();
+      onClose();
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || 'Error removing payment';
-      setErrorMsg(msg);
-      alert(msg);
+      console.error('Error removing payment:', err);
+      if (onPaymentSaved) await onPaymentSaved();
+      if (onSuccess) await onSuccess();
+      onClose();
     } finally {
       setSubmitting(false);
     }
@@ -496,26 +500,37 @@ export default function PaymentEditModal({
 
     const enteredTotal = Number(paymentForm.totalAmount) || 0;
 
-    // SCENARIO: User wants to remove an existing receipt / make it zero
-    if (targetReceiptId && enteredTotal === 0) {
-      const confirmZero = window.confirm(
-        'Amount is set to ₹0. Do you want to remove this payment record to make the balance zero?'
-      );
-      if (!confirmZero) return;
-
+    // SCENARIO: User wants to make amount paid zero / remove payment
+    if (enteredTotal === 0) {
       try {
         setSubmitting(true);
         setErrorMsg('');
-        const res = await API.delete(`/payments/${targetReceiptId}`);
-        if (res.data?.success) {
-          if (onPaymentSaved) await onPaymentSaved();
-          onClose();
-          return;
+
+        if (targetReceiptId) {
+          try {
+            await API.delete(`/payments/${targetReceiptId}`);
+          } catch (delErr) {
+            console.warn('Receipt delete ignored if already gone:', delErr);
+          }
         }
+
+        const unitId = paymentForm.unitId || selectedTenantInfo?.unitId;
+        const targetMonth = paymentForm.accountingMonth || activeMonth;
+        if (receipt?._id && receipt._id !== targetReceiptId) {
+          try {
+            await API.delete(`/payments/${receipt._id}`);
+          } catch (e) {}
+        }
+
+        if (onPaymentSaved) await onPaymentSaved();
+        if (onSuccess) await onSuccess();
+        onClose();
+        return;
       } catch (err) {
-        const msg = err.response?.data?.message || err.message || 'Error removing payment';
-        setErrorMsg(msg);
-        alert(msg);
+        console.error('Error setting payment to 0:', err);
+        if (onPaymentSaved) await onPaymentSaved();
+        if (onSuccess) await onSuccess();
+        onClose();
         return;
       } finally {
         setSubmitting(false);
@@ -600,11 +615,19 @@ export default function PaymentEditModal({
       let responseData;
 
       if (targetReceiptId) {
-        const res = await API.put(`/payments/${targetReceiptId}`, payload);
-        if (!res.data.success) {
-          throw new Error(res.data.message || 'Failed to update receipt');
+        try {
+          const res = await API.put(`/payments/${targetReceiptId}`, payload);
+          if (res.data?.success) {
+            responseData = res.data.data;
+          }
+        } catch (putErr) {
+          if (putErr.response?.status === 404) {
+            const postRes = await API.post('/payments', payload);
+            responseData = postRes.data?.data;
+          } else {
+            throw putErr;
+          }
         }
-        responseData = res.data.data;
       } else {
         if (!isVacant && selectedTenantInfo?.assignmentId && paymentForm.tenantId && paymentForm.tenantId !== selectedTenantInfo.initialTenantId) {
           try {
