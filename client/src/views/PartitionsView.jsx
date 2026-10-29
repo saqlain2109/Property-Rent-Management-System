@@ -344,25 +344,30 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Partitions (Units)</h2>
+            <p className="text-xs text-slate-500 font-medium">Manage property unit partitions, floor areas, and occupancy states</p>
           </div>
         </div>
+      </div>
 
-        {/* Quick Filter Selects */}
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+      {/* Oracle APEX-Style Toolbar */}
+      <ApexToolbar
+        propertyFilter={
           <select
             value={selectedPropertyFilter}
             onChange={(e) => { setSelectedPropertyFilter(e.target.value); setCurrentPage(1); }}
-            className="w-full sm:w-52 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-44 sm:w-52 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-2xs"
           >
             <option value="">All Properties ({properties.length})</option>
             {properties.map(p => (
               <option key={p._id} value={p._id}>{p.name}</option>
             ))}
           </select>
+        }
+        statusFilter={
           <select
             value={occupancyFilter}
             onChange={(e) => { setOccupancyFilter(e.target.value); setCurrentPage(1); }}
-            className="w-full sm:w-36 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-2xs shrink-0"
           >
             <option value="">All statuses</option>
             <option value="Vacant">Vacant</option>
@@ -370,14 +375,12 @@ export default function PartitionsView({ initialPropertyFilter, initialSearch = 
             <option value="Maintenance">Maintenance</option>
             <option value="Under Notice">Under Notice</option>
           </select>
-          <div className="text-xs text-slate-500 font-medium px-2">
+        }
+        kpiFilter={
+          <div className="text-xs text-slate-600 bg-slate-100 font-semibold px-2.5 py-1 rounded-xl shrink-0">
             <b>{filteredUnits.length}</b> Partitions
           </div>
-        </div>
-      </div>
-
-      {/* Oracle APEX-Style Toolbar */}
-      <ApexToolbar
+        }
         search={search}
         onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}

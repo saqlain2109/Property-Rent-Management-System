@@ -36,9 +36,12 @@ export function useModalBackHandler(isOpen, onClose) {
     return () => {
       window.removeEventListener('popstate', handlePopState);
       // If closed by user clicking an on-screen button (Save/Cancel/Close/X)
-      // pop the pushed modal entry from history so user doesn't have a dead back click
+      // pop the pushed modal entry from history so user doesn't have a dead back click,
+      // but only if the user hasn't already navigated to a different screen/hash
       if (!isBackTriggeredRef.current && window.history.state?.modalKey === modalKey) {
-        window.history.back();
+        if (window.location.hash === currentHash) {
+          window.history.back();
+        }
       }
     };
   }, [isOpen]);

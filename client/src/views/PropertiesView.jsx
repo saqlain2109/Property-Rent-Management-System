@@ -381,29 +381,30 @@ export default function PropertiesView({ onNavigateToPartitions, initialProperty
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Properties</h2>
-          </div>
-        </div>
-
-        {/* Quick Property Type Filter */}
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <select
-            value={propertyTypeFilter}
-            onChange={(e) => { setPropertyTypeFilter(e.target.value); setCurrentPage(1); }}
-            className="w-full sm:w-56 px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="">All property types</option>
-            {['Commercial Godown', 'Residential Apartment', 'Commercial Office', 'Garage', 'PG Facility', 'Room', 'Mixed Use', 'Other'].map((type) => (
-              <option key={type} value={type}>{type}</option>
-            ))}
-          </select>
-          <div className="text-xs text-slate-500 font-medium px-2">
-            <b>{filteredProperties.length}</b> Properties • <b>{filteredProperties.reduce((acc, p) => acc + (p.totalAreaSqFt || 0), 0).toLocaleString('en-IN')}</b> sq ft
+            <p className="text-xs text-slate-500 font-medium">Manage real estate assets, buildings, godowns, and total square footage</p>
           </div>
         </div>
       </div>
 
       {/* Oracle APEX-Style Toolbar */}
       <ApexToolbar
+        propertyFilter={
+          <select
+            value={propertyTypeFilter}
+            onChange={(e) => { setPropertyTypeFilter(e.target.value); setCurrentPage(1); }}
+            className="w-44 sm:w-56 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-2xs"
+          >
+            <option value="">All property types</option>
+            {['Commercial Godown', 'Residential Apartment', 'Commercial Office', 'Garage', 'PG Facility', 'Room', 'Mixed Use', 'Other'].map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        }
+        kpiFilter={
+          <div className="text-xs text-slate-600 bg-slate-100 font-semibold px-2.5 py-1 rounded-xl shrink-0">
+            <b>{filteredProperties.length}</b> Properties • <b>{filteredProperties.reduce((acc, p) => acc + (p.totalAreaSqFt || 0), 0).toLocaleString('en-IN')}</b> sq ft
+          </div>
+        }
         search={search}
         onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}

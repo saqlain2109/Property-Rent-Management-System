@@ -11,6 +11,7 @@ import {
 import ApexToolbar from '../components/ApexToolbar';
 import { cycleThreeStateSort, evaluateFilterRule } from '../utils/tableUtils';
 import { useFrozenColumns, getFrozenColumnStyle, useResizableColumns, ColumnHeaderCell, useTableAutoWrap } from '../components/ColumnManager';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
 
 const PRESET_RANGES = [
   { id: 'sheet1', label: 'Master Sheet 1 (Mar 2025 – Feb 2026)', start: '2025-03', end: '2026-02' },
@@ -46,6 +47,7 @@ export default function PropertyMonthlyMatrixReport() {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('matrix_sheet1_freeze_v1', 0);
+  const effectiveFrozenCount = Math.min(3, Math.max(0, Number(frozenColumnCount) || 0));
   const [activeViewId, setActiveViewId] = useState(null);
   const [matrixFilters, setMatrixFilters] = useState([]);
 
@@ -214,23 +216,42 @@ export default function PropertyMonthlyMatrixReport() {
 
   // Drilldown to Edit Month / Payment screen based on the last month paid for
   const handleCellDrilldown = (u, mKey) => {
+    pushDrilldown('monthly', {
+      label: 'Property Monthly Report',
+      targetTab: 'payments'
+    });
     const detail = u.cellDetails?.[mKey];
     const targetMonth = detail?.targetMonth || mKey;
     localStorage.setItem('payments_selected_month', targetMonth);
     if (detail?.receiptId) {
       localStorage.setItem('payments_edit_receipt_id', String(detail.receiptId));
-    }
-    if (u.unitId) {
+      localStorage.removeItem('payments_target_unit_id');
+    } else if (u.unitId) {
       localStorage.setItem('payments_target_unit_id', String(u.unitId));
     }
-    window.location.hash = '#/payments';
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    const tId = detail?.tenantId || u.tenantId || '';
+    if (tId) {
+      localStorage.setItem('payments_target_tenant_id', String(tId));
+      localStorage.setItem('payments_tenant_filter', String(tId));
+    }
+    const cNo = detail?.contractNo || u.contractNo || '';
+    if (cNo) {
+      localStorage.setItem('payments_target_contract_no', String(cNo));
+    }
+    const expRate = Number(detail?.monthlyRentExpected ?? (u.monthlyRentExpected ?? 0));
+    if (expRate > 0) {
+      localStorage.setItem('payments_target_monthly_rent', String(expRate));
+    }
+    navigateToTab('payments');
   };
 
   const handleGroupMonthClick = (mKey) => {
+    pushDrilldown('monthly', {
+      label: 'Property Monthly Report',
+      targetTab: 'payments'
+    });
     localStorage.setItem('payments_selected_month', mKey);
-    window.location.hash = '#/payments';
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    navigateToTab('payments');
   };
 
   // Filtered Groups by search
@@ -559,7 +580,8 @@ export default function PropertyMonthlyMatrixReport() {
         onSortChange={setSortConfig}
         isHeaderSticky={isHeaderSticky}
         onToggleHeaderSticky={setIsHeaderSticky}
-        frozenColumnCount={frozenColumnCount}
+        frozenColumnCount={effectiveFrozenCount}
+        maxFrozenColumns={3}
         onFrozenColumnCountChange={setFrozenColumnCount}
         activeViewName={activeViewId}
         onViewChange={setActiveViewId}
@@ -609,9 +631,9 @@ export default function PropertyMonthlyMatrixReport() {
                     onSort={handleSort}
                     isFilterable={false}
                     onResizeStart={handleResizeStart}
-                    isFrozen={frozenColumnCount > 0}
+                    isFrozen={effectiveFrozenCount > 0}
                     frozenStyle={{
-                      ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, true),
+                      ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, true, true),
                       backgroundColor: '#0f172a'
                     }}
                     isHeaderSticky={isHeaderSticky}
@@ -627,9 +649,9 @@ export default function PropertyMonthlyMatrixReport() {
                     onSort={handleSort}
                     isFilterable={false}
                     onResizeStart={handleResizeStart}
-                    isFrozen={frozenColumnCount > 1}
+                    isFrozen={effectiveFrozenCount > 1}
                     frozenStyle={{
-                      ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, true),
+                      ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, true, true),
                       backgroundColor: '#0f172a'
                     }}
                     isHeaderSticky={isHeaderSticky}
@@ -645,15 +667,15 @@ export default function PropertyMonthlyMatrixReport() {
                     onSort={handleSort}
                     isFilterable={false}
                     onResizeStart={handleResizeStart}
-                    isFrozen={frozenColumnCount > 2}
+                    isFrozen={effectiveFrozenCount > 2}
                     frozenStyle={{
-                      ...getFrozenColumnStyle(2, frozenColumnCount, visibleColumns, columnWidths, true),
+                      ...getFrozenColumnStyle(2, effectiveFrozenCount, visibleColumns, columnWidths, true, true),
                       backgroundColor: '#0f172a'
                     }}
                     isHeaderSticky={isHeaderSticky}
                     theme="dark"
                   />
-                  {activeMonths.map((m, mIdx) => (
+                  {activeMonths.map((m) => (
                     <ColumnHeaderCell
                       key={m.monthKey}
                       colId={m.monthKey}
@@ -666,8 +688,7 @@ export default function PropertyMonthlyMatrixReport() {
                       onSort={handleSort}
                       isFilterable={false}
                       onResizeStart={handleResizeStart}
-                      isFrozen={frozenColumnCount > (3 + mIdx)}
-                      frozenStyle={getFrozenColumnStyle(3 + mIdx, frozenColumnCount, visibleColumns, columnWidths, true)}
+                      isFrozen={false}
                       isHeaderSticky={isHeaderSticky}
                       theme="dark"
                     />

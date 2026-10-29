@@ -472,6 +472,16 @@ export default function AllExpenseReportView() {
 
       {/* APEX Interactive Toolbar */}
       <ApexToolbar
+        kpiFilter={
+          <div className="flex items-center gap-1.5 shrink-0 text-xs font-bold">
+            <div className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-800">
+              Total: {formatCurrency(grandTotalExpenses)}
+            </div>
+            <div className="px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+              {filteredExpenses.length} Records
+            </div>
+          </div>
+        }
         search={search}
         onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}

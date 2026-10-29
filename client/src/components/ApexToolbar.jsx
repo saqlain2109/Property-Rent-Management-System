@@ -4,9 +4,156 @@ import {
   Columns3, Filter, Table, SlidersHorizontal, 
   Download, Bookmark, RotateCcw, X, Plus, Trash2, 
   ChevronLeft, ChevronRight, Check, ArrowUpDown, ChevronDown,
-  Search, Pin, Star
+  Search, Pin, Star, GripVertical, Eye, EyeOff, ChevronUp, Move,
+  Building2, Activity, Calendar
 } from 'lucide-react';
 import { useAppFontSize, useTableAutoWrap, APP_FONT_SIZES } from './ColumnManager';
+
+export const DEFAULT_TOOLBAR_ITEMS = [
+  'search',
+  'rows',
+  'actions',
+  'views',
+  'filter_btn',
+  'spacer',
+  'month_filter',
+  'property_filter',
+  'status_filter',
+  'kpi_filter',
+  'primary',
+  'scroll',
+  'export',
+  'layout_btn'
+];
+
+export const TOOLBAR_ITEM_METADATA = {
+  search: {
+    id: 'search',
+    label: 'Search Box',
+    shortLabel: 'Search',
+    description: 'Fast keyword search across all table records',
+    icon: Search
+  },
+  month_filter: {
+    id: 'month_filter',
+    label: 'Active Month Navigator',
+    shortLabel: 'Month',
+    description: 'Active month previous/next stepper and date picker',
+    icon: Calendar
+  },
+  property_filter: {
+    id: 'property_filter',
+    label: 'Property & Entity Filter',
+    shortLabel: 'Property',
+    description: 'Property or entity selector dropdown',
+    icon: Building2
+  },
+  status_filter: {
+    id: 'status_filter',
+    label: 'Status Filter Pills',
+    shortLabel: 'Status',
+    description: 'All, Active, Inactive, Vacant status filter pills or scope switcher',
+    icon: Filter
+  },
+  kpi_filter: {
+    id: 'kpi_filter',
+    label: 'KPI & Overview Metrics',
+    shortLabel: 'KPIs / Metrics',
+    description: 'Tenancies, Expected, Collected, Outstanding, and totals summary',
+    icon: Activity
+  },
+  primary: {
+    id: 'primary',
+    label: 'Action Buttons',
+    shortLabel: 'Actions',
+    description: 'New Lease, New Tenant, New Settlement, or form action buttons',
+    icon: Plus
+  },
+  filter_btn: {
+    id: 'filter_btn',
+    label: 'Filter Builder',
+    shortLabel: 'Filter',
+    description: 'Advanced column filter condition builder dialog',
+    icon: Filter
+  },
+  views: {
+    id: 'views',
+    label: 'Reports & Views',
+    shortLabel: 'Views',
+    description: 'Saved custom views and system default views dropdown',
+    icon: Bookmark
+  },
+  actions: {
+    id: 'actions',
+    label: 'Actions Menu',
+    shortLabel: 'Actions',
+    description: 'Columns selector, freeze headers, wrap text, and reset controls',
+    icon: SlidersHorizontal
+  },
+  rows: {
+    id: 'rows',
+    label: 'Rows Per Page',
+    shortLabel: 'Rows',
+    description: 'Records displayed per page selector',
+    icon: Table
+  },
+  scroll: {
+    id: 'scroll',
+    label: 'Table Scroll',
+    shortLabel: 'Scroll',
+    description: 'Horizontal left & right table scroll buttons',
+    icon: ArrowUpDown
+  },
+  export: {
+    id: 'export',
+    label: 'Export / Download',
+    shortLabel: 'Download',
+    description: 'Download filtered records to Excel or CSV',
+    icon: Download
+  },
+  spacer: {
+    id: 'spacer',
+    label: 'Right-Align Divider',
+    shortLabel: 'Divider',
+    description: 'Pushes subsequent filters and buttons to the right side of the toolbar',
+    icon: Move
+  },
+  layout_btn: {
+    id: 'layout_btn',
+    label: 'Customize Layout',
+    shortLabel: 'Layout',
+    description: 'Button to open layout customization settings',
+    icon: SlidersHorizontal
+  }
+};
+
+const getInitialToolbarOrder = (key) => {
+  try {
+    const raw = localStorage.getItem(`toolbar_layout_${key}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed.filter(id => DEFAULT_TOOLBAR_ITEMS.includes(id));
+        DEFAULT_TOOLBAR_ITEMS.forEach(id => {
+          if (!valid.includes(id)) valid.push(id);
+        });
+        return valid;
+      }
+    }
+  } catch (e) {}
+  return [...DEFAULT_TOOLBAR_ITEMS];
+};
+
+const getInitialToolbarHidden = (key) => {
+  try {
+    const raw = localStorage.getItem(`toolbar_hidden_${key}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+};
 
 export default function ApexToolbar({
   search,
@@ -45,6 +192,12 @@ export default function ApexToolbar({
   onSaveView,
   onLoadView,
   primaryAction,
+  monthFilter,
+  propertyFilter,
+  quickFilter,
+  statusFilter,
+  kpiFilter,
+  kpiBadges,
   filterSuggestions = {} // { [columnId]: ['Value1', 'Value2'] }
 }) {
   const currentSearch = search !== undefined ? search : (searchValue !== undefined ? searchValue : '');
@@ -74,6 +227,119 @@ export default function ApexToolbar({
   const [showSaveViewInput, setShowSaveViewInput] = useState(false);
   const [showViewsDropdown, setShowViewsDropdown] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+
+  // Toolbar Layout & Reordering State (Customize filters and toolbar per-screen)
+  const [toolbarOrder, setToolbarOrder] = useState(() => getInitialToolbarOrder(currentStorageKey));
+  const [toolbarHidden, setToolbarHidden] = useState(() => getInitialToolbarHidden(currentStorageKey));
+  const [showLayoutModal, setShowLayoutModal] = useState(false);
+  const [draggedItemId, setDraggedItemId] = useState(null);
+  const [dragOverItemId, setDragOverItemId] = useState(null);
+  const [modalDraggedId, setModalDraggedId] = useState(null);
+  const [modalDragOverId, setModalDragOverId] = useState(null);
+
+  // Active Filters Badges Reordering State
+  const [draggedFilterIdx, setDraggedFilterIdx] = useState(null);
+  const [dragOverFilterIdx, setDragOverFilterIdx] = useState(null);
+
+  useEffect(() => {
+    setToolbarOrder(getInitialToolbarOrder(currentStorageKey));
+    setToolbarHidden(getInitialToolbarHidden(currentStorageKey));
+  }, [currentStorageKey]);
+
+  const isItemAvailable = (itemId) => {
+    if (itemId === 'month_filter') return Boolean(monthFilter);
+    if (itemId === 'property_filter') return Boolean(propertyFilter || quickFilter);
+    if (itemId === 'status_filter') return Boolean(statusFilter);
+    if (itemId === 'kpi_filter') return Boolean(kpiFilter || kpiBadges);
+    if (itemId === 'primary') return Boolean(primaryAction);
+    if (itemId === 'export') return Boolean(triggerExport);
+    return true;
+  };
+
+  const handleDropToolbarItem = (sourceItemId, targetItemId) => {
+    const src = sourceItemId || draggedItemId;
+    if (!src || src === targetItemId) {
+      setDraggedItemId(null);
+      setDragOverItemId(null);
+      setModalDraggedId(null);
+      setModalDragOverId(null);
+      return;
+    }
+    setToolbarOrder(prev => {
+      const fromIndex = prev.indexOf(src);
+      const toIndex = prev.indexOf(targetItemId);
+      if (fromIndex === -1 || toIndex === -1) return prev;
+      const newOrder = [...prev];
+      newOrder.splice(fromIndex, 1);
+      newOrder.splice(toIndex, 0, src);
+      try {
+        localStorage.setItem(`toolbar_layout_${currentStorageKey}`, JSON.stringify(newOrder));
+      } catch (e) {}
+      return newOrder;
+    });
+    setDraggedItemId(null);
+    setDragOverItemId(null);
+    setModalDraggedId(null);
+    setModalDragOverId(null);
+  };
+
+  const moveToolbarItem = (itemId, direction) => {
+    setToolbarOrder(prev => {
+      const available = prev.filter(isItemAvailable);
+      const availIdx = available.indexOf(itemId);
+      if (availIdx === -1) return prev;
+      const targetAvailIdx = direction === 'up' ? availIdx - 1 : availIdx + 1;
+      if (targetAvailIdx < 0 || targetAvailIdx >= available.length) return prev;
+      const targetItemId = available[targetAvailIdx];
+
+      const fromIndex = prev.indexOf(itemId);
+      const toIndex = prev.indexOf(targetItemId);
+      if (fromIndex === -1 || toIndex === -1) return prev;
+
+      const newOrder = [...prev];
+      const [removed] = newOrder.splice(fromIndex, 1);
+      newOrder.splice(toIndex, 0, removed);
+      try {
+        localStorage.setItem(`toolbar_layout_${currentStorageKey}`, JSON.stringify(newOrder));
+      } catch (e) {}
+      return newOrder;
+    });
+  };
+
+  const toggleToolbarItemVisibility = (itemId) => {
+    setToolbarHidden(prev => {
+      const isHidden = prev.includes(itemId);
+      const updated = isHidden ? prev.filter(id => id !== itemId) : [...prev, itemId];
+      try {
+        localStorage.setItem(`toolbar_hidden_${currentStorageKey}`, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  const handleResetToolbarLayout = () => {
+    const defaultOrder = [...DEFAULT_TOOLBAR_ITEMS];
+    setToolbarOrder(defaultOrder);
+    setToolbarHidden([]);
+    try {
+      localStorage.removeItem(`toolbar_layout_${currentStorageKey}`);
+      localStorage.removeItem(`toolbar_hidden_${currentStorageKey}`);
+    } catch (e) {}
+  };
+
+  const handleDropFilterBadge = (targetIdx) => {
+    if (draggedFilterIdx === null || draggedFilterIdx === targetIdx) {
+      setDraggedFilterIdx(null);
+      setDragOverFilterIdx(null);
+      return;
+    }
+    const updated = [...currentFilters];
+    const [moved] = updated.splice(draggedFilterIdx, 1);
+    updated.splice(targetIdx, 0, moved);
+    onFiltersChange?.(updated);
+    setDraggedFilterIdx(null);
+    setDragOverFilterIdx(null);
+  };
 
   // Column Selector Dialog State
   const [showColumnSelectorModal, setShowColumnSelectorModal] = useState(false);
@@ -473,50 +739,162 @@ export default function ApexToolbar({
 
   const filterableColumns = columns.filter(c => c.id !== 'actions');
 
-  return (
-    <div className="space-y-2 relative z-50">
-      {/* Top Toolbar Container - Aligned cleanly in One Single Line */}
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-xs select-none relative z-50 w-full min-w-0">
-        {/* Left Side: Search, Rows dropdown, Actions Menu, Views, Wrap, Download */}
-        <div className="flex flex-wrap items-center gap-2 relative z-50">
-          {/* Search Box */}
-          <div className="relative min-w-[150px] max-w-[220px]">
-            <input
-              type="text"
-              placeholder={searchPlaceholder || 'Search...'}
-              value={currentSearch}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-3 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all font-medium text-slate-800 placeholder:text-slate-400"
-            />
-            {currentSearch && (
-              <button 
-                onClick={() => onSearchChange('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+  const renderSearch = () => (
+    <div className="relative min-w-[150px] max-w-[220px]">
+      <input
+        type="text"
+        placeholder={searchPlaceholder || 'Search...'}
+        value={currentSearch}
+        onChange={(e) => onSearchChange(e.target.value)}
+        className="w-full pl-3 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all font-medium text-slate-800 placeholder:text-slate-400"
+      />
+      {currentSearch && (
+        <button 
+          onClick={() => onSearchChange('')}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
 
-          {/* Rows Selector */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
-            <span className="text-slate-400 font-normal">Rows</span>
-            <select
-              value={rowsPerPage || 25}
-              onChange={(e) => {
-                const val = e.target.value === 'All' ? 'All' : Number(e.target.value);
-                onRowsPerPageChange(val);
-              }}
-              className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
-            >
-              {availableRowsOptions.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
-          </div>
+  const renderRows = () => (
+    <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
+      <span className="text-slate-400 font-normal">Rows</span>
+      <select
+        value={rowsPerPage || 25}
+        onChange={(e) => {
+          const val = e.target.value === 'All' ? 'All' : Number(e.target.value);
+          onRowsPerPageChange(val);
+        }}
+        className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+      >
+        {availableRowsOptions.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    </div>
+  );
 
-          {/* Actions Menu Dropdown */}
-          <div className="relative z-[100]" ref={menuRef}>
+  const renderFilterButton = () => (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        openFilterModal();
+      }}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs cursor-pointer select-none shrink-0 ${
+        currentFilters.length > 0
+          ? 'bg-teal-50 text-teal-800 border-teal-300 hover:bg-teal-100'
+          : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+      }`}
+      title="Open column filter builder"
+    >
+      <Filter className={`w-3.5 h-3.5 ${currentFilters.length > 0 ? 'text-teal-600 fill-teal-600' : 'text-slate-500'}`} />
+      <span>Filter</span>
+      {currentFilters.length > 0 && (
+        <span className="bg-teal-600 text-white px-1.5 py-0.2 rounded-full text-[10px] font-bold">
+          {currentFilters.length}
+        </span>
+      )}
+    </button>
+  );
+
+  const renderPrimaryAction = () => primaryAction ? (
+    <div className="flex items-center gap-1.5 shrink-0">
+      {primaryAction}
+    </div>
+  ) : null;
+
+  const renderMonthFilter = () => {
+    if (!monthFilter) return null;
+    return (
+      <div className="flex items-center gap-1.5 shrink-0 max-w-full">
+        {monthFilter}
+      </div>
+    );
+  };
+
+  const renderStatusFilter = () => {
+    if (!statusFilter) return null;
+    return (
+      <div className="flex items-center gap-1.5 shrink-0 max-w-full">
+        {statusFilter}
+      </div>
+    );
+  };
+
+  const renderPropertyFilter = () => {
+    const node = propertyFilter || quickFilter;
+    if (!node) return null;
+    return (
+      <div className="flex items-center gap-1.5 shrink-0 max-w-full">
+        {node}
+      </div>
+    );
+  };
+
+  const renderKpiFilter = () => {
+    const node = kpiFilter || kpiBadges;
+    if (!node) return null;
+    return (
+      <div className="flex items-center gap-1.5 shrink-0 max-w-full">
+        {node}
+      </div>
+    );
+  };
+
+  const renderScrollButtons = () => (
+    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-0.5 text-xs text-slate-700 shadow-2xs shrink-0">
+      <button
+        type="button"
+        onClick={(e) => handleToolbarScroll('left', e)}
+        className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-white hover:text-teal-700 text-slate-600 font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+        title="Scroll Table Left (◀)"
+      >
+        <ChevronLeft className="w-3.5 h-3.5 text-teal-600" />
+        <span className="hidden md:inline">Left</span>
+      </button>
+      <div className="w-[1px] h-3.5 bg-slate-200 mx-0.5"></div>
+      <button
+        type="button"
+        onClick={(e) => handleToolbarScroll('right', e)}
+        className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-white hover:text-teal-700 text-slate-600 font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+        title="Scroll Table Right (▶)"
+      >
+        <span className="hidden md:inline">Right</span>
+        <ChevronRight className="w-3.5 h-3.5 text-teal-600" />
+      </button>
+    </div>
+  );
+
+  const renderExportButton = () => triggerExport ? (
+    <button
+      type="button"
+      onClick={triggerExport}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+      title="Export filtered records"
+    >
+      <Download className="w-3.5 h-3.5 text-teal-600" />
+      <span className="hidden sm:inline">Download</span>
+    </button>
+  ) : null;
+
+  const renderLayoutButton = () => (
+    <button
+      type="button"
+      onClick={() => setShowLayoutModal(true)}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-teal-300 text-slate-600 hover:text-teal-700 text-xs font-bold transition-all shadow-2xs cursor-pointer shrink-0"
+      title="Customize Filter & Toolbar Layout (Drag items or reorder)"
+    >
+      <SlidersHorizontal className="w-3.5 h-3.5 text-teal-600" />
+      <span className="hidden sm:inline">Layout</span>
+    </button>
+  );
+
+  const renderActionsMenu = () => (
+    <div className="relative z-[100]" ref={menuRef}>
             <button
               type="button"
               onClick={(e) => {
@@ -721,6 +1099,25 @@ export default function ApexToolbar({
 
                 <div className="my-1 border-t border-slate-100"></div>
 
+                {/* Customize Layout Trigger in Actions */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowLayoutModal(true);
+                    setShowActionsMenu(false);
+                  }}
+                  className="w-full px-4 py-2 text-left text-xs font-semibold flex items-center justify-between hover:bg-teal-50 text-teal-800 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <SlidersHorizontal className="w-4 h-4 text-teal-600 shrink-0" />
+                    <span>Customize Filter Layout</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <div className="my-1 border-t border-slate-100"></div>
+
                 {/* 9. Reset All (Columns & Filters) */}
                 <button
                   type="button"
@@ -736,8 +1133,9 @@ export default function ApexToolbar({
               </div>
             )}
           </div>
+  );
 
-          {/* Saved Views / Reports Dropdown (Oracle APEX Interactive Report Style) */}
+  const renderViewsDropdown = () => (
           <div className="relative shrink-0 z-40" ref={viewsDropdownRef}>
             <button
               type="button"
@@ -946,47 +1344,122 @@ export default function ApexToolbar({
               </div>
             )}
           </div>
-        </div>
+  );
 
-        {/* Right Side: Quick Action (e.g. Filters) & Download in one clean line */}
-        <div className="flex flex-wrap items-center gap-2">
-          {primaryAction}
+  const renderToolbarItem = (itemId) => {
+    switch (itemId) {
+      case 'search': return renderSearch();
+      case 'rows': return renderRows();
+      case 'actions': return renderActionsMenu();
+      case 'views': return renderViewsDropdown();
+      case 'filter_btn': return renderFilterButton();
+      case 'month_filter': return renderMonthFilter();
+      case 'property_filter': return renderPropertyFilter();
+      case 'status_filter': return renderStatusFilter();
+      case 'kpi_filter': return renderKpiFilter();
+      case 'primary': return renderPrimaryAction();
+      case 'scroll': return renderScrollButtons();
+      case 'export': return renderExportButton();
+      case 'layout_btn': return renderLayoutButton();
+      default: return null;
+    }
+  };
 
-          {/* On-Screen Horizontal Scroll Buttons */}
-          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-0.5 text-xs text-slate-700 shadow-2xs">
-            <button
-              type="button"
-              onClick={(e) => handleToolbarScroll('left', e)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-white hover:text-teal-700 text-slate-600 font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
-              title="Scroll Table Left (◀)"
-            >
-              <ChevronLeft className="w-3.5 h-3.5 text-teal-600" />
-              <span className="hidden md:inline">Left</span>
-            </button>
-            <div className="w-[1px] h-3.5 bg-slate-200 mx-0.5"></div>
-            <button
-              type="button"
-              onClick={(e) => handleToolbarScroll('right', e)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-white hover:text-teal-700 text-slate-600 font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
-              title="Scroll Table Right (▶)"
-            >
-              <span className="hidden md:inline">Right</span>
-              <ChevronRight className="w-3.5 h-3.5 text-teal-600" />
-            </button>
-          </div>
+  return (
+    <div className="space-y-2 relative z-50">
+      {/* Top Toolbar Container - User-Customizable Dynamic Layout */}
+      <div className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-xs select-none relative z-50 w-full min-w-0">
+        {toolbarOrder.map((itemId) => {
+          if (toolbarHidden.includes(itemId)) return null;
+          if (itemId === 'month_filter' && !monthFilter) return null;
+          if (itemId === 'property_filter' && !propertyFilter && !quickFilter) return null;
+          if (itemId === 'status_filter' && !statusFilter) return null;
+          if (itemId === 'kpi_filter' && !kpiFilter && !kpiBadges) return null;
+          if (itemId === 'primary' && !primaryAction) return null;
+          if (itemId === 'export' && !triggerExport) return null;
 
-          {(onExport || onExportExcel) && (
-            <button
-              type="button"
-              onClick={triggerExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
-              title="Export filtered records"
+          if (itemId === 'spacer') {
+            return (
+              <div
+                key="spacer"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggedItemId && draggedItemId !== 'spacer') setDragOverItemId('spacer');
+                }}
+                onDragLeave={() => { if (dragOverItemId === 'spacer') setDragOverItemId(null); }}
+                onDrop={(e) => { e.preventDefault(); handleDropToolbarItem(null, 'spacer'); }}
+                className={`flex-1 min-w-[8px] self-stretch flex items-center justify-center group/spacer relative select-none transition-all ${
+                  draggedItemId === 'spacer' ? 'opacity-30' : ''
+                } ${
+                  dragOverItemId === 'spacer' ? 'bg-teal-50/80 rounded-xl ring-2 ring-teal-500' : ''
+                }`}
+                title="Right-Align Divider (Drag to change which filters are on the left vs right)"
+              >
+                <div
+                  draggable={true}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', 'spacer');
+                    setDraggedItemId('spacer');
+                  }}
+                  onDragEnd={() => { setDraggedItemId(null); setDragOverItemId(null); }}
+                  className="cursor-grab active:cursor-grabbing w-full h-full min-h-[28px] rounded-lg border border-dashed border-transparent hover:border-teal-300 hover:bg-teal-50/40 flex items-center justify-center transition-all opacity-0 hover:opacity-100"
+                >
+                  <span className="text-[9px] font-extrabold text-teal-700 tracking-wider uppercase flex items-center gap-1">
+                    <GripVertical className="w-3 h-3 text-teal-600" />
+                    Divider
+                  </span>
+                </div>
+              </div>
+            );
+          }
+
+          const content = renderToolbarItem(itemId);
+          if (!content) return null;
+
+          return (
+            <div
+              key={itemId}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (draggedItemId && draggedItemId !== itemId) {
+                  setDragOverItemId(itemId);
+                }
+              }}
+              onDragLeave={() => {
+                if (dragOverItemId === itemId) setDragOverItemId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleDropToolbarItem(null, itemId);
+              }}
+              className={`group/tb relative flex items-center gap-0.5 transition-all duration-150 shrink-0 ${
+                draggedItemId === itemId ? 'opacity-35 scale-95 ring-2 ring-teal-400 rounded-xl' : ''
+              } ${
+                dragOverItemId === itemId ? 'ring-2 ring-teal-500 bg-teal-50/60 rounded-xl p-0.5' : ''
+              }`}
             >
-              <Download className="w-3.5 h-3.5 text-teal-600" />
-              <span className="hidden sm:inline">Download</span>
-            </button>
-          )}
-        </div>
+              {/* Drag Handle */}
+              <div
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', itemId);
+                  setDraggedItemId(itemId);
+                }}
+                onDragEnd={() => {
+                  setDraggedItemId(null);
+                  setDragOverItemId(null);
+                }}
+                className="opacity-0 group-hover/tb:opacity-70 hover:!opacity-100 cursor-grab active:cursor-grabbing p-0.5 text-slate-400 hover:text-teal-600 transition-opacity select-none -mr-0.5 shrink-0"
+                title={`Drag to move ${TOOLBAR_ITEM_METADATA[itemId]?.shortLabel || itemId}`}
+              >
+                <GripVertical className="w-3.5 h-3.5" />
+              </div>
+
+              {/* Rendered Item Content */}
+              {content}
+            </div>
+          );
+        })}
       </div>
 
       {/* Filter Badges Bar (Shows active filters with one-click remove) */}
@@ -996,7 +1469,7 @@ export default function ApexToolbar({
             <Filter className="w-3 h-3 text-teal-600" />
             Applied Filters:
           </span>
-          {currentFilters.map(f => {
+          {currentFilters.map((f, fIdx) => {
             const col = columns.find(c => c.id === f.columnId);
             const isUnary = f.operator === 'is_empty' || f.operator === 'is_not_empty';
             const operatorLabels = {
@@ -1016,8 +1489,40 @@ export default function ApexToolbar({
             return (
               <span
                 key={f.id}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50 border border-teal-200 text-teal-900 text-xs font-semibold animate-in fade-in"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggedFilterIdx !== null && draggedFilterIdx !== fIdx) {
+                    setDragOverFilterIdx(fIdx);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dragOverFilterIdx === fIdx) setDragOverFilterIdx(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDropFilterBadge(fIdx);
+                }}
+                className={`group/badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50 border border-teal-200 text-teal-900 text-xs font-semibold animate-in fade-in transition-all ${
+                  draggedFilterIdx === fIdx ? 'opacity-40 scale-95' : ''
+                } ${
+                  dragOverFilterIdx === fIdx ? 'ring-2 ring-teal-500 bg-teal-100' : ''
+                }`}
               >
+                <div
+                  draggable={true}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', String(fIdx));
+                    setDraggedFilterIdx(fIdx);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedFilterIdx(null);
+                    setDragOverFilterIdx(null);
+                  }}
+                  className="cursor-grab active:cursor-grabbing text-teal-400 hover:text-teal-700 opacity-60 group-hover/badge:opacity-100 -ml-0.5"
+                  title="Drag to reorder active filters"
+                >
+                  <GripVertical className="w-3 h-3" />
+                </div>
                 <span className="text-teal-700 font-bold">{col?.label || f.columnId}</span>
                 <span className="text-teal-600 font-mono text-[11px]">{operatorLabels[f.operator] || f.operator}</span>
                 {!isUnary && (
@@ -1028,7 +1533,7 @@ export default function ApexToolbar({
                 <button
                   type="button"
                   onClick={() => onFiltersChange(currentFilters.filter(item => item.id !== f.id))}
-                  className="p-0.5 rounded hover:bg-teal-200/50 text-teal-700"
+                  className="p-0.5 rounded hover:bg-teal-200/50 text-teal-700 cursor-pointer"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1038,7 +1543,7 @@ export default function ApexToolbar({
           <button
             type="button"
             onClick={() => onFiltersChange([])}
-            className="text-xs text-rose-600 hover:text-rose-800 font-bold underline px-1"
+            className="text-xs text-rose-600 hover:text-rose-800 font-bold underline px-1 cursor-pointer"
           >
             Clear All
           </button>
@@ -1859,6 +2364,209 @@ export default function ApexToolbar({
                 </div>
               </form>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Customize Toolbar & Filter Layout Dialog */}
+      {showLayoutModal && typeof document !== 'undefined' && createPortal(
+        <div 
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-[99999] animate-in fade-in duration-150"
+          onClick={() => setShowLayoutModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shadow-2xs">
+                  <SlidersHorizontal className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm">Customize Filter & Toolbar Layout</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Move filters and toolbar controls to your preferred position. Layout is saved automatically for this screen.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowLayoutModal(false)}
+                className="p-1.5 rounded-xl hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Tips Banner */}
+            <div className="px-5 py-2.5 bg-teal-50/50 border-b border-teal-100/70 text-[11px] text-teal-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-bold">Tip:</span>
+                <span>Drag rows using the grip handle <span className="font-mono">⋮⋮</span> or click the arrows to move filters.</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetToolbarLayout}
+                className="text-teal-700 hover:text-teal-900 font-bold underline cursor-pointer text-[11px] flex items-center gap-1"
+                title="Reset layout to default order"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset to Default</span>
+              </button>
+            </div>
+
+            {/* Modal List of Toolbar Items */}
+            <div className="p-4 overflow-y-auto max-h-[58vh] space-y-2">
+              {toolbarOrder.filter(isItemAvailable).map((itemId, idx, arr) => {
+                const meta = TOOLBAR_ITEM_METADATA[itemId] || {
+                  id: itemId,
+                  label: itemId,
+                  shortLabel: itemId,
+                  description: '',
+                  icon: SlidersHorizontal
+                };
+                const IconComponent = meta.icon;
+                const isHidden = toolbarHidden.includes(itemId);
+                const spacerIdx = arr.indexOf('spacer');
+                const isBeforeSpacer = spacerIdx === -1 || idx < spacerIdx;
+                const isSpacer = itemId === 'spacer';
+
+                return (
+                  <div
+                    key={itemId}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (modalDraggedId && modalDraggedId !== itemId) {
+                        setModalDragOverId(itemId);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (modalDragOverId === itemId) setModalDragOverId(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleDropToolbarItem(modalDraggedId, itemId);
+                    }}
+                    className={`group/row flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                      modalDraggedId === itemId ? 'opacity-35 scale-98 bg-slate-100' : ''
+                    } ${
+                      modalDragOverId === itemId ? 'ring-2 ring-teal-500 bg-teal-50 border-teal-300' : ''
+                    } ${
+                      isHidden ? 'bg-slate-50/60 border-slate-200 opacity-60' : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
+                    }`}
+                  >
+                    {/* Left: Drag Handle + Icon + Label + Description */}
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                      <div
+                        draggable={true}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', itemId);
+                          setModalDraggedId(itemId);
+                        }}
+                        onDragEnd={() => {
+                          setModalDraggedId(null);
+                          setModalDragOverId(null);
+                        }}
+                        className="cursor-grab active:cursor-grabbing p-1 text-slate-400 hover:text-teal-600 transition-colors"
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </div>
+
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        isSpacer 
+                          ? 'bg-amber-50 text-amber-600 border border-amber-200'
+                          : isHidden
+                            ? 'bg-slate-100 text-slate-400'
+                            : 'bg-teal-50 text-teal-700 border border-teal-200/70'
+                      }`}>
+                        <IconComponent className="w-3.5 h-3.5" />
+                      </div>
+
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold truncate ${isHidden ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                            {meta.label}
+                          </span>
+                          {/* Side indicator badge */}
+                          {isSpacer ? (
+                            <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 border border-amber-200 shrink-0 uppercase tracking-wide">
+                              Divider (Pushes following items to Right)
+                            </span>
+                          ) : (
+                            <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-md shrink-0 uppercase tracking-wide ${
+                              isBeforeSpacer 
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200/70'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}>
+                              {isBeforeSpacer ? 'Left Group' : 'Right Group'}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 truncate">
+                          {meta.description}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right: Actions (Visibility Toggle + Up / Down Reorder buttons) */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {!isSpacer && (
+                        <button
+                          type="button"
+                          onClick={() => toggleToolbarItemVisibility(itemId)}
+                          className={`p-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                            isHidden
+                              ? 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
+                              : 'bg-teal-50 text-teal-700 border-teal-200/80 hover:bg-teal-100'
+                          }`}
+                          title={isHidden ? 'Click to show this item' : 'Click to hide this item'}
+                        >
+                          {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => moveToolbarItem(itemId, 'up')}
+                        disabled={idx === 0}
+                        className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-teal-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Move Up / Left"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => moveToolbarItem(itemId, 'down')}
+                        disabled={idx === arr.length - 1}
+                        className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-teal-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Move Down / Right"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <span className="text-[11px] text-slate-400 font-medium">
+                Changes apply instantly across this screen.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowLayoutModal(false)}
+                className="px-4 py-2 text-xs font-bold bg-[#0f172a] hover:bg-[#1e293b] text-white rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5 text-teal-400" />
+                <span>Done</span>
+              </button>
+            </div>
           </div>
         </div>,
         document.body

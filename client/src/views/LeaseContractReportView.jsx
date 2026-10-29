@@ -18,6 +18,7 @@ import {
   ColumnHeaderCell, 
   useTableAutoWrap 
 } from '../components/ColumnManager';
+import { pushDrilldown } from '../utils/navigationHistory';
 
 // Palette of distinctive, professional line accent colors for tenants
 const TENANT_COLOR_PALETTES = [
@@ -1439,6 +1440,14 @@ export default function LeaseContractReportView() {
                   <button
                     type="button"
                     onClick={() => {
+                      pushDrilldown('lease_contract_report', {
+                        label: 'Lease Contract Report',
+                        targetTab: 'contracts',
+                        returnState: { contractNo: selectedCellInfo.contractNo }
+                      });
+                      if (selectedCellInfo.contractNo) {
+                        localStorage.setItem('contracts_target_no', selectedCellInfo.contractNo);
+                      }
                       setSelectedCellInfo(null);
                       window.location.hash = '#/contracts';
                     }}
@@ -1452,6 +1461,10 @@ export default function LeaseContractReportView() {
                   <button
                     type="button"
                     onClick={() => {
+                      pushDrilldown('lease_contract_report', {
+                        label: 'Lease Contract Report',
+                        targetTab: 'contracts'
+                      });
                       setSelectedCellInfo(null);
                       window.location.hash = '#/contracts';
                     }}

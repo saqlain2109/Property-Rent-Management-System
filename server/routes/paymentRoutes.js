@@ -20,9 +20,22 @@ router.get('/', protect, async (req, res) => {
     let query = { isReversed: false };
 
     if (contractNo) {
-      const allocReceiptIds = await PaymentAllocation.find({ contractNo }).distinct('receiptId');
+      const cleanCNo = contractNo.trim();
+      let contractPatterns = [cleanCNo];
+      if (/^(de|delhiery)-2025$/i.test(cleanCNo)) {
+        contractPatterns = ['DE-2025', 'Delhiery-2025'];
+      }
+      const contractRegex = new RegExp(`^(${contractPatterns.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`, 'i');
+
+      const allocReceiptIds = await PaymentAllocation.find({
+        $or: [
+          { contractNo: contractRegex },
+          { contractNo: { $in: contractPatterns } }
+        ]
+      }).distinct('receiptId');
+
       const orConditions = [
-        { contractNo: contractNo },
+        { contractNo: contractRegex },
         { _id: { $in: allocReceiptIds } }
       ];
       if (tenantId && unitId) {
@@ -110,8 +123,7 @@ router.get('/', protect, async (req, res) => {
 // Shows paid-till and pending amounts for all occupancies effective for the requested targetMonth
 router.get('/outstanding-summary', protect, async (req, res) => {
   try {
-    const { upToMonthYear } = req.query;
-    const targetMonth = upToMonthYear || getCurrentMonthYear();
+    const targetMonth = req.query.upToMonthYear || req.query.targetMonth || getCurrentMonthYear();
 
     const [year, m] = targetMonth.split('-').map(Number);
     const totalDays = new Date(year, m, 0).getDate();
@@ -148,10 +160,11 @@ router.get('/outstanding-summary', protect, async (req, res) => {
         isReversed: false,
         $or: [
           { accountingMonth: targetMonth },
-          { receiptDate: { $gte: monthStart, $lte: monthEnd } },
-          { monthPaidFor: { $regex: targetMonth } }
+          { accountingMonth: { $exists: false }, receiptDate: { $gte: monthStart, $lte: monthEnd } },
+          { accountingMonth: null, receiptDate: { $gte: monthStart, $lte: monthEnd } },
+          { accountingMonth: '', receiptDate: { $gte: monthStart, $lte: monthEnd } }
         ]
-      }).select('unitId tenantId status rentAmount depositAmount totalAmount contractNo accountingMonth monthPaidFor')
+      }).select('unitId tenantId status rentAmount depositAmount totalAmount contractNo accountingMonth monthPaidFor receiptNumber')
     ]);
 
     const revIdSet = new Set(reversedReceiptIds.map(String));
@@ -256,9 +269,12 @@ router.get('/outstanding-summary', protect, async (req, res) => {
         const targetMonthData = ledger.monthsBreakdown.find(m => m.monthYear === targetMonth);
         const activeReceipt = monthReceipts.find(r => 
           String(r.unitId?._id || r.unitId) === String(unit._id) &&
-          (r.accountingMonth === targetMonth || (r.monthPaidFor && r.monthPaidFor.includes(targetMonth))) &&
+          r.accountingMonth === targetMonth &&
           (!r.tenantId || String(r.tenantId?._id || r.tenantId) === String(tenantActualId))
-        ) || monthReceipts.find(r => String(r.unitId?._id || r.unitId) === String(unit._id)) || unitMonthReceipt;
+        ) || monthReceipts.find(r => 
+          String(r.unitId?._id || r.unitId) === String(unit._id) &&
+          r.accountingMonth === targetMonth
+        ) || null;
         const receiptPaidInMonth = (activeReceipt && activeReceipt.status !== 'Vacant' && activeReceipt.totalAmount !== undefined)
           ? (Number(activeReceipt.totalAmount) || 0)
           : null;
@@ -300,6 +316,7 @@ router.get('/outstanding-summary', protect, async (req, res) => {
           depositAmount: actualDepositForMonth,
           monthPaidFor: isExplicitlyVacant ? '' : (activeReceipt?.monthPaidFor || ''),
           receiptId: isExplicitlyVacant ? null : (activeReceipt?._id || null),
+          receiptNumber: isExplicitlyVacant ? '' : (activeReceipt?.receiptNumber || ''),
           paidTillMonth: isExplicitlyVacant ? 'Vacant' : (ledger.paidTillMonth || 'None'),
           nextUnpaidMonth: isExplicitlyVacant ? 'None' : (ledger.nextUnpaidMonth || 'Up to date'),
           totalExpected: isExplicitlyVacant ? 0 : ledger.totalExpected,
@@ -477,14 +494,6 @@ router.post('/', protect, authorize('admin', 'manager'), [
       });
     }
 
-    if (!existingReceipt && finalMonthPaidFor) {
-      existingReceipt = await PaymentReceipt.findOne({
-        unitId,
-        monthPaidFor: finalMonthPaidFor,
-        isReversed: false
-      });
-    }
-
     if (existingReceipt) {
       // UPDATE EXISTING RECEIPT IN PLACE
       existingReceipt.status = status;
@@ -540,7 +549,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
         req
       });
 
-      setImmediate(() => syncMonthlyLedgers().catch(console.error));
+      await syncMonthlyLedgers().catch(console.error);
 
       return res.json({
         success: true,
@@ -596,7 +605,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       req
     });
 
-    setImmediate(() => syncMonthlyLedgers().catch(console.error));
+    await syncMonthlyLedgers().catch(console.error);
 
     res.status(201).json({
       success: true,
@@ -634,7 +643,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
         await PaymentAllocation.deleteMany({
           $or: [{ receiptId: req.params.id }, { _id: req.params.id }]
         });
-        setImmediate(() => syncMonthlyLedgers().catch(console.error));
+        await syncMonthlyLedgers().catch(console.error);
         return res.json({ success: true, message: 'Payment set to zero', data: { totalAmount: 0, allocations: [] } });
       }
       return res.status(404).json({ success: false, message: 'Receipt not found' });
@@ -755,7 +764,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     });
 
     const updatedAllocations = await PaymentAllocation.find({ receiptId: receipt._id });
-    setImmediate(() => syncMonthlyLedgers().catch(console.error));
+    await syncMonthlyLedgers().catch(console.error);
 
     res.json({
       success: true,
@@ -795,7 +804,7 @@ router.post('/:id/reverse', protect, authorize('admin'), [
       req
     });
 
-    setImmediate(() => syncMonthlyLedgers().catch(console.error));
+    await syncMonthlyLedgers().catch(console.error);
 
     res.json({ success: true, message: 'Payment successfully reversed with full audit trail', data: receipt });
   } catch (error) {
@@ -816,7 +825,7 @@ const deletePaymentHandler = async (req, res) => {
 
     const receipt = await PaymentReceipt.findById(receiptId);
     if (!receipt) {
-      setImmediate(() => syncMonthlyLedgers().catch(console.error));
+      await syncMonthlyLedgers().catch(console.error);
       return res.json({ success: true, message: 'Payment receipt is already removed' });
     }
 
@@ -831,7 +840,7 @@ const deletePaymentHandler = async (req, res) => {
       req
     });
 
-    setImmediate(() => syncMonthlyLedgers().catch(console.error));
+    await syncMonthlyLedgers().catch(console.error);
 
     res.json({ success: true, message: 'Payment receipt permanently deleted' });
   } catch (error) {

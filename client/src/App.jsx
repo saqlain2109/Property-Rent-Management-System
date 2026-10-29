@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import LoginModal from './components/LoginModal';
 import ProfileModal from './components/ProfileModal';
@@ -69,6 +69,11 @@ export default function App() {
     if (fromHash) return fromHash;
     return localStorage.getItem('property_mgmt_active_tab') || 'dashboard';
   });
+
+  const currentTabRef = useRef(currentTab);
+  useEffect(() => {
+    currentTabRef.current = currentTab;
+  }, [currentTab]);
 
   const setCurrentTab = (newTab, options = {}) => {
     const { replace = false } = options;
@@ -141,18 +146,18 @@ export default function App() {
     if (!user) return;
 
     // Anchor initial hash if missing
-    const initialHashTab = getTabFromHash() || currentTab || 'dashboard';
+    const initialHashTab = getTabFromHash() || currentTabRef.current || 'dashboard';
     if (window.location.hash !== `#/${initialHashTab}`) {
       window.history.replaceState({ tab: initialHashTab, appRoot: true }, '', `#/${initialHashTab}`);
     }
 
     const handlePopState = (e) => {
-      // If modal was dismissed via popstate, do not switch main tabs
-      if (e.state && e.state.modalOpen) {
+      // If modal was dismissed via popstate, do not switch main tabs ONLY if the hash hasn't changed to a new tab
+      const tabFromHash = getTabFromHash();
+      if (e.state && e.state.modalOpen && !e.state.tab && tabFromHash === currentTabRef.current) {
         return;
       }
 
-      const tabFromHash = getTabFromHash();
       if (tabFromHash) {
         setCurrentTabState(tabFromHash);
         localStorage.setItem('property_mgmt_active_tab', tabFromHash);
@@ -165,8 +170,21 @@ export default function App() {
       }
     };
 
+    const handleCustomNav = (e) => {
+      const targetTab = e.detail?.tab;
+      if (targetTab && targetTab !== currentTabRef.current) {
+        setCurrentTab(targetTab);
+      }
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    window.addEventListener('app_navigate_tab', handleCustomNav);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+      window.removeEventListener('app_navigate_tab', handleCustomNav);
+    };
   }, [user]);
 
   const handleLoginSuccess = (userData) => {
@@ -328,7 +346,7 @@ export default function App() {
 
         {/* Dynamic Content Views */}
         <div className="flex-1 min-w-0 p-2 sm:p-2.5 md:p-3 w-full max-w-[1920px] mx-auto transition-all duration-300">
-          <ErrorBoundary>
+          <ErrorBoundary key={currentTab} resetKey={currentTab}>
           {currentTab === 'dashboard' && (
             <Dashboard
               onNavigateToPartitions={handleNavigateToPartitions}

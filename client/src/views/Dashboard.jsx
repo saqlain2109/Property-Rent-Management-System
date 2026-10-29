@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend
 } from 'recharts';
 import gsap from 'gsap';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
 
 const KpiCard = ({ label, value, sub, icon: Icon, color, bgColor, iconColor }) => (
   <div className={`bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-start gap-4`}>
@@ -266,11 +267,15 @@ export default function Dashboard() {
                     <tr 
                       key={r._id} 
                       onClick={() => {
+                        pushDrilldown('dashboard', {
+                          label: 'Dashboard',
+                          targetTab: 'payments'
+                        });
                         const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
                         if (m) localStorage.setItem('payments_selected_month', m);
                         localStorage.setItem('payments_edit_receipt_id', String(r._id));
-                        window.location.hash = '#/payments';
-                        window.dispatchEvent(new PopStateEvent('popstate'));
+                        localStorage.removeItem('payments_target_unit_id');
+                        navigateToTab('payments');
                       }}
                       className="hover:bg-teal-50/70 cursor-pointer transition-colors group/drow"
                       title="Click to edit in Edit Month / Payment screen"

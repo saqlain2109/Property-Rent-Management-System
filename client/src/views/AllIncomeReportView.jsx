@@ -11,6 +11,8 @@ import {
   getFrozenColumnStyle
 } from '../components/ColumnManager';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
+import PaymentEditModal from '../components/PaymentEditModal';
 import {
   Receipt,
   TrendingUp,
@@ -30,7 +32,9 @@ import {
   Layers,
   Phone,
   FileSpreadsheet,
-  Filter
+  Filter,
+  GripVertical,
+  RotateCcw
 } from 'lucide-react';
 
 const ALL_INCOME_COLUMNS_DEF = [
@@ -39,6 +43,7 @@ const ALL_INCOME_COLUMNS_DEF = [
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
   { id: 'receiptNumber', label: 'Receipt #', defaultVisible: true },
   { id: 'contractNo', label: 'Contract #', defaultVisible: true },
+  { id: 'contractType', label: 'Contract Type', defaultVisible: true },
   { id: 'property', label: 'Property', defaultVisible: true },
   { id: 'propertyCode', label: 'Property Code', defaultVisible: false },
   { id: 'propertyType', label: 'Property Type', defaultVisible: false },
@@ -51,7 +56,6 @@ const ALL_INCOME_COLUMNS_DEF = [
   { id: 'carpetAreaSqFt', label: 'Carpet Area (Sq Ft)', defaultVisible: false },
   { id: 'floor', label: 'Floor / Location', defaultVisible: false },
   { id: 'unitType', label: 'Unit Type', defaultVisible: false },
-  { id: 'monthlyRentExpected', label: 'Monthly Rent Rate (₹)', defaultVisible: false },
   { id: 'occupancyStatus', label: 'Occupancy Status', defaultVisible: false },
   { id: 'legacySheetCode', label: 'Legacy Sheet Code', defaultVisible: false },
   { id: 'tenant', label: 'Tenant', defaultVisible: true },
@@ -63,14 +67,19 @@ const ALL_INCOME_COLUMNS_DEF = [
   { id: 'idProofNumber', label: 'ID Proof Number', defaultVisible: false },
   { id: 'tenantAddress', label: 'Tenant Address', defaultVisible: false },
   { id: 'emergencyContact', label: 'Emergency Contact', defaultVisible: false },
-  { id: 'deposit', label: 'Security Deposit (₹)', defaultVisible: false },
-  { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
   { id: 'status', label: 'Status', defaultVisible: true },
+  { id: 'monthlyRentExpected', label: 'Monthly Rent (₹)', defaultVisible: true },
+  { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
   { id: 'rentAmount', label: 'Rent Amount Paid (₹)', defaultVisible: true },
   { id: 'depositAmount', label: 'Deposit Amount (₹)', defaultVisible: true },
   { id: 'totalAmount', label: 'Total Amount Paid (₹)', defaultVisible: true },
-  { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
+  { id: 'outstanding', label: 'Outstanding Due (₹)', defaultVisible: true },
+  { id: 'adjustmentAmount', label: 'Adjustment (+/-) (₹)', defaultVisible: true },
+  { id: 'adjustedOutstanding', label: 'Adjusted Outstanding (₹)', defaultVisible: true },
   { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
+  { id: 'paidUpTo', label: 'Paid Up To', defaultVisible: true },
+  { id: 'deposit', label: 'Security Deposit Held (₹)', defaultVisible: false },
+  { id: 'loanAmount', label: 'Loan Amount (₹)', defaultVisible: true },
   { id: 'comments', label: 'Notes / Comments', defaultVisible: true },
   { id: 'isReversed', label: 'Reversal Status', defaultVisible: false },
   { id: 'reversalReason', label: 'Reversal Reason', defaultVisible: false },
@@ -86,15 +95,22 @@ const DEFAULT_INCOME_COLS = [
   'accountingMonth',
   'receiptNumber',
   'contractNo',
+  'contractType',
   'property',
   'unit',
   'tenant',
-  'monthsCovered',
   'status',
-  'comments',
+  'monthlyRentExpected',
+  'monthsCovered',
   'rentAmount',
   'depositAmount',
   'totalAmount',
+  'outstanding',
+  'adjustmentAmount',
+  'adjustedOutstanding',
+  'paidUpTo',
+  'loanAmount',
+  'comments',
   'actions'
 ];
 
@@ -104,6 +120,7 @@ const DEFAULT_INCOME_COLUMN_WIDTHS = {
   accountingMonth: 140,
   receiptNumber: 130,
   contractNo: 120,
+  contractType: 120,
   property: 160,
   propertyCode: 120,
   propertyType: 140,
@@ -116,7 +133,6 @@ const DEFAULT_INCOME_COLUMN_WIDTHS = {
   carpetAreaSqFt: 130,
   floor: 110,
   unitType: 130,
-  monthlyRentExpected: 140,
   occupancyStatus: 120,
   legacySheetCode: 120,
   tenant: 150,
@@ -128,14 +144,19 @@ const DEFAULT_INCOME_COLUMN_WIDTHS = {
   idProofNumber: 130,
   tenantAddress: 180,
   emergencyContact: 150,
-  deposit: 130,
-  monthsCovered: 150,
   status: 95,
+  monthlyRentExpected: 130,
+  monthsCovered: 150,
   rentAmount: 130,
   depositAmount: 120,
   totalAmount: 130,
-  adjustmentAmount: 140,
+  outstanding: 135,
+  adjustmentAmount: 130,
+  adjustedOutstanding: 140,
   adjustmentDescription: 180,
+  paidUpTo: 110,
+  deposit: 130,
+  loanAmount: 120,
   comments: 180,
   isReversed: 120,
   reversalReason: 150,
@@ -158,6 +179,7 @@ const getIncomeFieldVal = (r, colId) => {
     }
     case 'receiptNumber': return r.receiptNumber || '';
     case 'contractNo': return r.contractNo || '';
+    case 'contractType': return r.contractType || 'Rent';
     case 'property': return r.unitId?.propertyId?.name || '';
     case 'propertyCode': return r.unitId?.propertyId?.propertyCode || '';
     case 'propertyType': return r.unitId?.propertyId?.propertyType || '';
@@ -170,7 +192,7 @@ const getIncomeFieldVal = (r, colId) => {
     case 'carpetAreaSqFt': return r.unitId?.carpetAreaSqFt ? `${r.unitId.carpetAreaSqFt} sq ft` : '';
     case 'floor': return r.unitId?.floor || '';
     case 'unitType': return r.unitId?.unitType || '';
-    case 'monthlyRentExpected': return r.unitId?.monthlyRentExpected || 0;
+    case 'monthlyRentExpected': return Number(r.monthlyRentExpected ?? (r.unitId?.monthlyRentExpected || 0)) || 0;
     case 'occupancyStatus': return r.unitId?.occupancyStatus || '';
     case 'legacySheetCode': return r.unitId?.legacySheetCode || '';
     case 'tenant': return r.tenantId?.name || '';
@@ -182,7 +204,7 @@ const getIncomeFieldVal = (r, colId) => {
     case 'idProofNumber': return r.tenantId?.idProofNumber || '';
     case 'tenantAddress': return r.tenantId?.address || '';
     case 'emergencyContact': return `${r.tenantId?.emergencyContactName || ''} ${r.tenantId?.emergencyContactPhone ? `(${r.tenantId.emergencyContactPhone})` : ''}`.trim();
-    case 'deposit': return r.tenantId?.deposit || 0;
+    case 'deposit': return Number(r.deposit ?? (r.tenantId?.deposit || 0)) || 0;
     case 'monthsCovered': {
       const rawM = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
       return rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '';
@@ -191,8 +213,12 @@ const getIncomeFieldVal = (r, colId) => {
     case 'rentAmount': return Number(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount) || 0;
     case 'depositAmount': return Number(r.depositAmount) || 0;
     case 'totalAmount': return Number(r.totalAmount) || 0;
+    case 'outstanding': return Number(r.outstanding) || 0;
     case 'adjustmentAmount': return Number(r.adjustmentAmount) || 0;
+    case 'adjustedOutstanding': return Number(r.adjustedOutstanding) || 0;
     case 'adjustmentDescription': return r.adjustmentDescription || '';
+    case 'paidUpTo': return r.paidUpTo || '—';
+    case 'loanAmount': return Number(r.loanAmount) || 0;
     case 'comments': return r.comments || '';
     case 'isReversed': return r.isReversed ? 'Reversed' : 'Active';
     case 'reversalReason': return r.reversalReason || '';
@@ -254,6 +280,65 @@ export default function AllIncomeReportView() {
     setCurrentPage(1);
   };
 
+  // Draggable top filter cards layout customization
+  const DEFAULT_INCOME_FILTER_ORDER = useMemo(() => ['fromMonth', 'toMonth', 'property', 'partition', 'tenant'], []);
+  const [filterCardsOrder, setFilterCardsOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem('income_filter_cards_order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 5) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return ['fromMonth', 'toMonth', 'property', 'partition', 'tenant'];
+  });
+
+  const [draggedCardKey, setDraggedCardKey] = useState(null);
+  const [dragOverCardKey, setDragOverCardKey] = useState(null);
+
+  const handleCardDragStart = (e, cardKey) => {
+    setDraggedCardKey(cardKey);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleCardDragOver = (e, cardKey) => {
+    e.preventDefault();
+    if (cardKey !== dragOverCardKey) {
+      setDragOverCardKey(cardKey);
+    }
+  };
+
+  const handleCardDrop = (e, targetCardKey) => {
+    e.preventDefault();
+    if (!draggedCardKey || draggedCardKey === targetCardKey) {
+      setDraggedCardKey(null);
+      setDragOverCardKey(null);
+      return;
+    }
+    const current = [...filterCardsOrder];
+    const fromIdx = current.indexOf(draggedCardKey);
+    const toIdx = current.indexOf(targetCardKey);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      current.splice(fromIdx, 1);
+      current.splice(toIdx, 0, draggedCardKey);
+      setFilterCardsOrder(current);
+      try {
+        localStorage.setItem('income_filter_cards_order', JSON.stringify(current));
+      } catch {}
+    }
+    setDraggedCardKey(null);
+    setDragOverCardKey(null);
+  };
+
+  const resetFilterCardsOrder = () => {
+    setFilterCardsOrder(['fromMonth', 'toMonth', 'property', 'partition', 'tenant']);
+    try {
+      localStorage.removeItem('income_filter_cards_order');
+    } catch {}
+  };
+
   const activeCustomFilterCount = useMemo(() => {
     return [
       incomeFilters.fromAccountingMonth,
@@ -270,8 +355,18 @@ export default function AllIncomeReportView() {
     if (!saved) return DEFAULT_INCOME_COLS;
     try {
       const allowed = ALL_INCOME_COLUMNS_DEF.map(c => c.id);
-      const parsed = JSON.parse(saved).filter(c => allowed.includes(c));
-      return parsed.length > 0 ? parsed : DEFAULT_INCOME_COLS;
+      let parsed = JSON.parse(saved).filter(c => allowed.includes(c));
+      if (parsed.length > 0) {
+        ['contractType', 'monthlyRentExpected', 'outstanding', 'adjustmentAmount', 'adjustedOutstanding', 'paidUpTo', 'loanAmount'].forEach(col => {
+          if (!parsed.includes(col)) {
+            const tIdx = parsed.indexOf('totalAmount');
+            if (tIdx !== -1) parsed.splice(tIdx + 1, 0, col);
+            else parsed.push(col);
+          }
+        });
+        return parsed;
+      }
+      return DEFAULT_INCOME_COLS;
     } catch {
       return DEFAULT_INCOME_COLS;
     }
@@ -284,6 +379,11 @@ export default function AllIncomeReportView() {
   } = useResizableColumns('all_income_v2', DEFAULT_INCOME_COLUMN_WIDTHS);
 
   const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns('all_income_v2', 0);
+
+  const [outstandingSummary, setOutstandingSummary] = useState([]);
+
+  // Full Payment Edit Modal state (in-place)
+  const [editingPaymentModalReceiptId, setEditingPaymentModalReceiptId] = useState(null);
 
   // Edit Receipt Modal
   const [editingReceipt, setEditingReceipt] = useState(null);
@@ -306,18 +406,20 @@ export default function AllIncomeReportView() {
   const fetchIncomeData = async () => {
     try {
       setLoading(true);
-      const [pRes, tRes, propRes, uRes, aRes] = await Promise.all([
+      const [pRes, tRes, propRes, uRes, aRes, oRes] = await Promise.all([
         API.get('/payments'),
         API.get('/tenants'),
         API.get('/properties'),
         API.get('/units'),
-        API.get('/assignments')
+        API.get('/assignments'),
+        API.get('/payments/outstanding-summary').catch(() => ({ data: { success: false } }))
       ]);
       if (pRes.data?.success) setReceipts(pRes.data.data || []);
       if (tRes.data?.success) setTenants(tRes.data.data || []);
       if (propRes.data?.success) setProperties(propRes.data.data || []);
       if (uRes.data?.success) setUnits(uRes.data.data || []);
       if (aRes.data?.success) setAssignments(aRes.data.data || []);
+      if (oRes?.data?.success) setOutstandingSummary(oRes.data.data || []);
     } catch (err) {
       console.error('Failed to load income data:', err);
     } finally {
@@ -334,34 +436,102 @@ export default function AllIncomeReportView() {
     setSortConfig(prev => cycleThreeStateSort(prev, colId));
   };
 
+  // Enriched receipts with full details from assignments & outstandingSummary
+  const enrichedReceipts = useMemo(() => {
+    const assignByContract = new Map();
+    const assignByUnitTenant = new Map();
+    assignments.forEach(a => {
+      if (a.contractNo) assignByContract.set(String(a.contractNo).trim().toLowerCase(), a);
+      if (a.assignmentCode) assignByContract.set(String(a.assignmentCode).trim().toLowerCase(), a);
+      const uId = String(a.unitId?._id || a.unitId || '');
+      const tId = String(a.tenantId?._id || a.tenantId || '');
+      if (uId && tId) assignByUnitTenant.set(`${uId}_${tId}`, a);
+    });
+
+    const summaryByContract = new Map();
+    const summaryByUnitTenant = new Map();
+    outstandingSummary.forEach(s => {
+      if (s.contractNo) summaryByContract.set(String(s.contractNo).trim().toLowerCase(), s);
+      const uId = String(s.unit?._id || s.unit || '');
+      const tId = String(s.tenant?._id || s.tenant || '');
+      if (uId && tId) summaryByUnitTenant.set(`${uId}_${tId}`, s);
+    });
+
+    return receipts.map(r => {
+      const uId = String(r.unitId?._id || r.unitId || '');
+      const tId = String(r.tenantId?._id || r.tenantId || '');
+      const cNo = (r.contractNo || '').trim().toLowerCase();
+
+      const assign = (cNo ? assignByContract.get(cNo) : null) || (uId && tId ? assignByUnitTenant.get(`${uId}_${tId}`) : null);
+      const summary = (cNo ? summaryByContract.get(cNo) : null) || (uId && tId ? summaryByUnitTenant.get(`${uId}_${tId}`) : null);
+
+      const contractType = r.contractType || assign?.contractType || summary?.contractType || 'Rent';
+      const monthlyRentExpected = Number(r.monthlyRentExpected ?? (summary?.monthlyRentExpected ?? (assign?.monthlyRent || assign?.rentAmount || r.unitId?.monthlyRentExpected || 0))) || 0;
+      const outstanding = Number(r.outstanding !== undefined ? r.outstanding : (summary?.totalOutstanding || 0));
+      const adjustmentAmount = Number(r.adjustmentAmount || 0);
+      const adjustmentDescription = r.adjustmentDescription || '';
+      const adjustedOutstanding = Number(r.adjustedOutstanding !== undefined ? r.adjustedOutstanding : Math.max(0, outstanding + adjustmentAmount));
+
+      let paidUpTo = r.paidUpTo || '';
+      if (!paidUpTo && summary?.paidTillMonth && summary.paidTillMonth !== 'None' && summary.paidTillMonth !== 'Vacant') {
+        paidUpTo = formatMonthYear(summary.paidTillMonth);
+      }
+      if (!paidUpTo && (r.accountingMonth || r.monthPaidFor)) {
+        const rawM = r.accountingMonth || r.monthPaidFor;
+        const parts = rawM.split(',').map(s => s.trim()).filter(Boolean);
+        const lastM = parts.sort()[parts.length - 1];
+        if (lastM && /^\d{4}-\d{2}$/.test(lastM)) {
+          paidUpTo = formatMonthYear(lastM);
+        }
+      }
+
+      const loanAmount = Number(r.loanAmount !== undefined ? r.loanAmount : (assign?.loanAmount || 0));
+
+      return {
+        ...r,
+        contractType,
+        monthlyRentExpected,
+        outstanding,
+        adjustmentAmount,
+        adjustmentDescription,
+        adjustedOutstanding,
+        paidUpTo: paidUpTo || '—',
+        loanAmount
+      };
+    });
+  }, [receipts, assignments, outstandingSummary]);
+
   const filterSuggestions = useMemo(() => {
     return {
-      accountingMonth: extractUniqueValues(receipts, r => {
+      accountingMonth: extractUniqueValues(enrichedReceipts, r => {
         const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
         return m ? formatMonthYear(m) : '';
       }),
-      receiptNumber: extractUniqueValues(receipts, r => r.receiptNumber),
-      contractNo: extractUniqueValues(receipts, r => r.contractNo),
-      property: extractUniqueValues(receipts, r => r.unitId?.propertyId?.name),
-      propertyCode: extractUniqueValues(receipts, r => r.unitId?.propertyId?.propertyCode),
-      propertyType: extractUniqueValues(receipts, r => r.unitId?.propertyId?.propertyType),
-      city: extractUniqueValues(receipts, r => r.unitId?.propertyId?.city),
-      unit: extractUniqueValues(receipts, r => r.unitId?.subUnitPartition || r.unitId?.unitName),
-      unitCode: extractUniqueValues(receipts, r => r.unitId?.unitCode),
-      unitType: extractUniqueValues(receipts, r => r.unitId?.unitType),
-      floor: extractUniqueValues(receipts, r => r.unitId?.floor),
-      occupancyStatus: extractUniqueValues(receipts, r => r.unitId?.occupancyStatus),
-      tenant: extractUniqueValues(receipts, r => r.tenantId?.name),
-      tenantCode: extractUniqueValues(receipts, r => r.tenantId?.tenantCode),
-      phone: extractUniqueValues(receipts, r => r.tenantId?.phone),
-      email: extractUniqueValues(receipts, r => r.tenantId?.email),
-      tenantType: extractUniqueValues(receipts, r => r.tenantId?.tenantType),
+      receiptNumber: extractUniqueValues(enrichedReceipts, r => r.receiptNumber),
+      contractNo: extractUniqueValues(enrichedReceipts, r => r.contractNo),
+      contractType: ['Rent', 'Business'],
+      property: extractUniqueValues(enrichedReceipts, r => r.unitId?.propertyId?.name),
+      propertyCode: extractUniqueValues(enrichedReceipts, r => r.unitId?.propertyId?.propertyCode),
+      propertyType: extractUniqueValues(enrichedReceipts, r => r.unitId?.propertyId?.propertyType),
+      city: extractUniqueValues(enrichedReceipts, r => r.unitId?.propertyId?.city),
+      unit: extractUniqueValues(enrichedReceipts, r => r.unitId?.subUnitPartition || r.unitId?.unitName),
+      unitCode: extractUniqueValues(enrichedReceipts, r => r.unitId?.unitCode),
+      unitType: extractUniqueValues(enrichedReceipts, r => r.unitId?.unitType),
+      floor: extractUniqueValues(enrichedReceipts, r => r.unitId?.floor),
+      occupancyStatus: extractUniqueValues(enrichedReceipts, r => r.unitId?.occupancyStatus),
+      tenant: extractUniqueValues(enrichedReceipts, r => r.tenantId?.name),
+      tenantCode: extractUniqueValues(enrichedReceipts, r => r.tenantId?.tenantCode),
+      phone: extractUniqueValues(enrichedReceipts, r => r.tenantId?.phone),
+      email: extractUniqueValues(enrichedReceipts, r => r.tenantId?.email),
+      tenantType: extractUniqueValues(enrichedReceipts, r => r.tenantId?.tenantType),
       status: ['Rented', 'Vacant'],
-      monthsCovered: extractUniqueValues(receipts, r => r.monthsCovered),
+      monthsCovered: extractUniqueValues(enrichedReceipts, r => r.monthsCovered),
+      paidUpTo: extractUniqueValues(enrichedReceipts, r => r.paidUpTo),
+      adjustmentDescription: extractUniqueValues(enrichedReceipts, r => r.adjustmentDescription),
       isReversed: ['Active', 'Reversed'],
-      comments: extractUniqueValues(receipts, r => r.comments)
+      comments: extractUniqueValues(enrichedReceipts, r => r.comments)
     };
-  }, [receipts]);
+  }, [enrichedReceipts]);
 
   // Available accounting months collected from receipts & default calendar years
   const availableAccountingMonths = useMemo(() => {
@@ -386,7 +556,7 @@ export default function AllIncomeReportView() {
 
   // Filtering & Sorting
   const processedReceipts = useMemo(() => {
-    let rows = [...receipts];
+    let rows = [...enrichedReceipts];
 
     // 0. Custom Top Filter Panel (From/To Accounting Month, Property, Sub-Property/Partition, Tenant)
     if (incomeFilters.fromAccountingMonth) {
@@ -426,6 +596,7 @@ export default function AllIncomeReportView() {
       rows = rows.filter(r => {
         const rNo = (r.receiptNumber || '').toLowerCase();
         const cNo = (r.contractNo || '').toLowerCase();
+        const cType = (r.contractType || '').toLowerCase();
         const prop = (r.unitId?.propertyId?.name || '').toLowerCase();
         const unit = (r.unitId?.subUnitPartition || r.unitId?.unitName || '').toLowerCase();
         const ten = (r.tenantId?.name || '').toLowerCase();
@@ -435,10 +606,13 @@ export default function AllIncomeReportView() {
         const months = (r.monthsCovered || '').toLowerCase();
         const amt = String(r.totalAmount || '');
         const ref = (r.referenceNumber || r.receiptNumber || '').toLowerCase();
+        const adjDesc = (r.adjustmentDescription || '').toLowerCase();
+        const pUpTo = (r.paidUpTo || '').toLowerCase();
 
         return (
           rNo.includes(q) ||
           cNo.includes(q) ||
+          cType.includes(q) ||
           prop.includes(q) ||
           unit.includes(q) ||
           ten.includes(q) ||
@@ -447,7 +621,9 @@ export default function AllIncomeReportView() {
           ref.includes(q) ||
           comm.includes(q) ||
           months.includes(q) ||
-          amt.includes(q)
+          amt.includes(q) ||
+          adjDesc.includes(q) ||
+          pUpTo.includes(q)
         );
       });
     }
@@ -465,18 +641,24 @@ export default function AllIncomeReportView() {
     // 3. Sorting (supports all backend columns)
     if (sortConfig.key) {
       rows = sortDataRows(rows, sortConfig, (item, key) => {
-        if (['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(key)) {
+        if (['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected', 'outstanding', 'adjustedOutstanding', 'loanAmount'].includes(key)) {
           return Number(getIncomeFieldVal(item, key)) || 0;
         }
         if (['receiptDate', 'createdAt', 'updatedAt', 'reversalDate'].includes(key)) {
           return item[key] ? new Date(item[key]).getTime() : 0;
+        }
+        if (key === 'accountingMonth') {
+          return item.accountingMonth || (item.receiptDate ? new Date(item.receiptDate).toISOString().slice(0, 7) : '') || '';
+        }
+        if (key === 'monthsCovered') {
+          return item.monthsCovered || (item.allocations && item.allocations.map(a => a.rentMonthYear).join(', ')) || '';
         }
         return getIncomeFieldVal(item, key);
       });
     }
 
     return rows;
-  }, [receipts, search, activeFilters, sortConfig, incomeFilters]);
+  }, [enrichedReceipts, search, activeFilters, sortConfig, incomeFilters]);
 
   // Pagination
   const totalPages = rowsPerPage === 'All' ? 1 : Math.ceil(processedReceipts.length / Number(rowsPerPage));
@@ -495,7 +677,7 @@ export default function AllIncomeReportView() {
         exportCols.forEach(col => {
           if (col.id === 'index') return;
           const val = getIncomeFieldVal(r, col.id);
-          row[col.label] = ['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected'].includes(col.id)
+          row[col.label] = ['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'deposit', 'monthlyRentExpected', 'outstanding', 'adjustedOutstanding', 'loanAmount'].includes(col.id)
             ? (Number(val) || 0)
             : val;
         });
@@ -514,6 +696,11 @@ export default function AllIncomeReportView() {
 
   // Navigate directly to Edit Month / Payment screen
   const navigateToEditPayment = (r) => {
+    pushDrilldown('reports_all_income', {
+      label: 'All Income Report',
+      targetTab: 'payments'
+    });
+
     let targetMonth = r.accountingMonth || '';
     if (r.allocations && r.allocations.length > 0) {
       const sorted = [...r.allocations].map(a => a.rentMonthYear).filter(Boolean).sort();
@@ -532,12 +719,25 @@ export default function AllIncomeReportView() {
       localStorage.setItem('payments_selected_month', targetMonth);
     }
     localStorage.setItem('payments_edit_receipt_id', String(r._id));
-    const uId = r.unitId?._id || r.unitId;
-    if (uId) {
-      localStorage.setItem('payments_target_unit_id', String(uId));
+    // Clear any unit target ID so openFastPaymentModal doesn't override the receipt
+    localStorage.removeItem('payments_target_unit_id');
+
+    const tId = r.tenantId?._id || r.tenantId;
+    if (tId) {
+      localStorage.setItem('payments_target_tenant_id', String(tId));
+      localStorage.setItem('payments_tenant_filter', String(tId));
     }
-    window.location.hash = '#/payments';
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    if (r.contractNo) {
+      localStorage.setItem('payments_target_contract_no', String(r.contractNo));
+    }
+    if (r.monthlyRentExpected) {
+      localStorage.setItem('payments_target_monthly_rent', String(r.monthlyRentExpected));
+    }
+    const pId = r.propertyId?._id || r.propertyId || r.unitId?.propertyId?._id || r.unitId?.propertyId;
+    if (pId) {
+      localStorage.setItem('payments_prop_filter', String(pId));
+    }
+    navigateToTab('payments');
   };
 
   // Open Edit Modal - Single-Value Form for full record editing
@@ -748,6 +948,15 @@ export default function AllIncomeReportView() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={resetFilterCardsOrder}
+                className="flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer border border-slate-200"
+                title="Reset filter cards arrangement to default"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Layout</span>
+              </button>
               {activeCustomFilterCount > 0 && (
                 <button
                   type="button"
@@ -770,127 +979,153 @@ export default function AllIncomeReportView() {
             </div>
           </div>
 
-          {/* Filter Fields Grid: From Month, To Month, Property, Sub Property, Tenant */}
+          {/* Draggable Filter Fields Grid: From Month, To Month, Property, Sub Property, Tenant */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {/* 1. From Accounting Month */}
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                From Accounting Month
-              </label>
-              <select
-                value={incomeFilters.fromAccountingMonth}
-                onChange={(e) => {
-                  setIncomeFilters(prev => ({ ...prev, fromAccountingMonth: e.target.value }));
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              >
-                <option value="">Any Start Month</option>
-                {availableAccountingMonths.map(m => (
-                  <option key={m} value={m}>
-                    {formatMonthYear(m)} ({m})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {filterCardsOrder.map((cardKey) => {
+              const isOver = dragOverCardKey === cardKey && draggedCardKey !== cardKey;
+              const isDragging = draggedCardKey === cardKey;
 
-            {/* 2. To Accounting Month */}
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                To Accounting Month
-              </label>
-              <select
-                value={incomeFilters.toAccountingMonth}
-                onChange={(e) => {
-                  setIncomeFilters(prev => ({ ...prev, toAccountingMonth: e.target.value }));
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              >
-                <option value="">Any End Month</option>
-                {availableAccountingMonths.map(m => (
-                  <option key={m} value={m}>
-                    {formatMonthYear(m)} ({m})
-                  </option>
-                ))}
-              </select>
-            </div>
+              let label = '';
+              let control = null;
 
-            {/* 3. Property */}
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                Property
-              </label>
-              <select
-                value={incomeFilters.propertyId}
-                onChange={(e) => {
-                  const pId = e.target.value;
-                  setIncomeFilters(prev => {
-                    let newUnitId = prev.unitId;
-                    if (newUnitId && pId) {
-                      const u = units.find(u => String(u._id) === String(newUnitId));
-                      if (u && String(u.propertyId?._id || u.propertyId) !== String(pId)) {
-                        newUnitId = '';
-                      }
-                    }
-                    return { ...prev, propertyId: pId, unitId: newUnitId };
-                  });
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
-              >
-                <option value="">All Properties</option>
-                {properties.map(p => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+              if (cardKey === 'fromMonth') {
+                label = 'From Accounting Month';
+                control = (
+                  <select
+                    value={incomeFilters.fromAccountingMonth}
+                    onChange={(e) => {
+                      setIncomeFilters(prev => ({ ...prev, fromAccountingMonth: e.target.value }));
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  >
+                    <option value="">Any Start Month</option>
+                    {availableAccountingMonths.map(m => (
+                      <option key={m} value={m}>
+                        {formatMonthYear(m)} ({m})
+                      </option>
+                    ))}
+                  </select>
+                );
+              } else if (cardKey === 'toMonth') {
+                label = 'To Accounting Month';
+                control = (
+                  <select
+                    value={incomeFilters.toAccountingMonth}
+                    onChange={(e) => {
+                      setIncomeFilters(prev => ({ ...prev, toAccountingMonth: e.target.value }));
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  >
+                    <option value="">Any End Month</option>
+                    {availableAccountingMonths.map(m => (
+                      <option key={m} value={m}>
+                        {formatMonthYear(m)} ({m})
+                      </option>
+                    ))}
+                  </select>
+                );
+              } else if (cardKey === 'property') {
+                label = 'Property';
+                control = (
+                  <select
+                    value={incomeFilters.propertyId}
+                    onChange={(e) => {
+                      const pId = e.target.value;
+                      setIncomeFilters(prev => {
+                        let newUnitId = prev.unitId;
+                        if (newUnitId && pId) {
+                          const u = units.find(u => String(u._id) === String(newUnitId));
+                          if (u && String(u.propertyId?._id || u.propertyId) !== String(pId)) {
+                            newUnitId = '';
+                          }
+                        }
+                        return { ...prev, propertyId: pId, unitId: newUnitId };
+                      });
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
+                  >
+                    <option value="">All Properties</option>
+                    {properties.map(p => (
+                      <option key={p._id} value={p._id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                );
+              } else if (cardKey === 'partition') {
+                label = 'Sub-Property / Partition';
+                control = (
+                  <select
+                    value={incomeFilters.unitId}
+                    onChange={(e) => {
+                      setIncomeFilters(prev => ({ ...prev, unitId: e.target.value }));
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
+                  >
+                    <option value="">All Partitions</option>
+                    {filterUnitOptions.map(u => (
+                      <option key={u._id} value={u._id}>
+                        {u.subUnitPartition || u.unitName} ({u.unitCode})
+                      </option>
+                    ))}
+                  </select>
+                );
+              } else if (cardKey === 'tenant') {
+                label = 'Tenant';
+                control = (
+                  <select
+                    value={incomeFilters.tenantId}
+                    onChange={(e) => {
+                      setIncomeFilters(prev => ({ ...prev, tenantId: e.target.value }));
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
+                  >
+                    <option value="">All Tenants</option>
+                    {tenants.map(t => (
+                      <option key={t._id} value={t._id}>
+                        {t.name} {t.tenantCode ? `(${t.tenantCode})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                );
+              }
 
-            {/* 4. Sub-Property / Partition */}
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                Sub-Property / Partition
-              </label>
-              <select
-                value={incomeFilters.unitId}
-                onChange={(e) => {
-                  setIncomeFilters(prev => ({ ...prev, unitId: e.target.value }));
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
-              >
-                <option value="">All Partitions</option>
-                {filterUnitOptions.map(u => (
-                  <option key={u._id} value={u._id}>
-                    {u.subUnitPartition || u.unitName} ({u.unitCode})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* 5. Tenant */}
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                Tenant
-              </label>
-              <select
-                value={incomeFilters.tenantId}
-                onChange={(e) => {
-                  setIncomeFilters(prev => ({ ...prev, tenantId: e.target.value }));
-                  setCurrentPage(1);
-                }}
-                className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 truncate"
-              >
-                <option value="">All Tenants</option>
-                {tenants.map(t => (
-                  <option key={t._id} value={t._id}>
-                    {t.name} {t.tenantCode ? `(${t.tenantCode})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+              return (
+                <div
+                  key={cardKey}
+                  draggable
+                  onDragStart={(e) => handleCardDragStart(e, cardKey)}
+                  onDragOver={(e) => handleCardDragOver(e, cardKey)}
+                  onDragEnd={() => { setDraggedCardKey(null); setDragOverCardKey(null); }}
+                  onDrop={(e) => handleCardDrop(e, cardKey)}
+                  className={`p-2 rounded-xl border transition-all select-none ${
+                    isOver
+                      ? 'border-emerald-500 bg-emerald-50/80 shadow-sm ring-2 ring-emerald-400'
+                      : isDragging
+                      ? 'opacity-40 border-slate-300 bg-slate-50'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-2xs'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">
+                      {label}
+                    </label>
+                    <span
+                      className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 p-0.5 rounded hover:bg-slate-100"
+                      title="Drag to rearrange filter position"
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                  {control}
+                </div>
+              );
+            })}
           </div>
 
           {/* Results Summary */}
@@ -913,6 +1148,19 @@ export default function AllIncomeReportView() {
 
       {/* APEX Interactive Toolbar */}
       <ApexToolbar
+        kpiFilter={
+          <div className="flex items-center gap-1.5 shrink-0 text-xs font-medium">
+            <span className="font-extrabold text-slate-800">{processedReceipts.length}</span>
+            <span className="text-slate-500">of</span>
+            <span className="font-extrabold text-slate-800">{receipts.length}</span>
+            <span className="text-slate-500">receipts</span>
+            {activeCustomFilterCount > 0 && (
+              <span className="text-emerald-700 font-bold ml-1">
+                ({formatCurrency(totalIncome)})
+              </span>
+            )}
+          </div>
+        }
         search={search}
         onSearchChange={(v) => { setSearch(v); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}
@@ -965,8 +1213,9 @@ export default function AllIncomeReportView() {
 
                     const isActions = colId === 'actions';
                     const isIndex = colId === 'index';
-                    const isAmount = ['totalAmount', 'rentAmount', 'depositAmount', 'monthlyRentExpected', 'adjustmentAmount', 'deposit'].includes(colId);
-                    const align = isActions || isIndex ? 'text-center' : isAmount ? 'text-right' : 'text-left';
+                    const isAmount = ['totalAmount', 'rentAmount', 'depositAmount', 'monthlyRentExpected', 'adjustmentAmount', 'deposit', 'outstanding', 'adjustedOutstanding', 'loanAmount'].includes(colId);
+                    const isCenter = ['contractType', 'paidUpTo', 'isReversed', 'occupancyStatus', 'status'].includes(colId);
+                    const align = isActions || isIndex || isCenter ? 'text-center' : isAmount ? 'text-right' : 'text-left';
 
                     return (
                       <th
@@ -978,7 +1227,7 @@ export default function AllIncomeReportView() {
                         style={{ ...frozenStyle, width: `${Math.max(width, 45)}px`, minWidth: `${Math.max(width, 45)}px` }}
                         className={`py-2.5 pl-3 pr-6 border-r border-slate-300 relative group bg-slate-100 ${align}`}
                       >
-                        <div className={`flex items-center gap-1 w-full ${isActions || isIndex ? 'justify-center' : isAmount ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`flex items-center gap-1 w-full ${isActions || isIndex || isCenter ? 'justify-center' : isAmount ? 'justify-end' : 'justify-start'}`}>
                           {isActions || isIndex ? (
                             <span className="text-xs font-bold text-slate-700">{def.label}</span>
                           ) : (
@@ -1051,7 +1300,7 @@ export default function AllIncomeReportView() {
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 font-mono font-bold text-teal-800 whitespace-nowrap">
                               <button
                                 type="button"
-                                onClick={() => navigateToEditPayment(r)}
+                                onClick={() => setEditingPaymentModalReceiptId(r._id)}
                                 className="hover:underline hover:text-teal-600 cursor-pointer font-mono font-bold text-left"
                                 title="Click to edit receipt in Edit Month / Payment screen"
                               >
@@ -1071,6 +1320,21 @@ export default function AllIncomeReportView() {
                               ) : (
                                 <span className="text-slate-400">—</span>
                               )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'contractType') {
+                          const isBiz = (r.contractType || '').toLowerCase() === 'business';
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                                isBiz
+                                  ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              }`}>
+                                {isBiz ? 'Business' : 'Rent'}
+                              </span>
                             </td>
                           );
                         }
@@ -1176,7 +1440,7 @@ export default function AllIncomeReportView() {
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 text-center whitespace-nowrap">
                               <button
                                 type="button"
-                                onClick={() => navigateToEditPayment(r)}
+                                onClick={() => setEditingPaymentModalReceiptId(r._id)}
                                 className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1.5 border border-teal-200/60 cursor-pointer shadow-2xs"
                                 title="Edit in Edit Month / Payment screen"
                               >
@@ -1223,8 +1487,79 @@ export default function AllIncomeReportView() {
                           );
                         }
 
-                        if (['monthlyRentExpected', 'deposit'].includes(colId)) {
-                          const num = Number(getIncomeFieldVal(r, colId)) || 0;
+                        if (colId === 'monthlyRentExpected') {
+                          const num = Number(r.monthlyRentExpected) || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono font-bold text-slate-800 whitespace-nowrap">
+                              {num > 0 ? formatCurrency(num) : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'outstanding') {
+                          const outVal = Number(r.outstanding) || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono whitespace-nowrap">
+                              {outVal > 0 ? (
+                                <span className="font-black text-rose-700">
+                                  {formatCurrency(outVal)}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">₹0</span>
+                              )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'adjustedOutstanding') {
+                          const adjOut = Number(r.adjustedOutstanding) || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono whitespace-nowrap">
+                              {adjOut > 0 ? (
+                                <span className="inline-block px-2 py-0.5 rounded-lg bg-rose-50 text-rose-800 font-extrabold text-[11px] border border-rose-200/60">
+                                  {formatCurrency(adjOut)}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-600 font-bold">₹0</span>
+                              )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'adjustmentDescription') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-slate-600 text-[11px] max-w-xs truncate" title={r.adjustmentDescription}>
+                              {r.adjustmentDescription || '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'paidUpTo') {
+                          const val = r.paidUpTo && r.paidUpTo !== 'None' && r.paidUpTo !== 'Vacant' ? r.paidUpTo : '—';
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                              {val !== '—' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 font-bold text-[11px] border border-teal-200/60">
+                                  {val}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'loanAmount') {
+                          const num = Number(r.loanAmount) || 0;
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono font-medium text-slate-800 whitespace-nowrap">
+                              {num > 0 ? formatCurrency(num) : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'deposit') {
+                          const num = Number(r.deposit ?? (r.tenantId?.deposit || 0)) || 0;
                           return (
                             <td key={colId} style={frozenStyle} className="py-2.5 px-3 border-r border-slate-200 text-right font-mono text-slate-700 whitespace-nowrap">
                               {num > 0 ? formatCurrency(num) : '—'}
@@ -1640,6 +1975,22 @@ export default function AllIncomeReportView() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* FULL PAYMENT EDIT MODAL OVERLAY IN ALL INCOME REPORT */}
+      {editingPaymentModalReceiptId && (
+        <PaymentEditModal
+          isOpen={Boolean(editingPaymentModalReceiptId)}
+          onClose={() => setEditingPaymentModalReceiptId(null)}
+          receiptId={editingPaymentModalReceiptId}
+          tenants={tenants}
+          assignments={assignments}
+          backButtonLabel="Back to All Income Report"
+          onSuccess={async () => {
+            setEditingPaymentModalReceiptId(null);
+            await fetchData();
+          }}
+        />
       )}
     </div>
   );

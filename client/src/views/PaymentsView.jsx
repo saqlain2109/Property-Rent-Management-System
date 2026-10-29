@@ -5,6 +5,7 @@ import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters
 import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns, getFrozenColumnStyle, ColumnHeaderCell, useTableAutoWrap } from '../components/ColumnManager';
 import ApexToolbar from '../components/ApexToolbar';
 import PaymentEditModal from '../components/PaymentEditModal';
+import { peekDrilldown, popAndReturnDrilldown } from '../utils/navigationHistory';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
 import { useModalBackHandler } from '../utils/useModalBackHandler';
@@ -48,6 +49,7 @@ const RENT_SHEET_COLUMNS_DEF = [
   { id: 'outstanding', label: 'Outstanding due', defaultVisible: true },
   { id: 'paidUpTo', label: 'Paid Up To', defaultVisible: true },
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
+  { id: 'receiptNumber', label: 'Receipt #', defaultVisible: true },
   { id: 'paidForMonth', label: 'Month Paid For', defaultVisible: true },
   { id: 'rentAmount', label: 'Rent Amount Paid', defaultVisible: true },
   { id: 'depositAmount', label: 'Deposit Amount', defaultVisible: true },
@@ -125,6 +127,7 @@ const DEFAULT_SHEET_COLUMN_WIDTHS = {
   outstanding: 125,
   paidUpTo: 105,
   accountingMonth: 140,
+  receiptNumber: 130,
   paidForMonth: 150,
   rentAmount: 125,
   depositAmount: 115,
@@ -229,7 +232,13 @@ export default function PaymentsView() {
     if (saved) {
       try {
         const allowed = RENT_SHEET_COLUMNS_DEF.map((column) => column.id);
-        return JSON.parse(saved).filter((column) => allowed.includes(column));
+        const parsed = JSON.parse(saved).filter((column) => allowed.includes(column));
+        if (!parsed.includes('receiptNumber')) {
+          const idx = parsed.indexOf('accountingMonth');
+          if (idx !== -1) parsed.splice(idx + 1, 0, 'receiptNumber');
+          else parsed.push('receiptNumber');
+        }
+        return parsed;
       } catch (e) {}
     }
     return RENT_SHEET_COLUMNS_DEF.filter(c => c.defaultVisible !== false).map(c => c.id);
@@ -299,6 +308,7 @@ export default function PaymentsView() {
   const [expenseForm, setExpenseForm] = useState({
     headType: 'Property',
     propertyId: '',
+    unitId: '',
     category: '',
     amount: '',
     expenseMonth: '',
@@ -437,40 +447,112 @@ export default function PaymentsView() {
     setReceiptSortConfig(prev => cycleThreeStateSort(prev, colId));
   };
 
-  // Locate existing receipt for a unit in a given month (strictly ONE receipt per unit per month)
+  // Locate existing receipt for a unit in a given accounting month (strictly ONE receipt per unit per accounting month)
+  const receiptCoversMonthPaidFor = (r, m) => {
+    if (!r || r.isReversed || !m) return false;
+    if (r.allocations && Array.isArray(r.allocations) && r.allocations.length > 0) {
+      if (r.allocations.some(a => a.rentMonthYear === m && Number(a.allocatedAmount ?? a.actualAllocated ?? 0) > 0)) {
+        return true;
+      }
+    }
+    if (r.monthPaidFor) {
+      const list = String(r.monthPaidFor).split(',').map(s => s.trim());
+      if (list.includes(m)) return true;
+    }
+    return false;
+  };
+
+  const receiptMatchesAccountingMonth = (r, m) => {
+    if (!r || r.isReversed || !m) return false;
+    const acctM = r.accountingMonth 
+      ? String(r.accountingMonth).slice(0, 7) 
+      : (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+    return acctM === m;
+  };
+
+  const isContractMatch = (c1, c2) => {
+    if (!c1 || !c2) return false;
+    const s1 = c1.trim().toLowerCase();
+    const s2 = c2.trim().toLowerCase();
+    if (s1 === s2) return true;
+    if ((s1 === 'de-2025' || s1 === 'delhiery-2025') && (s2 === 'de-2025' || s2 === 'delhiery-2025')) return true;
+    return false;
+  };
+
+  // Locate existing receipt for a unit in a given month (checks month paid for first, then accounting month)
   const findReceiptForUnitAndMonth = (item, targetMonth = selectedMonth) => {
     const unitIdStr = String(item?.unit?._id || item?.unitId?._id || item?.unitId || item?.unit || '');
     if (!unitIdStr) return null;
     const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
+    const tenantIdStr = String(item?.tenant?._id || item?.tenantId?._id || item?.tenantId || item?.tenant || '');
 
-    const matchesMonth = (r) => {
-      if (r.allocations && r.allocations.some(a => a.rentMonthYear === targetMonth)) return true;
-      if (r.accountingMonth === targetMonth) return true;
-      if (typeof r.accountingMonth === 'string' && r.accountingMonth.startsWith(targetMonth)) return true;
-      if (r.monthPaidFor && r.monthPaidFor.includes(targetMonth)) return true;
-      return false;
-    };
+    // 1. Priority 1: Match unit, contractNo, tenantId that covers targetMonth in monthPaidFor / allocations
+    if (contractNoStr && tenantIdStr) {
+      const exactCovered = receipts.find(r => 
+        !r.isReversed &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
+        isContractMatch(r.contractNo, contractNoStr) &&
+        receiptCoversMonthPaidFor(r, targetMonth)
+      );
+      if (exactCovered) return exactCovered;
+    }
 
-    // Priority 1: Match unit, contractNo, and month
+    // 2. Priority 2: Match unit, tenantId that covers targetMonth
+    if (tenantIdStr) {
+      const tenantCovered = receipts.find(r => 
+        !r.isReversed &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
+        receiptCoversMonthPaidFor(r, targetMonth)
+      );
+      if (tenantCovered) return tenantCovered;
+    }
+
+    // 3. Priority 3: Match unit that covers targetMonth
+    const unitCovered = receipts.find(r => 
+      !r.isReversed &&
+      String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+      receiptCoversMonthPaidFor(r, targetMonth)
+    );
+    if (unitCovered) return unitCovered;
+
+    // 4. Priority 4: Match unit, contractNo, tenantId by accounting month
+    if (contractNoStr && tenantIdStr) {
+      const exactMatch = receipts.find(r => 
+        receiptMatchesAccountingMonth(r, targetMonth) &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
+        isContractMatch(r.contractNo, contractNoStr)
+      );
+      if (exactMatch) return exactMatch;
+    }
+
+    // 5. Priority 5: Match unit, contractNo by accounting month
     if (contractNoStr) {
-      const contractMatch = receipts.find(r => {
-        if (r.isReversed) return false;
-        if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
-        const rContract = String(r.contractNo || '').trim().toLowerCase();
-        if (rContract === contractNoStr) {
-          return matchesMonth(r);
-        }
-        return false;
-      });
+      const contractMatch = receipts.find(r => 
+        receiptMatchesAccountingMonth(r, targetMonth) &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        isContractMatch(r.contractNo, contractNoStr)
+      );
       if (contractMatch) return contractMatch;
     }
 
-    // Priority 2: Strict Rule - Only ONE receipt per property unit per month
-    return receipts.find(r => {
-      if (r.isReversed) return false;
-      if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
-      return matchesMonth(r);
-    }) || null;
+    // 6. Priority 6: Match unit, tenantId by accounting month
+    if (tenantIdStr) {
+      const tenantMatch = receipts.find(r => 
+        receiptMatchesAccountingMonth(r, targetMonth) &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr
+      );
+      if (tenantMatch) return tenantMatch;
+    }
+
+    // 7. Priority 7: Match unit by accounting month
+    return receipts.find(r => 
+      receiptMatchesAccountingMonth(r, targetMonth) &&
+      String(r.unitId?._id || r.unitId || '') === unitIdStr
+    ) || null;
   };
 
   // Resolve accurate month(s) paid for a unit/item from existing receipt or allocations
@@ -515,6 +597,7 @@ export default function PaymentsView() {
   const sheetFilterSuggestions = React.useMemo(() => {
     return {
       accountingMonth: [formatMonthYear(selectedMonth)],
+      receiptNumber: extractUniqueValues(outstandingData, d => findReceiptForUnitAndMonth(d, selectedMonth)?.receiptNumber || d.receiptNumber || 'None'),
       paidForMonth: extractUniqueValues(outstandingData, d => {
         const mList = resolveSelectedMonthsForItem(d, selectedMonth);
         return mList.length > 0 ? mList.map(m => formatMonthYear(m)).join(', ') : 'None';
@@ -561,14 +644,21 @@ export default function PaymentsView() {
     setEditingReceiptId(null);
     setEditingReceiptObj(null);
     setPaymentModalItem(null);
+    localStorage.removeItem('payments_target_tenant_id');
+    localStorage.removeItem('payments_target_contract_no');
+    localStorage.removeItem('payments_target_monthly_rent');
     if (returnToLedgerModal) {
       setSelectedLedgerModal(returnToLedgerModal);
       setReturnToLedgerModal(null);
     }
+    const drilldown = peekDrilldown();
+    if (drilldown) {
+      popAndReturnDrilldown();
+    }
   };
 
   // Browser Back button navigation: dismiss open modals back to the table
-  useModalBackHandler(showPaymentModal, handleClosePaymentModal);
+  // Note: showPaymentModal back navigation is handled inside PaymentEditModal itself
   useModalBackHandler(Boolean(selectedLedgerModal), () => setSelectedLedgerModal(null));
   useModalBackHandler(showExpenseModal, () => setShowExpenseModal(false));
   const [editingReceiptId, setEditingReceiptId] = useState(null);
@@ -701,56 +791,58 @@ export default function PaymentsView() {
     };
   };
 
-  // Get all payable months for a tenant (unpaid overdue months + active month if unpaid + upcoming advance months)
-  // CRITICAL: NEVER include any month that is ALREADY FULLY PAID (unless currently selected on this receipt)
+  // Get all payable months for a tenant:
+  // 1. Accounting month as 1st month
+  // 2. Followed by previous months in descending order (e.g., if accounting month is Dec '25 -> Nov '25, Oct '25, Sep '25...)
+  // 3. Followed by upcoming advance months
   const getPayableMonthsList = (item, activeMonth, currentSelectedMonths = []) => {
     const defaultRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0;
     const list = [];
 
-    // 1. Past / overdue unpaid months (only status === 'Unpaid' or 'Partially Paid')
-    const pastUnpaid = (item.monthsBreakdown || [])
-      .filter(m => m.monthYear < activeMonth && (m.status === 'Unpaid' || m.status === 'Partially Paid'));
-    
-    pastUnpaid.forEach(m => {
-      const remaining = m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || defaultRate);
-      if (remaining > 0) {
-        list.push({
-          monthYear: m.monthYear,
-          dueAmount: remaining,
-          type: 'overdue'
-        });
-      }
-    });
+    // Parse activeMonth (YYYY-MM)
+    const [actYearStr, actMonthStr] = (activeMonth || '').split('-');
+    const actYear = parseInt(actYearStr, 10) || new Date().getFullYear();
+    const actMonth = parseInt(actMonthStr, 10) || (new Date().getMonth() + 1);
 
-    // 2. Active month (ONLY IF NOT FULLY PAID or IF CURRENTLY SELECTED!)
+    // 1. Active accounting month (1st month)
     const activeData = item.monthsBreakdown?.find(m => m.monthYear === activeMonth);
     const activePaid = activeData ? activeData.allocatedAmount : 0;
     const activeExpected = activeData ? activeData.expectedRate : defaultRate;
-    const isActivePaid = activePaid >= activeExpected && activeExpected > 0;
+    const remainingActive = Math.max(0, activeExpected - activePaid);
 
-    if (!isActivePaid || currentSelectedMonths.includes(activeMonth)) {
-      const remaining = Math.max(0, activeExpected - activePaid);
+    list.push({
+      monthYear: activeMonth,
+      dueAmount: remainingActive > 0 ? remainingActive : (activeExpected || defaultRate),
+      type: 'current'
+    });
+
+    // 2. Previous months in descending order (e.g. if accounting month is Dec '25 -> Nov '25, Oct '25, Sep '25...)
+    for (let i = 1; i <= 12; i++) {
+      const d = new Date(actYear, actMonth - 1 - i, 1);
+      const mStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const mData = item.monthsBreakdown?.find(b => b.monthYear === mStr);
+      const paid = mData ? mData.allocatedAmount : 0;
+      const exp = mData ? mData.expectedRate : defaultRate;
+      const remaining = mData ? (mData.outstandingAmount > 0 ? mData.outstandingAmount : Math.max(0, exp - paid)) : defaultRate;
+
       list.push({
-        monthYear: activeMonth,
-        dueAmount: remaining > 0 ? remaining : activeExpected,
-        type: activePaid > 0 ? 'partial' : 'current'
+        monthYear: mStr,
+        dueAmount: remaining > 0 ? remaining : defaultRate,
+        type: 'past'
       });
     }
 
-    // 3. Upcoming advance months
+    // 3. Upcoming advance months (at least 2 months in future, showing 6 months in chronological order)
     const upcoming = getUpcomingMonths(activeMonth, 6);
     upcoming.forEach(mStr => {
       const fData = item.monthsBreakdown?.find(bm => bm.monthYear === mStr);
       const fPaid = fData ? fData.allocatedAmount : 0;
       const fExp = fData ? fData.expectedRate : defaultRate;
-      const isFPaid = fPaid >= fExp && fExp > 0;
-      if (!isFPaid || currentSelectedMonths.includes(mStr)) {
-        list.push({
-          monthYear: mStr,
-          dueAmount: Math.max(0, fExp - fPaid) || defaultRate,
-          type: 'advance'
-        });
-      }
+      list.push({
+        monthYear: mStr,
+        dueAmount: Math.max(0, fExp - fPaid) || defaultRate,
+        type: 'advance'
+      });
     });
 
     // 4. Any month in currentSelectedMonths not already in list
@@ -761,12 +853,12 @@ export default function PaymentsView() {
         list.push({
           monthYear: mStr,
           dueAmount: defaultRate,
-          type: isAdv ? 'advance' : isPast ? 'overdue' : 'current'
+          type: isAdv ? 'advance' : isPast ? 'past' : 'current'
         });
       }
     });
 
-    // Deduplicate by monthYear
+    // Deduplicate while preserving order: Accounting Month 1st, then past months (Nov 25, Oct 25, Sep 25...), then advance months
     const uniqueMap = new Map();
     list.forEach(mItem => {
       if (!uniqueMap.has(mItem.monthYear)) {
@@ -774,7 +866,7 @@ export default function PaymentsView() {
       }
     });
 
-    return Array.from(uniqueMap.values()).sort((a, b) => a.monthYear.localeCompare(b.monthYear));
+    return Array.from(uniqueMap.values());
   };
 
   const getRowDraft = (item) => {
@@ -909,10 +1001,18 @@ export default function PaymentsView() {
     if (currentMonths.includes(monthStr)) {
       nextMonths = currentMonths.filter(m => m !== monthStr);
     } else {
-      nextMonths = [...currentMonths, monthStr].sort();
+      nextMonths = [...currentMonths, monthStr];
     }
 
     const payable = getPayableMonthsList(item, selectedMonth, nextMonths);
+    const payableOrder = payable.map(p => p.monthYear);
+    nextMonths.sort((a, b) => {
+      const idxA = payableOrder.indexOf(a);
+      const idxB = payableOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      return a.localeCompare(b);
+    });
+
     let totalAmt = 0;
     nextMonths.forEach(m => {
       const pm = payable.find(p => p.monthYear === m);
@@ -1063,11 +1163,14 @@ export default function PaymentsView() {
       try {
         setSavingRows(prev => ({ ...prev, [rowKey]: true }));
         const unitIdStr = String(item.unit?._id || item.unitId || '');
-        const targetReceipts = receipts.filter(r => 
-          !r.isReversed &&
-          String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-          (r.allocations?.some(a => a.rentMonthYear === targetMonth) || r.accountingMonth === targetMonth)
-        );
+        const targetReceipts = receipts.filter(r => {
+          if (r.isReversed) return false;
+          if (String(r.unitId?._id || r.unitId || '') !== unitIdStr) return false;
+          const rAcct = r.accountingMonth 
+            ? String(r.accountingMonth).slice(0, 7) 
+            : (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+          return rAcct === targetMonth;
+        });
 
         const toDelete = targetReceipts.length > 0 ? targetReceipts : (existingReceipt ? [existingReceipt] : []);
         for (const r of toDelete) {
@@ -1367,9 +1470,11 @@ export default function PaymentsView() {
     setEditingExpense(null);
     const normHeadType = headType === 'Common' ? 'Other' : headType;
     const firstCat = expenseCategories.find(c => c.headType === normHeadType || (normHeadType === 'Other' && c.headType === 'Common'))?.name || (normHeadType === 'Property' ? 'Repairs & Renovation' : 'Miscellaneous');
+    const chosenPropId = normHeadType === 'Property' ? (defaultPropId || selectedPropertyFilter || properties[0]?._id || '') : '';
     setExpenseForm({
       headType: normHeadType,
-      propertyId: normHeadType === 'Property' ? (defaultPropId || selectedPropertyFilter || properties[0]?._id || '') : '',
+      propertyId: chosenPropId,
+      unitId: '',
       category: firstCat,
       amount: '',
       expenseMonth: selectedMonth,
@@ -1383,10 +1488,12 @@ export default function PaymentsView() {
   const openEditExpenseModal = (exp) => {
     setEditingExpense(exp);
     const pId = exp.propertyId?._id || exp.propertyId || '';
+    const uId = exp.unitId?._id || exp.unitId || '';
     const normHeadType = exp.headType ? (exp.headType === 'Common' ? 'Other' : exp.headType) : (pId ? 'Property' : 'Other');
     setExpenseForm({
       headType: normHeadType,
       propertyId: pId,
+      unitId: uId,
       category: exp.category || '',
       amount: String(exp.amount || ''),
       expenseMonth: exp.expenseMonth || (exp.expenseDate ? exp.expenseDate.slice(0, 7) : selectedMonth),
@@ -1418,6 +1525,7 @@ export default function PaymentsView() {
       const payload = {
         headType: expenseForm.headType === 'Common' ? 'Other' : expenseForm.headType,
         propertyId: expenseForm.headType === 'Property' ? expenseForm.propertyId : null,
+        unitId: expenseForm.headType === 'Property' ? (expenseForm.unitId || null) : null,
         category: expenseForm.category.trim(),
         amount: amt,
         expenseMonth: expenseForm.expenseMonth || selectedMonth,
@@ -1500,21 +1608,41 @@ export default function PaymentsView() {
   // Auto-open Edit Month / Payment modal if navigated from reports (Property Monthly Report, Rent Report, All Income, etc.)
   useEffect(() => {
     const checkIncomingEditRequest = () => {
+      // 1. ALWAYS apply incoming month and filters first
       const savedMonth = localStorage.getItem('payments_selected_month');
       if (savedMonth && savedMonth !== selectedMonth) {
         setSelectedMonth(savedMonth);
       }
 
+      const savedPropFilter = localStorage.getItem('payments_prop_filter');
+      if (savedPropFilter !== null && savedPropFilter !== selectedPropertyFilter) {
+        setSelectedPropertyFilter(savedPropFilter);
+      }
+
+      const savedTenantFilter = localStorage.getItem('payments_target_tenant_id') || localStorage.getItem('payments_tenant_filter');
+      if (savedTenantFilter && savedTenantFilter !== selectedTenantFilter) {
+        setSelectedTenantFilter(savedTenantFilter);
+      }
+
+      // 2. Open edit receipt modal if a specific receipt edit was requested
       const targetReceiptId = localStorage.getItem('payments_edit_receipt_id');
       if (targetReceiptId) {
         localStorage.removeItem('payments_edit_receipt_id');
+        localStorage.removeItem('payments_target_unit_id');
         setEditingReceiptId(targetReceiptId);
-        setEditingReceiptObj(null);
+        const existingObj = (receipts || []).find(r => String(r._id) === String(targetReceiptId));
+        setEditingReceiptObj(existingObj || null);
         setPaymentModalItem(null);
         setShowPaymentModal(true);
         return;
       }
 
+      // 3. If already actively editing a receipt, protect it from being overridden by background data updates
+      if (showPaymentModal && editingReceiptId) {
+        return;
+      }
+
+      // 4. Open fast payment modal for a unit if requested
       const targetUnitId = localStorage.getItem('payments_target_unit_id');
       if (targetUnitId && outstandingData && outstandingData.length > 0) {
         localStorage.removeItem('payments_target_unit_id');
@@ -1527,8 +1655,24 @@ export default function PaymentsView() {
 
     checkIncomingEditRequest();
     window.addEventListener('hashchange', checkIncomingEditRequest);
-    return () => window.removeEventListener('hashchange', checkIncomingEditRequest);
-  }, [selectedMonth, outstandingData]);
+    window.addEventListener('popstate', checkIncomingEditRequest);
+    window.addEventListener('app_check_edit_request', checkIncomingEditRequest);
+    return () => {
+      window.removeEventListener('hashchange', checkIncomingEditRequest);
+      window.removeEventListener('popstate', checkIncomingEditRequest);
+      window.removeEventListener('app_check_edit_request', checkIncomingEditRequest);
+    };
+  }, [selectedMonth, outstandingData, showPaymentModal, editingReceiptId]);
+
+  // Keep editingReceiptObj synchronized once receipts load asynchronously
+  useEffect(() => {
+    if (editingReceiptId && !editingReceiptObj && receipts && receipts.length > 0) {
+      const matched = receipts.find(r => String(r._id) === String(editingReceiptId));
+      if (matched) {
+        setEditingReceiptObj(matched);
+      }
+    }
+  }, [receipts, editingReceiptId, editingReceiptObj]);
 
   // Cancel / Reverse Receipt
 
@@ -1658,8 +1802,10 @@ export default function PaymentsView() {
   const sortedReceipts = React.useMemo(() => {
     return sortDataRows(filteredReceipts, receiptSortConfig, {
       receiptDate: r => r.receiptDate,
+      receiptNumber: r => r.receiptNumber || '',
       tenant: r => r.tenantId?.name || '',
-      monthsCovered: r => r.monthsCovered || '',
+      accountingMonth: r => r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '') || '',
+      monthsCovered: r => r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '',
       rentAmount: r => Number(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount) || 0,
       depositAmount: r => Number(r.depositAmount) || 0,
       totalAmount: r => Number(r.totalAmount) || 0,
@@ -1726,10 +1872,14 @@ export default function PaymentsView() {
       const outstanding = String(d.totalOutstanding || 0);
       const paidUpTo = d.paidTillMonth && d.paidTillMonth !== 'None' ? formatMonthYear(d.paidTillMonth) : 'None';
 
+      const receiptObj = findReceiptForUnitAndMonth(d, selectedMonth);
+      const receiptNo = receiptObj?.receiptNumber || d.receiptNumber || '';
+
       const matchesSearch = !search ||
         tenantName.toLowerCase().includes(search.toLowerCase()) ||
         propName.toLowerCase().includes(search.toLowerCase()) ||
         unitName.toLowerCase().includes(search.toLowerCase()) ||
+        receiptNo.toLowerCase().includes(search.toLowerCase()) ||
         phone.includes(search);
 
       const matchesProp = !selectedPropertyFilter ||
@@ -1749,6 +1899,7 @@ export default function PaymentsView() {
         else if (f.columnId === 'property') fieldVal = propName;
         else if (f.columnId === 'subUnit') fieldVal = unitName;
         else if (f.columnId === 'accountingMonth') fieldVal = `${selectedMonth} ${formatMonthYear(selectedMonth)}`;
+        else if (f.columnId === 'receiptNumber') fieldVal = receiptNo;
         else if (f.columnId === 'paidForMonth') {
           const mList = resolveSelectedMonthsForItem(d, selectedMonth);
           fieldVal = mList.map(m => `${m} ${formatMonthYear(m)}`).join(' ');
@@ -2334,6 +2485,7 @@ export default function PaymentsView() {
       monthlyRent: d => d.monthsBreakdown?.find(m => m.monthYear === selectedMonth)?.expectedRate ?? (d.unit?.monthlyRentExpected || 0),
       outstanding: d => d.totalOutstanding || 0,
       paidUpTo: d => d.paidTillMonth || '',
+      receiptNumber: d => findReceiptForUnitAndMonth(d, selectedMonth)?.receiptNumber || d.receiptNumber || '',
       tenantPhone: d => d.tenant?.phone || '',
       propertyType: d => d.property?.type || '',
       subUnitArea: d => d.unit?.areaSqFt || 0,
@@ -2527,67 +2679,6 @@ export default function PaymentsView() {
             </button>
           </div>
         </div>
-
-        {/* Top Month Selector & Quick Metrics Bar - In One Clean Single Row from Active Month to Outstanding */}
-        <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-          {/* Active Month Controller (Today button removed as requested) */}
-          <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-2xl border border-slate-200 shadow-2xs">
-            <button
-              onClick={handlePrevMonth}
-              className="p-1.5 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
-              title="Previous Month"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center gap-1.5 px-2 py-0.5">
-              <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <div className="text-left">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Active Month</span>
-                <span className="text-xs font-black text-slate-900 leading-tight">{formatMonthYear(selectedMonth)}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleNextMonth}
-              className="p-1.5 rounded-xl hover:bg-white text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
-              title="Next Month"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-
-            <div className="h-5 w-px bg-slate-200 mx-0.5" />
-
-            {/* Direct Month Picker */}
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={handleSelectCustomMonth}
-              className="text-xs font-semibold px-2 py-1 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-              title="Jump to specific month and year"
-            />
-          </div>
-
-          {/* Compact Overview Badges (Tenancies, Expected, Collected, Outstanding) in the same single row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-1.5 shadow-2xs">
-              <span className="text-xs text-slate-500 font-semibold">Tenancies:</span>
-              <span className="text-xs font-black text-slate-800">{filteredOut.length} units</span>
-            </div>
-            <div className="px-3 py-1.5 rounded-xl bg-blue-50/70 border border-blue-200/80 flex items-center gap-1.5 shadow-2xs">
-              <span className="text-xs text-blue-600 font-semibold">Expected:</span>
-              <span className="text-xs font-black text-blue-900 font-mono">{formatCurrency(totalExpectedSum)}</span>
-            </div>
-            <div className="px-3 py-1.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-center gap-1.5 shadow-2xs">
-              <span className="text-xs text-emerald-600 font-semibold">Collected:</span>
-              <span className="text-xs font-black text-emerald-800 font-mono">{formatCurrency(totalPaidSum)}</span>
-            </div>
-            <div className="px-3 py-1.5 rounded-xl bg-rose-50/70 border border-rose-200/80 flex items-center gap-1.5 shadow-2xs">
-              <span className="text-xs text-rose-600 font-semibold">Outstanding:</span>
-              <span className="text-xs font-black text-rose-700 font-mono">{formatCurrency(totalOutstandingSum)}</span>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* VIEW 1: EXCEL-TEMPLATE-STYLE GRID */}
@@ -2595,6 +2686,89 @@ export default function PaymentsView() {
         <div className="space-y-2">
           {/* APEX Toolbar for Rent Sheet */}
           <ApexToolbar
+            monthFilter={
+              <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-xl border border-slate-200 shadow-2xs shrink-0">
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  className="p-1 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
+                  title="Previous Month"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+
+                <div className="flex items-center gap-1 px-1.5 py-0.5">
+                  <Calendar className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <div className="text-left leading-none">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Month</span>
+                    <span className="text-xs font-black text-slate-900 whitespace-nowrap leading-tight">{formatMonthYear(selectedMonth)}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  className="p-1 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
+                  title="Next Month"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+
+                <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={handleSelectCustomMonth}
+                  className="text-xs font-semibold px-1.5 py-0.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                  title="Jump to specific month and year"
+                />
+              </div>
+            }
+            propertyFilter={
+              <div className="flex items-center gap-1.5 shrink-0">
+                <select
+                  value={selectedPropertyFilter}
+                  onChange={(e) => { setSelectedPropertyFilter(e.target.value); setSheetCurrentPage(1); }}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
+                >
+                  <option value="">All Properties</option>
+                  {properties.map(p => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={selectedTenantFilter}
+                  onChange={(e) => { setSelectedTenantFilter(e.target.value); setSheetCurrentPage(1); }}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
+                >
+                  <option value="">All Tenants</option>
+                  {availableTenantsForFilter.map(t => (
+                    <option key={t._id} value={t._id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            }
+            kpiFilter={
+              <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                <div className="px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-1 text-xs">
+                  <span className="text-slate-500 font-medium">Tenancies:</span>
+                  <span className="font-bold text-slate-800">{filteredOut.length}</span>
+                </div>
+                <div className="px-2.5 py-1 rounded-xl bg-blue-50/70 border border-blue-200/80 flex items-center gap-1 text-xs">
+                  <span className="text-blue-600 font-medium">Expected:</span>
+                  <span className="font-bold text-blue-900 font-mono">{formatCurrency(totalExpectedSum)}</span>
+                </div>
+                <div className="px-2.5 py-1 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-center gap-1 text-xs">
+                  <span className="text-emerald-600 font-medium">Collected:</span>
+                  <span className="font-bold text-emerald-800 font-mono">{formatCurrency(totalPaidSum)}</span>
+                </div>
+                <div className="px-2.5 py-1 rounded-xl bg-rose-50/70 border border-rose-200/80 flex items-center gap-1 text-xs">
+                  <span className="text-rose-600 font-medium">Outstanding:</span>
+                  <span className="font-bold text-rose-700 font-mono">{formatCurrency(totalOutstandingSum)}</span>
+                </div>
+              </div>
+            }
             search={search}
             onSearchChange={(val) => { setSearch(val); setSheetCurrentPage(1); }}
             rowsPerPage={sheetRowsPerPage}
@@ -2618,30 +2792,6 @@ export default function PaymentsView() {
             storageKey="payments_sheet_v5"
             activeViewName={sheetActiveViewId}
             onViewChange={setSheetActiveViewId}
-            primaryAction={
-              <div className="flex items-center gap-2 shrink-0">
-                <select
-                  value={selectedPropertyFilter}
-                  onChange={(e) => { setSelectedPropertyFilter(e.target.value); setSheetCurrentPage(1); }}
-                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
-                >
-                  <option value="">All Properties</option>
-                  {properties.map(p => (
-                    <option key={p._id} value={p._id}>{p.name}</option>
-                  ))}
-                </select>
-                <select
-                  value={selectedTenantFilter}
-                  onChange={(e) => { setSelectedTenantFilter(e.target.value); setSheetCurrentPage(1); }}
-                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
-                >
-                  <option value="">All Tenants</option>
-                  {availableTenantsForFilter.map(t => (
-                    <option key={t._id} value={t._id}>{t.name}</option>
-                  ))}
-                </select>
-              </div>
-            }
           />
 
           {/* The Excel Grid Table */}
@@ -2690,6 +2840,7 @@ export default function PaymentsView() {
                         else if (colId === 'outstanding') { label = 'Outstanding'; align = 'text-right'; extraClass = 'bg-rose-50/50 text-rose-900'; }
                         else if (colId === 'paidUpTo') { label = 'Paid Up To'; align = 'text-center'; }
                         else if (colId === 'accountingMonth') { label = 'Accounting Month'; align = 'text-center'; }
+                        else if (colId === 'receiptNumber') { label = 'Receipt #'; align = 'text-center'; }
                         else if (colId === 'paidForMonth') { label = 'Month Paid For'; }
                         else if (colId === 'rentAmount') { label = 'Rent Amount Paid'; align = 'text-right'; }
                         else if (colId === 'depositAmount') { label = 'Deposit Amount'; align = 'text-right'; }
@@ -3031,6 +3182,26 @@ export default function PaymentsView() {
                                 </span>
                               );
                             }
+                            if (colId === 'receiptNumber') {
+                              const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
+                              const rNo = existingReceiptForRow?.receiptNumber || item.receiptNumber;
+                              return renderCellTd(
+                                "px-3 py-3.5 border-r border-slate-100 text-center text-xs font-mono font-bold whitespace-nowrap",
+                                rNo ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openFastPaymentModal(item)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 border border-indigo-200/80 cursor-pointer transition-colors shadow-2xs font-bold font-mono"
+                                    title="Edit Month / Payment Details for this receipt"
+                                  >
+                                    <Receipt className="w-3 h-3 text-indigo-500" />
+                                    <span>{rNo}</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-400 text-xs italic">—</span>
+                                )
+                              );
+                            }
                             if (colId === 'paidForMonth') {
                               const existingReceiptForRow = findReceiptForUnitAndMonth(item, selectedMonth);
                               const rowStatus = draft.status || existingReceiptForRow?.status || item.status || (item.tenant ? 'Rented' : 'Vacant');
@@ -3083,13 +3254,14 @@ export default function PaymentsView() {
                                   {/* Multi-Month Selection Popover */}
                                   {openMonthPickerRow === rowKey && (() => {
                                     const payableMonths = getPayableMonthsList(item, selectedMonth, selMonths);
-                                    const dueMonths = payableMonths.filter(m => m.type !== 'advance');
-                                    const advanceMonths = payableMonths.filter(m => m.type === 'advance');
+                                    const currentMonths = payableMonths.filter(m => m.type === 'current');
+                                    const pastMonths = payableMonths.filter(m => m.type === 'past').sort((a, b) => b.monthYear.localeCompare(a.monthYear));
+                                    const advanceMonths = payableMonths.filter(m => m.type === 'advance').sort((a, b) => a.monthYear.localeCompare(b.monthYear));
 
                                     return (
                                       <div
                                         onClick={(e) => e.stopPropagation()}
-                                        className="absolute top-12 left-2 z-30 bg-white border border-slate-200 rounded-2xl shadow-2xl p-3.5 min-w-[280px] text-xs cursor-default text-left"
+                                        className="absolute top-12 left-2 z-30 bg-white border border-slate-200 rounded-2xl shadow-2xl p-3.5 min-w-[300px] text-xs cursor-default text-left"
                                       >
                                         <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
                                           <span className="font-extrabold text-slate-800">Select Month(s) to Pay</span>
@@ -3102,17 +3274,17 @@ export default function PaymentsView() {
                                           </button>
                                         </div>
 
-                                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                                          {/* Due / Pending Months (if any) */}
-                                          {dueMonths.length > 0 && (
+                                        <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                                          {/* 1. Accounting Month (1st) */}
+                                          {currentMonths.length > 0 && (
                                             <div className="space-y-1">
-                                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block px-1">
-                                                Month Paid For ({dueMonths.length})
+                                              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded block border border-emerald-200/50">
+                                                Accounting Month
                                               </span>
-                                              {dueMonths.map(m => (
+                                              {currentMonths.map(m => (
                                                 <label key={m.monthYear} className={`flex items-center justify-between gap-2 p-1.5 rounded-lg cursor-pointer border transition-all ${
                                                   selMonths.includes(m.monthYear)
-                                                    ? 'bg-rose-50/70 border-rose-300'
+                                                    ? 'bg-emerald-50/70 border-emerald-300'
                                                     : 'hover:bg-slate-50 border-slate-100'
                                                 }`}>
                                                   <div className="flex items-center gap-2">
@@ -3120,12 +3292,12 @@ export default function PaymentsView() {
                                                       type="checkbox"
                                                       checked={selMonths.includes(m.monthYear)}
                                                       onChange={() => handleToggleMonthForRow(item, m.monthYear)}
-                                                      className="rounded text-rose-600 focus:ring-rose-500 w-3.5 h-3.5 cursor-pointer"
+                                                      className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer"
                                                     />
-                                                    <span className="text-slate-800 font-semibold">{formatMonthYear(m.monthYear)}</span>
-                                                    {m.type === 'current' && <span className="text-[10px] text-slate-500">(Active)</span>}
+                                                    <span className="text-slate-800 font-bold">{formatMonthYear(m.monthYear)}</span>
+                                                    <span className="text-[10px] text-emerald-600 font-bold">(Current)</span>
                                                   </div>
-                                                  <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
+                                                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
                                                     Due {formatCurrency(m.dueAmount)}
                                                   </span>
                                                 </label>
@@ -3133,10 +3305,39 @@ export default function PaymentsView() {
                                             </div>
                                           )}
 
-                                          {/* Advance Months (Unpaid upcoming months) */}
+                                          {/* 2. Previous Month(s) (Followed by previous months in descending order: Nov 25, Oct 25, Sep 25...) */}
+                                          {pastMonths.length > 0 && (
+                                            <div className="space-y-1 pt-1">
+                                              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded block border border-amber-200/50">
+                                                Previous Month(s) ({pastMonths.length})
+                                              </span>
+                                              {pastMonths.map(m => (
+                                                <label key={m.monthYear} className={`flex items-center justify-between gap-2 p-1.5 rounded-lg cursor-pointer border transition-all ${
+                                                  selMonths.includes(m.monthYear)
+                                                    ? 'bg-amber-50/70 border-amber-300'
+                                                    : 'hover:bg-slate-50 border-slate-100'
+                                                }`}>
+                                                  <div className="flex items-center gap-2">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={selMonths.includes(m.monthYear)}
+                                                      onChange={() => handleToggleMonthForRow(item, m.monthYear)}
+                                                      className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer"
+                                                    />
+                                                    <span className="text-slate-800 font-semibold">{formatMonthYear(m.monthYear)}</span>
+                                                  </div>
+                                                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                                                    Due {formatCurrency(m.dueAmount)}
+                                                  </span>
+                                                </label>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          {/* 3. Advance Months (Unpaid upcoming months) */}
                                           {advanceMonths.length > 0 && (
                                             <div className="space-y-1 pt-1">
-                                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block px-1">
+                                              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded block border border-blue-200/50">
                                                 Upcoming Month(s) (Advance)
                                               </span>
                                               {advanceMonths.map(m => (
@@ -3652,31 +3853,30 @@ export default function PaymentsView() {
               storageKey="payments_expense_section_v1"
               activeViewName={expenseSectionActiveViewId}
               onViewChange={setExpenseSectionActiveViewId}
+              propertyFilter={
+                <select
+                  value={expenseSectionPropFilter}
+                  onChange={(e) => { setExpenseSectionPropFilter(e.target.value); setExpenseSectionCurrentPage(1); }}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer shrink-0"
+                >
+                  <option value="">All Properties & Common</option>
+                  {orderedExpenseGridProperties.map(p => (
+                    <option key={p._id} value={p._id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              }
               primaryAction={
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={expenseSectionPropFilter}
-                    onChange={(e) => { setExpenseSectionPropFilter(e.target.value); setExpenseSectionCurrentPage(1); }}
-                    className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
-                  >
-                    <option value="">All Properties & Common</option>
-                    {orderedExpenseGridProperties.map(p => (
-                      <option key={p._id} value={p._id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-
-                  <button
-                    type="button"
-                    onClick={() => openAddExpenseModal('Property')}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer"
-                    title="Open Add Expense Dialog"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>+ Add Expense</span>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => openAddExpenseModal('Property')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer shrink-0"
+                  title="Open Add Expense Dialog"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add Expense</span>
+                </button>
               }
             />
 
@@ -4463,38 +4663,36 @@ export default function PaymentsView() {
             storageKey="payments_receipts"
             activeViewName={receiptActiveViewId}
             onViewChange={setReceiptActiveViewId}
-            primaryAction={
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Property Filter */}
-                <select
-                  value={receiptPropertyFilter}
-                  onChange={(e) => { setReceiptPropertyFilter(e.target.value); setReceiptCurrentPage(1); }}
-                  className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
-                >
-                  <option value="">All Properties</option>
-                  {properties.map(p => (
-                    <option key={p._id} value={p._id}>{p.name}</option>
-                  ))}
-                </select>
-
-{/* Status Filter */}
-                <select
-                  value={receiptStatusFilter}
-                  onChange={(e) => { setReceiptStatusFilter(e.target.value); setReceiptCurrentPage(1); }}
-                  className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="Rented">Rented</option>
-                  <option value="Vacant">Vacant</option>
-                </select>
-
-                {/* Multi-Month Selector with Popover */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowReceiptMonthPicker(prev => !prev)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-                      receiptSelectedMonths.length > 0
+            propertyFilter={
+              <select
+                value={receiptPropertyFilter}
+                onChange={(e) => { setReceiptPropertyFilter(e.target.value); setReceiptCurrentPage(1); }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer shrink-0"
+              >
+                <option value="">All Properties</option>
+                {properties.map(p => (
+                  <option key={p._id} value={p._id}>{p.name}</option>
+                ))}
+              </select>
+            }
+            statusFilter={
+              <select
+                value={receiptStatusFilter}
+                onChange={(e) => { setReceiptStatusFilter(e.target.value); setReceiptCurrentPage(1); }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer shrink-0"
+              >
+                <option value="">All Statuses</option>
+                <option value="Rented">Rented</option>
+                <option value="Vacant">Vacant</option>
+              </select>
+            }
+            monthFilter={
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowReceiptMonthPicker(prev => !prev)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-2xs cursor-pointer ${
+                    receiptSelectedMonths.length > 0
                         ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
                         : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
                     }`}
@@ -4584,9 +4782,8 @@ export default function PaymentsView() {
                     </div>
                   )}
                 </div>
-              </div>
-            }
-          />
+              }
+            />
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
 
@@ -5051,7 +5248,7 @@ export default function PaymentsView() {
           selectedMonth={selectedMonth}
           tenants={tenants}
           assignments={assignments}
-          backButtonLabel="Back to Rent & Payment"
+          backButtonLabel={peekDrilldown()?.label || "Back to Rent & Payment"}
           onSuccess={async () => {
             const rowKey = paymentModalItem ? getRowKey(paymentModalItem) : null;
             if (rowKey) {
@@ -5341,7 +5538,7 @@ Status: <span className="font-medium text-slate-700">{r.status || 'Rented'}</spa
                     </label>
                     <select
                       value={expenseForm.propertyId}
-                      onChange={(e) => setExpenseForm(f => ({ ...f, propertyId: e.target.value }))}
+                      onChange={(e) => setExpenseForm(f => ({ ...f, propertyId: e.target.value, unitId: '' }))}
                       required
                       className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs"
                     >
@@ -5358,6 +5555,38 @@ Status: <span className="font-medium text-slate-700">{r.status || 'Rented'}</spa
                     </label>
                     <div className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-dashed border-purple-200 bg-purple-50 text-purple-700">
                       General / Common Expense
+                    </div>
+                  </div>
+                )}
+
+                {/* Col 2: Sub-Unit Partition (if Property Expense) */}
+                {expenseForm.headType === 'Property' ? (
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                      Sub-Unit / Partition (Optional)
+                    </label>
+                    <select
+                      value={expenseForm.unitId || ''}
+                      disabled={!expenseForm.propertyId}
+                      onChange={(e) => setExpenseForm(f => ({ ...f, unitId: e.target.value }))}
+                      className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      <option value="">Entire Property / Common Partition</option>
+                      {units
+                        .filter(u => String(u.propertyId?._id || u.propertyId || '') === String(expenseForm.propertyId || ''))
+                        .map(u => (
+                          <option key={u._id} value={u._id}>{u.subUnitPartition || u.unitName}</option>
+                        ))
+                      }
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                      Sub-Unit
+                    </label>
+                    <div className="w-full px-3 py-2 text-xs text-slate-400 rounded-xl border border-dashed border-slate-200 bg-slate-50 flex items-center">
+                      — None (General) —
                     </div>
                   </div>
                 )}

@@ -16,6 +16,14 @@ export default class ErrorBoundary extends React.Component {
     this.setState({ errorInfo });
   }
 
+  componentDidUpdate(prevProps) {
+    if (this.state.hasError) {
+      if (prevProps.children !== this.props.children || prevProps.resetKey !== this.props.resetKey) {
+        this.setState({ hasError: false, error: null, errorInfo: null });
+      }
+    }
+  }
+
   handleReload = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
     window.location.reload();
@@ -38,6 +46,12 @@ export default class ErrorBoundary extends React.Component {
           <p className="text-xs text-slate-600 mb-4 max-w-md mx-auto">
             {this.state.error?.message || 'An unexpected rendering error occurred.'}
           </p>
+          {this.state.error?.stack && (
+            <details className="mb-4 text-left bg-white p-3 rounded-xl border border-rose-200 text-[11px] font-mono text-rose-700 max-h-48 overflow-y-auto">
+              <summary className="font-bold cursor-pointer text-rose-600 mb-1">View Technical Details</summary>
+              <pre className="whitespace-pre-wrap">{this.state.error.stack}</pre>
+            </details>
+          )}
           <div className="flex items-center justify-center gap-3">
             <button
               type="button"

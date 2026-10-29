@@ -5050,5 +5050,23 @@
     "createdAt": "2026-10-27T06:00:24.106Z",
     "updatedAt": "2026-10-27T07:48:41.452Z",
     "__v": 0
+  },
+  {
+    "_id": "6ae227312761b7a716f6553a",
+    "expenseCode": "EXP-2026-00294",
+    "expenseDate": "2026-10-28T00:00:00.000Z",
+    "expenseMonth": "2026-10",
+    "propertyId": "6ada066dd7c483f46dca0370",
+    "unitId": "6ada066dd7c483f46dca037b",
+    "headType": "Property",
+    "category": "Maintenance",
+    "amount": 1250,
+    "description": "Test Property and Unit Expense",
+    "recordedBy": "6ada066dd7c483f46dca036f",
+    "isReversed": false,
+    "reversalReason": "",
+    "createdAt": "2026-10-28T16:47:45.536Z",
+    "updatedAt": "2026-10-28T16:47:45.536Z",
+    "__v": 0
   }
 ]

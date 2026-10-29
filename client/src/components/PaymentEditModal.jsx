@@ -4,7 +4,8 @@ import { formatCurrency, formatDate, formatMonthYear } from '../utils/formatters
 import { useModalBackHandler } from '../utils/useModalBackHandler';
 import { 
   ChevronLeft, Check, Plus, X, CheckCircle2, 
-  AlertCircle, ExternalLink, RefreshCw, Trash2 
+  AlertCircle, ExternalLink, RefreshCw, Trash2,
+  RotateCcw, GripVertical
 } from 'lucide-react';
 
 const getCurrentMonthYear = () => {
@@ -25,13 +26,67 @@ export default function PaymentEditModal({
   backButtonLabel = 'Back',
   onNavigateToPayments = null
 }) {
-  const activeMonth = propSelectedMonth || (receipt?.accountingMonth) || (receipt?.receiptDate ? String(receipt.receiptDate).slice(0, 7) : '') || getCurrentMonthYear();
+  const activeMonth = (receipt?.accountingMonth) || (receipt?.receiptDate ? String(receipt.receiptDate).slice(0, 7) : '') || propSelectedMonth || getCurrentMonthYear();
 
   useModalBackHandler(isOpen, onClose);
 
   const [modalLoading, setModalLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Customizable Form Sections Layout
+  const [columnOrder, setColumnOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem('payment_modal_column_order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 3) return parsed;
+      }
+    } catch {}
+    return ['occupancy', 'financials', 'dueMonths'];
+  });
+
+  const [draggedCol, setDraggedCol] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
+
+  const handleColDragStart = (e, colId) => {
+    setDraggedCol(colId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleColDragOver = (e, colId) => {
+    e.preventDefault();
+    if (colId !== dragOverCol) setDragOverCol(colId);
+  };
+
+  const handleColDrop = (e, targetColId) => {
+    e.preventDefault();
+    if (!draggedCol || draggedCol === targetColId) {
+      setDraggedCol(null);
+      setDragOverCol(null);
+      return;
+    }
+    const current = [...columnOrder];
+    const fromIdx = current.indexOf(draggedCol);
+    const toIdx = current.indexOf(targetColId);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      current.splice(fromIdx, 1);
+      current.splice(toIdx, 0, draggedCol);
+      setColumnOrder(current);
+      try {
+        localStorage.setItem('payment_modal_column_order', JSON.stringify(current));
+      } catch {}
+    }
+    setDraggedCol(null);
+    setDragOverCol(null);
+  };
+
+  const resetColumnOrder = () => {
+    setColumnOrder(['occupancy', 'financials', 'dueMonths']);
+    try {
+      localStorage.removeItem('payment_modal_column_order');
+    } catch {}
+  };
 
   // Lists
   const [tenantsList, setTenantsList] = useState(propTenants || []);
@@ -71,8 +126,8 @@ export default function PaymentEditModal({
       const cUId = String(c.unitId?._id || c.unitId || '');
       if (cTId !== tStr || cUId !== uStr) return false;
       if (!targetMonth) return true;
-      const sMonth = c.startDate ? c.startDate.slice(0, 7) : null;
-      const eMonth = c.endDate ? c.endDate.slice(0, 7) : null;
+      const sMonth = c.startDate ? (typeof c.startDate === 'string' ? c.startDate.slice(0, 7) : new Date(c.startDate).toISOString().slice(0, 7)) : null;
+      const eMonth = c.endDate ? (typeof c.endDate === 'string' ? c.endDate.slice(0, 7) : new Date(c.endDate).toISOString().slice(0, 7)) : null;
       if (sMonth && sMonth > targetMonth) return false;
       if (eMonth && eMonth < targetMonth) return false;
       return true;
@@ -150,24 +205,29 @@ export default function PaymentEditModal({
           setAssignmentsList(curAssignments);
         }
 
-        // Resolve unit, tenant and contract identifiers
-        const tenantObj = item?.tenant || receipt?.tenantId || receipt?.tenant;
-        const unitObj = item?.unit || receipt?.unitId || receipt?.unit;
-        const tenantId = tenantObj?._id || (typeof tenantObj === 'string' ? tenantObj : null);
-        const unitId = unitObj?._id || (typeof unitObj === 'string' ? unitObj : null);
-        const monthlyRate = item?.monthlyRentExpected || unitObj?.monthlyRentExpected || receipt?.monthlyRentExpected || 22000;
-        const propName = item?.property?.name || unitObj?.propertyId?.name || receipt?.property?.name || 'Property';
-        const partName = item?.unit?.subUnitPartition || item?.unit?.unitName || unitObj?.subUnitPartition || unitObj?.unitName || receipt?.partitionName || 'Unit';
-        const activeContract = resolveContractForTargetMonth(tenantId, unitId, activeMonth, curAssignments) || item?.contractNo || receipt?.contractNo || '';
-
-        // Strict Single Receipt Lookup: Priority: receiptId prop > receipt prop > search by (unitId, activeMonth)
+        // Strict Single Receipt Lookup: Priority: receiptId prop > receipt prop
         let targetReceiptId = receiptId || receipt?._id || receipt?.receiptId || null;
         let recData = receipt || null;
 
-        // If targetReceiptId not passed directly, query payments for this unit and month
-        if (!targetReceiptId && unitId) {
+        // If targetReceiptId exists, fetch single receipt first to guarantee full, fresh data
+        if (targetReceiptId) {
           try {
-            const checkRes = await API.get(`/payments?unitId=${unitId}`);
+            const recRes = await API.get(`/payments/${targetReceiptId}`);
+            if (recRes.data?.success && recRes.data.data) {
+              recData = recRes.data.data;
+            }
+          } catch (err) {
+            console.warn('Could not fetch single receipt via /payments/:id, using fallback receipt prop', err);
+          }
+        }
+
+        const initialUnitObj = recData?.unitId || item?.unit || receipt?.unitId || receipt?.unit;
+        const initialUnitId = initialUnitObj?._id || (typeof initialUnitObj === 'string' ? initialUnitObj : null);
+
+        // If targetReceiptId not passed directly, query payments for this unit and month
+        if (!targetReceiptId && initialUnitId) {
+          try {
+            const checkRes = await API.get(`/payments?unitId=${initialUnitId}`);
             if (checkRes.data?.success && Array.isArray(checkRes.data.data)) {
               const matched = checkRes.data.data.find(r => 
                 !r.isReversed &&
@@ -177,7 +237,16 @@ export default function PaymentEditModal({
               );
               if (matched) {
                 targetReceiptId = matched._id;
-                recData = matched;
+                try {
+                  const singleRes = await API.get(`/payments/${targetReceiptId}`);
+                  if (singleRes.data?.success && singleRes.data.data) {
+                    recData = singleRes.data.data;
+                  } else {
+                    recData = matched;
+                  }
+                } catch {
+                  recData = matched;
+                }
               }
             }
           } catch (cErr) {
@@ -185,32 +254,138 @@ export default function PaymentEditModal({
           }
         }
 
-        // If targetReceiptId exists, fetch single receipt to guarantee full, fresh data
-        if (targetReceiptId) {
-          try {
-            const recRes = await API.get(`/payments/${targetReceiptId}`);
-            if (recRes.data?.success) {
-              recData = recRes.data.data;
-            }
-          } catch (err) {
-            console.warn('Could not fetch single receipt via /payments/:id, using fallback receipt prop', err);
+        setCurrentReceiptId(targetReceiptId || null);
+
+        const effectiveMonth = recData?.accountingMonth || activeMonth;
+
+        // Resolve unit, tenant and contract identifiers with full fallback cascade
+        const tenantObj = recData?.tenantId || recData?.tenant || item?.tenant || receipt?.tenantId || receipt?.tenant;
+        const unitObj = recData?.unitId || recData?.unit || item?.unit || receipt?.unitId || receipt?.unit;
+        let tenantId = tenantObj?._id || (typeof tenantObj === 'string' ? tenantObj : null);
+        let unitId = unitObj?._id || (typeof unitObj === 'string' ? unitObj : null);
+
+        const savedTargetTenant = localStorage.getItem('payments_target_tenant_id') || localStorage.getItem('payments_tenant_filter');
+        if (!tenantId && savedTargetTenant) {
+          tenantId = savedTargetTenant;
+        }
+
+        const savedTargetContract = localStorage.getItem('payments_target_contract_no');
+        const resolvedContractNo = recData?.contractNo || item?.contractNo || receipt?.contractNo || savedTargetContract || '';
+
+        // Fallback: match contractNo against assignments if tenantId or unitId is missing
+        if ((!tenantId || !unitId) && resolvedContractNo && curAssignments && curAssignments.length > 0) {
+          const matchedAss = curAssignments.find(a => (a.contractNo || '').trim().toLowerCase() === resolvedContractNo.trim().toLowerCase());
+          if (matchedAss) {
+            if (!tenantId) tenantId = matchedAss.tenantId?._id || (typeof matchedAss.tenantId === 'string' ? matchedAss.tenantId : null);
+            if (!unitId) unitId = matchedAss.unitId?._id || (typeof matchedAss.unitId === 'string' ? matchedAss.unitId : null);
           }
         }
 
-        setCurrentReceiptId(targetReceiptId || null);
+        // Active contract lookup
+        const activeContract = resolvedContractNo || resolveContractForTargetMonth(tenantId, unitId, effectiveMonth, curAssignments) || '';
+
+        // Find assignment object for contract details: prioritize exact activeContract
+        let assignmentObj = null;
+        if (activeContract) {
+          assignmentObj = (curAssignments || []).find(a => 
+            (a.contractNo || '').trim().toLowerCase() === activeContract.trim().toLowerCase()
+          );
+        }
+        if (!assignmentObj && unitId && tenantId) {
+          const tIdStr = String(tenantId?._id || tenantId);
+          const uIdStr = String(unitId?._id || unitId);
+          assignmentObj = (curAssignments || []).find(a => {
+            if (String(a.unitId?._id || a.unitId) !== uIdStr || String(a.tenantId?._id || a.tenantId) !== tIdStr) return false;
+            const sMonth = a.startDate ? (typeof a.startDate === 'string' ? a.startDate.slice(0, 7) : new Date(a.startDate).toISOString().slice(0, 7)) : null;
+            const eMonth = a.endDate ? (typeof a.endDate === 'string' ? a.endDate.slice(0, 7) : new Date(a.endDate).toISOString().slice(0, 7)) : null;
+            if (sMonth && sMonth > effectiveMonth) return false;
+            if (eMonth && eMonth < effectiveMonth) return false;
+            return true;
+          }) || (curAssignments || []).find(a => 
+            String(a.unitId?._id || a.unitId) === uIdStr && 
+            String(a.tenantId?._id || a.tenantId) === tIdStr &&
+            a.status === 'Active'
+          ) || (curAssignments || []).find(a => 
+            String(a.unitId?._id || a.unitId) === uIdStr && 
+            String(a.tenantId?._id || a.tenantId) === tIdStr
+          );
+        }
+
+        // If tenantId is still missing, recover from matched assignment
+        if (!tenantId && assignmentObj?.tenantId) {
+          tenantId = assignmentObj.tenantId?._id || (typeof assignmentObj.tenantId === 'string' ? assignmentObj.tenantId : null);
+        }
+
+        // Resolve tenant name and phone: check curTenants list
+        const matchedTenant = (curTenants || []).find(t => String(t._id) === String(tenantId));
+        const tenantName = (typeof tenantObj === 'object' && tenantObj?.name) 
+          ? tenantObj.name 
+          : (matchedTenant?.name || item?.tenant?.name || 'Tenant');
+        const tenantPhone = (typeof tenantObj === 'object' && tenantObj?.phone) 
+          ? tenantObj.phone 
+          : (matchedTenant?.phone || '');
+
+        const propName = recData?.unitId?.propertyId?.name || recData?.propertyId?.name || assignmentObj?.propertyId?.name || assignmentObj?.unitId?.propertyId?.name || item?.property?.name || unitObj?.propertyId?.name || receipt?.property?.name || 'Property';
+        const partName = recData?.unitId?.subUnitPartition || recData?.unitId?.unitName || assignmentObj?.unitId?.subUnitPartition || assignmentObj?.unitId?.unitName || item?.unit?.subUnitPartition || item?.unit?.unitName || unitObj?.subUnitPartition || unitObj?.unitName || receipt?.partitionName || 'Unit';
+
+        // Target month for determining rent rate (first preference: month paid for, else effective accounting month)
+        const primaryPaidMonth = (recData?.monthPaidFor ? String(recData.monthPaidFor).split(',')[0].trim() : '') || effectiveMonth;
+
+        // 1. Resolve contract rate from rateHistory or agreement
+        let contractRate = null;
+        if (assignmentObj?.rateHistory && Array.isArray(assignmentObj.rateHistory) && assignmentObj.rateHistory.length > 0) {
+          const matchedHist = assignmentObj.rateHistory.find(r => {
+            const sM = r.effectiveFrom ? (typeof r.effectiveFrom === 'string' ? r.effectiveFrom.slice(0, 7) : new Date(r.effectiveFrom).toISOString().slice(0, 7)) : '0000-00';
+            const eM = r.effectiveTo ? (typeof r.effectiveTo === 'string' ? r.effectiveTo.slice(0, 7) : new Date(r.effectiveTo).toISOString().slice(0, 7)) : '9999-99';
+            return primaryPaidMonth >= sM && primaryPaidMonth <= eM;
+          });
+          if (matchedHist && Number(matchedHist.monthlyRate) > 0) {
+            contractRate = Number(matchedHist.monthlyRate);
+          }
+        }
+        if (!contractRate && assignmentObj) {
+          contractRate = Number(
+            assignmentObj.currentAgreement?.monthlyRate ??
+            assignmentObj.currentMonthlyRate ??
+            assignmentObj.monthlyRent ??
+            assignmentObj.rentAmount ??
+            0
+          ) || null;
+        }
+
+        // 2. Caller / report passed expected rate
+        const savedTargetRent = Number(localStorage.getItem('payments_target_monthly_rent')) || null;
+        const passedExpectedRate = savedTargetRent || Number(
+          item?.monthlyRentExpected ??
+          receipt?.monthlyRentExpected ??
+          recData?.monthlyRentExpected ??
+          0
+        ) || null;
+
+        // 3. Fallback unit base rate
+        const fallbackUnitRate = Number(
+          recData?.unitId?.monthlyRentExpected ??
+          unitObj?.monthlyRentExpected ??
+          assignmentObj?.unitId?.monthlyRentExpected ??
+          22000
+        ) || 22000;
+
+        // Contract rate and passed rate take precedence over base unit rate
+        let monthlyRate = contractRate || passedExpectedRate || (recData?.rentAmount && Number(recData.rentAmount) > 0 ? Number(recData.rentAmount) : null) || fallbackUnitRate;
 
         setSelectedTenantInfo({
           tenantId,
           initialTenantId: tenantId,
           unitId,
+          assignmentId: assignmentObj?._id || null,
           receiptNumber: recData?.receiptNumber || '',
-          tenantName: tenantObj?.name || 'Tenant',
-          tenantPhone: tenantObj?.phone || '',
+          tenantName,
+          tenantPhone,
           propertyName: propName,
           partitionName: partName,
           monthlyRate,
-          contractStartDate: recData?.contractStartDate || item?.startDate || null,
-          contractEndDate: recData?.contractEndDate || item?.endDate || null,
+          contractStartDate: recData?.contractStartDate || assignmentObj?.startDate || item?.startDate || null,
+          contractEndDate: recData?.contractEndDate || assignmentObj?.endDate || item?.endDate || null,
           paidTillMonth: item?.paidTillMonth
         });
 
@@ -239,17 +414,17 @@ export default function PaymentEditModal({
           : new Date().toISOString().split('T')[0];
 
         setPaymentForm({
-          status: recData?.status || (item?.tenant ? 'Rented' : 'Vacant'),
+          status: recData?.status || (tenantId ? 'Rented' : (item?.tenant ? 'Rented' : 'Vacant')),
           tenantId: tenantId || '',
           unitId: unitId || '',
-          contractNo: recData?.contractNo || activeContract,
+          contractNo: activeContract,
           receiptNumber: recData?.receiptNumber || item?.receiptNumber || '',
           receiptDate: receiptDateStr,
-          accountingMonth: recData?.accountingMonth || activeMonth,
+          accountingMonth: effectiveMonth,
           rentAmount: String(recRent),
           depositAmount: String(recDep),
           totalAmount: String(recTotal),
-          comments: recData?.comments || `Rent payment for ${formatMonthYear(activeMonth)}`,
+          comments: recData?.comments || `Rent payment for ${formatMonthYear(effectiveMonth)}`,
           adjustmentAmount: String(recData?.adjustmentAmount || 0),
           adjustmentDescription: recData?.adjustmentDescription || ''
         });
@@ -274,9 +449,9 @@ export default function PaymentEditModal({
           }
         }
 
-        // If no prior allocations found, default to activeMonth only if rent paid is greater than 0
+        // If no prior allocations found, default to effectiveMonth only if rent paid is greater than 0
         if (Object.keys(initialMap).length === 0 && recRent > 0) {
-          initialMap[activeMonth] = recRent;
+          initialMap[effectiveMonth] = recRent;
         }
 
         setSelectedMonthsMap(initialMap);
@@ -285,25 +460,43 @@ export default function PaymentEditModal({
         let ledgerBreakdown = [];
         if (tenantId && unitId) {
           try {
-            const lRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${tenantId}&unitId=${unitId}&upToMonthYear=${activeMonth}`);
-            if (lRes.data?.success && Array.isArray(lRes.data.data?.monthsBreakdown)) {
-              ledgerBreakdown = lRes.data.data.monthsBreakdown;
+            const lRes = await API.get(`/payments/tenant-unit-ledger?tenantId=${tenantId}&unitId=${unitId}`);
+            if (lRes.data?.success && lRes.data.data) {
+              if (Array.isArray(lRes.data.data.monthsBreakdown)) {
+                ledgerBreakdown = lRes.data.data.monthsBreakdown;
+              }
+              if (lRes.data.data.paidTillMonth) {
+                setSelectedTenantInfo(prev => ({
+                  ...prev,
+                  paidTillMonth: lRes.data.data.paidTillMonth || prev?.paidTillMonth
+                }));
+              }
             }
           } catch (lErr) {
             console.warn('Could not fetch tenant-unit ledger on modal open:', lErr);
           }
         }
 
+        // Refine monthlyRate if ledger returned accurate expected rate for the target month
+        const activeMonthDataForTarget = ledgerBreakdown.find(m => m.monthYear === primaryPaidMonth) || ledgerBreakdown.find(m => m.monthYear === effectiveMonth);
+        if (activeMonthDataForTarget?.expectedRate && Number(activeMonthDataForTarget.expectedRate) > 0) {
+          monthlyRate = Number(activeMonthDataForTarget.expectedRate);
+          setSelectedTenantInfo(prev => ({
+            ...prev,
+            monthlyRate
+          }));
+        }
+
         // 3. Build unpaidMonthsList:
         // Include:
         // - All past months from ledger that are Unpaid or Partially Paid
-        // - activeMonth
+        // - effectiveMonth
         // - Any months already allocated in initialMap
         const unpaidMap = new Map();
 
         // Add past unpaid / partially paid months from ledger
         ledgerBreakdown.forEach(m => {
-          if (m.monthYear < activeMonth && (m.status === 'Unpaid' || m.status === 'Partially Paid')) {
+          if (m.monthYear < effectiveMonth && (m.status === 'Unpaid' || m.status === 'Partially Paid')) {
             unpaidMap.set(m.monthYear, {
               monthYear: m.monthYear,
               outstandingAmount: m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || monthlyRate),
@@ -313,12 +506,20 @@ export default function PaymentEditModal({
           }
         });
 
-        // Add activeMonth
-        const activeMonthData = ledgerBreakdown.find(m => m.monthYear === activeMonth);
+        // Add effectiveMonth
+        const activeMonthData = ledgerBreakdown.find(m => m.monthYear === effectiveMonth) || activeMonthDataForTarget;
         const activeExp = activeMonthData?.expectedRate || monthlyRate;
-        const activeOut = activeMonthData ? (activeMonthData.outstandingAmount > 0 ? activeMonthData.outstandingAmount : Math.max(0, activeExp - (initialMap[activeMonth] || 0))) : Math.max(0, monthlyRate - recRent);
-        unpaidMap.set(activeMonth, {
-          monthYear: activeMonth,
+        let activeOut = 0;
+        if (initialMap[effectiveMonth] !== undefined) {
+          activeOut = Math.max(0, activeExp - Number(initialMap[effectiveMonth] || 0));
+        } else if (activeMonthData) {
+          activeOut = activeMonthData.outstandingAmount > 0 ? activeMonthData.outstandingAmount : 0;
+        } else {
+          activeOut = Math.max(0, activeExp - recRent);
+        }
+
+        unpaidMap.set(effectiveMonth, {
+          monthYear: effectiveMonth,
           outstandingAmount: activeOut,
           expectedRate: activeExp,
           isAdvance: false
@@ -332,12 +533,12 @@ export default function PaymentEditModal({
               monthYear: mYear,
               outstandingAmount: mData ? mData.outstandingAmount : 0,
               expectedRate: mData ? mData.expectedRate : monthlyRate,
-              isAdvance: mYear > activeMonth
+              isAdvance: mYear > effectiveMonth
             });
           }
         });
 
-        const sortedUnpaidList = Array.from(unpaidMap.values()).sort((a, b) => a.monthYear.localeCompare(b.monthYear));
+        const sortedUnpaidList = Array.from(unpaidMap.values()).sort((a, b) => String(a.monthYear || '').localeCompare(String(b.monthYear || '')));
         setUnpaidMonthsList(sortedUnpaidList);
       } catch (err) {
         console.error('Failed to initialize payment edit modal:', err);
@@ -780,8 +981,9 @@ export default function PaymentEditModal({
 
       if (onSuccess) {
         await onSuccess(responseData);
+      } else {
+        onClose();
       }
-      onClose();
     } catch (err) {
       console.error('Payment submit error:', err);
       const msg = err.response?.data?.message || err.message || 'Error processing payment. Please try again.';
@@ -802,6 +1004,16 @@ export default function PaymentEditModal({
       {/* FULL SCREEN HEADER */}
       <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-200 shrink-0 bg-white shadow-xs">
         <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={resetColumnOrder}
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer flex items-center gap-1"
+            title="Reset form sections arrangement to default"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset Layout</span>
+          </button>
+
           <button
             type="button"
             onClick={onClose}
@@ -916,9 +1128,29 @@ export default function PaymentEditModal({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             
             {/* COLUMN 1: UNIT, STATUS, TENANT & CONTRACT DETAILS */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+            <div
+              onDragOver={(e) => handleColDragOver(e, 'occupancy')}
+              onDrop={(e) => handleColDrop(e, 'occupancy')}
+              style={{ order: columnOrder.indexOf('occupancy') }}
+              className={`bg-white p-3 rounded-xl border transition-all space-y-2.5 ${
+                dragOverCol === 'occupancy' && draggedCol !== 'occupancy'
+                  ? 'border-emerald-500 bg-emerald-50/50 shadow-md ring-2 ring-emerald-400'
+                  : draggedCol === 'occupancy'
+                  ? 'opacity-40 border-slate-300'
+                  : 'border-slate-200 shadow-2xs'
+              }`}
+            >
+              <div
+                draggable
+                onDragStart={(e) => handleColDragStart(e, 'occupancy')}
+                onDragEnd={() => { setDraggedCol(null); setDragOverCol(null); }}
+                className="flex items-center justify-between pb-2.5 border-b border-slate-100 cursor-grab active:cursor-grabbing select-none"
+                title="Drag header to rearrange section"
+              >
                 <div className="flex items-center gap-2">
+                  <span className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100">
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </span>
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                   <span className="text-xs font-black text-slate-900 uppercase tracking-wider">
                     Occupancy & Contract
@@ -992,11 +1224,25 @@ export default function PaymentEditModal({
                       const newTenantId = e.target.value;
                       const chosenTenant = tenantsList.find(t => t._id === newTenantId);
                       setPaymentForm(f => ({ ...f, tenantId: newTenantId }));
+
+                      const chosenContract = assignmentsList.find(c => {
+                        const cTId = String(c.tenantId?._id || c.tenantId || '');
+                        const cUId = String(c.unitId?._id || c.unitId || '');
+                        return cTId === String(newTenantId) && cUId === String(selectedTenantInfo?.unitId || '');
+                      });
+                      const chosenRate = Number(
+                        chosenContract?.currentAgreement?.monthlyRate ??
+                        chosenContract?.currentMonthlyRate ??
+                        chosenContract?.monthlyRent ??
+                        0
+                      );
+
                       setSelectedTenantInfo(prev => ({
                         ...prev,
                         tenantId: newTenantId,
                         tenantName: chosenTenant?.name || prev?.tenantName,
-                        tenantPhone: chosenTenant?.phone || ''
+                        tenantPhone: chosenTenant?.phone || '',
+                        monthlyRate: chosenRate > 0 ? chosenRate : prev?.monthlyRate
                       }));
                       if (newTenantId && selectedTenantInfo?.unitId) {
                         try {
@@ -1007,14 +1253,18 @@ export default function PaymentEditModal({
                             if (m.monthYear < activeMonth && (m.status === 'Unpaid' || m.status === 'Partially Paid')) {
                               unpaidMap.set(m.monthYear, {
                                 monthYear: m.monthYear,
-                                outstandingAmount: m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || selectedTenantInfo?.monthlyRate || 0),
-                                expectedRate: m.expectedRate || selectedTenantInfo?.monthlyRate || 0,
+                                outstandingAmount: m.outstandingAmount > 0 ? m.outstandingAmount : (m.expectedRate || chosenRate || selectedTenantInfo?.monthlyRate || 0),
+                                expectedRate: m.expectedRate || chosenRate || selectedTenantInfo?.monthlyRate || 0,
                                 isAdvance: false
                               });
                             }
                           });
                           const targetMonthData = breakdown.find(m => m.monthYear === activeMonth);
-                          const defaultRate = targetMonthData?.expectedRate || selectedTenantInfo?.monthlyRate || 22000;
+                          const defaultRate = targetMonthData?.expectedRate || (chosenRate > 0 ? chosenRate : null) || selectedTenantInfo?.monthlyRate || 22000;
+                          setSelectedTenantInfo(prev => ({
+                            ...prev,
+                            monthlyRate: defaultRate
+                          }));
                           unpaidMap.set(activeMonth, {
                             monthYear: activeMonth,
                             outstandingAmount: targetMonthData ? (targetMonthData.outstandingAmount > 0 ? targetMonthData.outstandingAmount : defaultRate) : defaultRate,
@@ -1022,7 +1272,7 @@ export default function PaymentEditModal({
                             isAdvance: false
                           });
                           setUnpaidMonthsList(Array.from(unpaidMap.values()).sort((a, b) => a.monthYear.localeCompare(b.monthYear)));
-                          const defaultAmt = targetMonthData?.outstandingAmount || targetMonthData?.expectedRate || selectedTenantInfo?.monthlyRate || 0;
+                          const defaultAmt = targetMonthData?.outstandingAmount || targetMonthData?.expectedRate || defaultRate || 0;
                           syncPaymentState(defaultAmt > 0 ? { [activeMonth]: defaultAmt } : {}, newTenantId, selectedTenantInfo.unitId);
                         } catch(err) {
                           console.error('Error fetching ledger for new tenant:', err);
@@ -1083,7 +1333,23 @@ export default function PaymentEditModal({
                       {matchingContracts.length > 0 ? (
                         <select
                           value={paymentForm.contractNo || ''}
-                          onChange={(e) => setPaymentForm(f => ({ ...f, contractNo: e.target.value }))}
+                          onChange={(e) => {
+                            const newContractNo = e.target.value;
+                            setPaymentForm(f => ({ ...f, contractNo: newContractNo }));
+                            const chosenContract = matchingContracts.find(c => (c.contractNo || c.assignmentCode) === newContractNo);
+                            if (chosenContract) {
+                              const newRate = Number(
+                                chosenContract.currentAgreement?.monthlyRate ??
+                                chosenContract.currentMonthlyRate ??
+                                chosenContract.monthlyRent ??
+                                chosenContract.rentAmount ??
+                                0
+                              );
+                              if (newRate > 0) {
+                                setSelectedTenantInfo(prev => ({ ...prev, monthlyRate: newRate }));
+                              }
+                            }
+                          }}
                           className="w-full px-2.5 py-1.5 rounded-lg border border-teal-300 bg-teal-50/50 text-xs font-mono font-bold text-teal-900 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer shadow-2xs"
                         >
                           {matchingContracts.map(c => {
@@ -1158,9 +1424,29 @@ export default function PaymentEditModal({
             </div>
 
             {/* COLUMN 2: FINANCIALS, AMOUNT PAID & ADJUSTMENTS */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+            <div
+              onDragOver={(e) => handleColDragOver(e, 'financials')}
+              onDrop={(e) => handleColDrop(e, 'financials')}
+              style={{ order: columnOrder.indexOf('financials') }}
+              className={`bg-white p-3 rounded-xl border transition-all space-y-2.5 ${
+                dragOverCol === 'financials' && draggedCol !== 'financials'
+                  ? 'border-blue-500 bg-blue-50/50 shadow-md ring-2 ring-blue-400'
+                  : draggedCol === 'financials'
+                  ? 'opacity-40 border-slate-300'
+                  : 'border-slate-200 shadow-2xs'
+              }`}
+            >
+              <div
+                draggable
+                onDragStart={(e) => handleColDragStart(e, 'financials')}
+                onDragEnd={() => { setDraggedCol(null); setDragOverCol(null); }}
+                className="flex items-center justify-between pb-2.5 border-b border-slate-100 cursor-grab active:cursor-grabbing select-none"
+                title="Drag header to rearrange section"
+              >
                 <div className="flex items-center gap-2">
+                  <span className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100">
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </span>
                   <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
                   <span className="text-xs font-black text-slate-900 uppercase tracking-wider">
                     Rent & Payment Calculation
@@ -1290,8 +1576,8 @@ export default function PaymentEditModal({
                     const balanceDiff = Math.max(0, expRate - allocated);
                     return sum + balanceDiff;
                   }
-                  const rem = m.outstandingAmount > 0 ? m.outstandingAmount : expRate;
-                  return sum + Number(rem);
+                  const rem = Number(m.outstandingAmount) || 0;
+                  return sum + rem;
                 }, 0);
 
                 const adjNum = Number(paymentForm.adjustmentAmount) || 0;
@@ -1369,9 +1655,29 @@ export default function PaymentEditModal({
             </div>
 
             {/* COLUMN 3: DUE MONTHS TO SETTLE (PAST DUE & ADVANCE MONTHS UNIFIED) */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2 flex flex-col">
-              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 shrink-0">
+            <div
+              onDragOver={(e) => handleColDragOver(e, 'dueMonths')}
+              onDrop={(e) => handleColDrop(e, 'dueMonths')}
+              style={{ order: columnOrder.indexOf('dueMonths') }}
+              className={`bg-white p-3 rounded-xl border transition-all space-y-2 flex flex-col ${
+                dragOverCol === 'dueMonths' && draggedCol !== 'dueMonths'
+                  ? 'border-purple-500 bg-purple-50/50 shadow-md ring-2 ring-purple-400'
+                  : draggedCol === 'dueMonths'
+                  ? 'opacity-40 border-slate-300'
+                  : 'border-slate-200 shadow-2xs'
+              }`}
+            >
+              <div
+                draggable
+                onDragStart={(e) => handleColDragStart(e, 'dueMonths')}
+                onDragEnd={() => { setDraggedCol(null); setDragOverCol(null); }}
+                className="flex items-center justify-between pb-2.5 border-b border-slate-100 shrink-0 cursor-grab active:cursor-grabbing select-none"
+                title="Drag header to rearrange section"
+              >
                 <div className="flex items-center gap-2">
+                  <span className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100">
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </span>
                   <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
                   <span className="text-xs font-black text-slate-900 uppercase tracking-wider">
                     Month Paid For

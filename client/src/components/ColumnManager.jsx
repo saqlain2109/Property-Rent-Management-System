@@ -498,7 +498,7 @@ export function useFrozenColumns(storageKey, defaultCount = 0) {
 /**
  * Calculates cumulative left sticky position and border divider for frozen columns.
  */
-export function getFrozenColumnStyle(colIndex, frozenCount, visibleColumns, columnWidths, isHeader = false) {
+export function getFrozenColumnStyle(colIndex, frozenCount, visibleColumns, columnWidths, isHeader = false, isDark = false) {
   if (colIndex >= frozenCount) return {};
 
   let leftOffset = 0;
@@ -514,7 +514,7 @@ export function getFrozenColumnStyle(colIndex, frozenCount, visibleColumns, colu
     left: `${leftOffset}px`,
     top: isHeader ? 0 : undefined,
     zIndex: isHeader ? 50 : 15,
-    backgroundColor: isHeader ? '#f1f5f9' : undefined,
+    backgroundColor: isHeader ? (isDark ? '#0f172a' : '#f1f5f9') : undefined,
     boxShadow: isLastFrozen ? '3px 0 6px -2px rgba(0, 0, 0, 0.12)' : undefined,
     borderRight: isLastFrozen ? '2px solid #94a3b8' : undefined
   };
@@ -744,6 +744,7 @@ export function ColumnHeaderCell({
           zIndex: (frozenStyle && frozenStyle.zIndex) ? Math.max(Number(frozenStyle.zIndex) || 0, 25) : 20
         } : {}),
         ...frozenStyle,
+        ...(isDark && (!style?.backgroundColor && (!frozenStyle?.backgroundColor || frozenStyle.backgroundColor === '#f1f5f9')) ? { backgroundColor: '#0f172a' } : {}),
         ...style
       }}
       className={`relative group select-none py-2 px-2.5 transition-colors cursor-pointer ${

@@ -19,6 +19,7 @@ import {
   ColumnHeaderCell, 
   useTableAutoWrap 
 } from '../components/ColumnManager';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
 
 export default function MonthlyPropertyEarningsView({
   mode = 'month_wise', // 'month_wise' | 'rent_report'
@@ -65,6 +66,7 @@ export default function MonthlyPropertyEarningsView({
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isHeaderSticky, setIsHeaderSticky] = useState(true);
   const [frozenColumnCount, setFrozenColumnCount] = useFrozenColumns(`${prefix}_freeze_v2`, 0);
+  const effectiveFrozenCount = Math.min(2, Math.max(0, Number(frozenColumnCount) || 0));
   const [activeViewId, setActiveViewId] = useState(null);
   const [reportFilters, setReportFilters] = useState([]);
   const [visibleColumns, setVisibleColumns] = useState([]);
@@ -81,6 +83,13 @@ export default function MonthlyPropertyEarningsView({
     });
   }, [selectedYear]);
 
+  const availableFinancialYears = useMemo(() => {
+    if (data?.availableYears && Array.isArray(data.availableYears) && data.availableYears.length > 0) {
+      return data.availableYears;
+    }
+    return ['2026', '2025', '2024'];
+  }, [data?.availableYears]);
+
   const effectiveMonthLabels = useMemo(() => {
     return (data?.monthLabels && data.monthLabels.length > 0)
       ? data.monthLabels
@@ -91,9 +100,6 @@ export default function MonthlyPropertyEarningsView({
     const map = {
       index: 48,
       property: 260,
-      propertyCode: 120,
-      propertyType: 130,
-      unitsCount: 100,
       total: 135
     };
     effectiveMonthLabels.forEach(m => {
@@ -135,14 +141,11 @@ export default function MonthlyPropertyEarningsView({
     return effectiveMonthLabels.filter(m => visibleColumns.length === 0 || visibleColumns.includes(m.key));
   }, [effectiveMonthLabels, visibleColumns]);
 
-  // Code/Type column removed as requested
+  // Leading row identifier columns
   const columnsDef = useMemo(() => {
     const list = [
       { id: 'index', label: '#', defaultVisible: true },
       { id: 'property', label: 'Property / Partition', defaultVisible: true },
-      { id: 'propertyCode', label: 'Property Code', defaultVisible: false },
-      { id: 'propertyType', label: 'Property Type', defaultVisible: false },
-      { id: 'unitsCount', label: 'Units Count', defaultVisible: false },
     ];
     effectiveMonthLabels.forEach(m => {
       list.push({ id: m.key, label: m.label, defaultVisible: true });
@@ -602,6 +605,57 @@ export default function MonthlyPropertyEarningsView({
         ) : (
           <div className="space-y-2">
             <ApexToolbar
+              monthFilter={
+                <div className="flex items-center gap-1.5 shrink-0 text-xs font-bold">
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => {
+                      setSelectedYear(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-800 focus:outline-none cursor-pointer shadow-2xs"
+                  >
+                    <option value="all">All Financial Years</option>
+                    {availableFinancialYears.map(y => (
+                      <option key={y} value={y}>Year {y}</option>
+                    ))}
+                  </select>
+                </div>
+              }
+              propertyFilter={
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs shadow-2xs">
+                  <Building2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                  <label className="font-bold text-slate-500 whitespace-nowrap">Property:</label>
+                  <select
+                    value={selectedPropertyFilter}
+                    onChange={(e) => {
+                      setSelectedPropertyFilter(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer max-w-[200px] truncate"
+                  >
+                    <option value="">All Properties ({data?.rows?.length || 0})</option>
+                    {data?.rows?.map(r => (
+                      <option key={r.propertyId} value={r.propertyId}>
+                        {r.propertyName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              }
+              kpiFilter={
+                <div className="flex items-center gap-1.5 shrink-0 text-xs font-bold">
+                  <div className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800">
+                    Rent: {formatCurrency(activeGrandTotal)}
+                  </div>
+                  <div className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-800">
+                    Exp: {formatCurrency(activeGrandTotalExpenses)}
+                  </div>
+                  <div className={`px-2.5 py-1 rounded-xl border ${activeGrandTotalDifference >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+                    Net: {activeGrandTotalDifference >= 0 ? '+' : ''}{formatCurrency(activeGrandTotalDifference)}
+                  </div>
+                </div>
+              }
               search={searchTerm}
               onSearchChange={(val) => { setSearchTerm(val); setCurrentPage(1); }}
               rowsPerPage={rowsPerPage}
@@ -618,7 +672,8 @@ export default function MonthlyPropertyEarningsView({
               onSortChange={setSortConfig}
               isHeaderSticky={isHeaderSticky}
               onToggleHeaderSticky={setIsHeaderSticky}
-              frozenColumnCount={frozenColumnCount}
+              frozenColumnCount={effectiveFrozenCount}
+              maxFrozenColumns={2}
               onFrozenColumnCountChange={setFrozenColumnCount}
               activeViewName={activeViewId}
               onViewChange={setActiveViewId}
@@ -646,11 +701,11 @@ export default function MonthlyPropertyEarningsView({
                       onSort={handleSort}
                       isFilterable={false}
                       onResizeStart={handleResizeStart}
-                      isFrozen={frozenColumnCount > 0}
+                      isFrozen={effectiveFrozenCount > 0}
                       frozenStyle={{
-                        ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, true),
+                        ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, true, true),
                         backgroundColor: '#0f172a',
-                        zIndex: isHeaderSticky ? (frozenColumnCount > 0 ? 25 : 20) : (frozenColumnCount > 0 ? 25 : undefined),
+                        zIndex: isHeaderSticky ? (effectiveFrozenCount > 0 ? 25 : 20) : (effectiveFrozenCount > 0 ? 25 : undefined),
                         borderBottom: '2px solid #334155'
                       }}
                       isHeaderSticky={isHeaderSticky}
@@ -674,11 +729,11 @@ export default function MonthlyPropertyEarningsView({
                       onClearFilter={handleClearColumnFilter}
                       uniqueValues={uniquePropertyNames}
                       onResizeStart={handleResizeStart}
-                      isFrozen={frozenColumnCount > 1}
+                      isFrozen={effectiveFrozenCount > 1}
                       frozenStyle={{
-                        ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, true),
+                        ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, true, true),
                         backgroundColor: '#0f172a',
-                        zIndex: isHeaderSticky ? (frozenColumnCount > 1 ? 25 : 20) : (frozenColumnCount > 1 ? 25 : undefined),
+                        zIndex: isHeaderSticky ? (effectiveFrozenCount > 1 ? 25 : 20) : (effectiveFrozenCount > 1 ? 25 : undefined),
                         borderBottom: '2px solid #334155'
                       }}
                       isHeaderSticky={isHeaderSticky}
@@ -686,55 +741,7 @@ export default function MonthlyPropertyEarningsView({
                       style={{ borderBottom: '2px solid #334155' }}
                     />
                   )}
-                  {(visibleColumns.length === 0 || visibleColumns.includes('propertyCode')) && (
-                    <ColumnHeaderCell
-                      colId="propertyCode"
-                      label="Property Code"
-                      align="left"
-                      width={columnWidths['propertyCode'] || 120}
-                      minWidth={100}
-                      isSortable={true}
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                      onResizeStart={handleResizeStart}
-                      isHeaderSticky={isHeaderSticky}
-                      theme="dark"
-                      style={{ borderBottom: '2px solid #334155' }}
-                    />
-                  )}
-                  {(visibleColumns.length === 0 || visibleColumns.includes('propertyType')) && (
-                    <ColumnHeaderCell
-                      colId="propertyType"
-                      label="Property Type"
-                      align="left"
-                      width={columnWidths['propertyType'] || 130}
-                      minWidth={110}
-                      isSortable={true}
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                      onResizeStart={handleResizeStart}
-                      isHeaderSticky={isHeaderSticky}
-                      theme="dark"
-                      style={{ borderBottom: '2px solid #334155' }}
-                    />
-                  )}
-                  {(visibleColumns.length === 0 || visibleColumns.includes('unitsCount')) && (
-                    <ColumnHeaderCell
-                      colId="unitsCount"
-                      label="Units Count"
-                      align="center"
-                      width={columnWidths['unitsCount'] || 100}
-                      minWidth={80}
-                      isSortable={true}
-                      sortConfig={sortConfig}
-                      onSort={handleSort}
-                      onResizeStart={handleResizeStart}
-                      isHeaderSticky={isHeaderSticky}
-                      theme="dark"
-                      style={{ borderBottom: '2px solid #334155' }}
-                    />
-                  )}
-                  {displayMonthCols.map((m, mIdx) => (
+                  {displayMonthCols.map((m) => (
                     <ColumnHeaderCell
                       key={m.key}
                       colId={m.key}
@@ -750,8 +757,7 @@ export default function MonthlyPropertyEarningsView({
                       onApplyFilter={handleApplyColumnFilter}
                       onClearFilter={handleClearColumnFilter}
                       onResizeStart={handleResizeStart}
-                      isFrozen={frozenColumnCount > (2 + mIdx)}
-                      frozenStyle={getFrozenColumnStyle(2 + mIdx, frozenColumnCount, visibleColumns, columnWidths, true)}
+                      isFrozen={false}
                       isHeaderSticky={isHeaderSticky}
                       theme="dark"
                       style={{ borderBottom: '2px solid #334155' }}
@@ -806,7 +812,7 @@ export default function MonthlyPropertyEarningsView({
                         {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                           <td
                             style={{
-                              ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                              ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                               width: `${columnWidths['index'] || 48}px`,
                               minWidth: `${columnWidths['index'] || 48}px`,
                               maxWidth: `${columnWidths['index'] || 48}px`
@@ -819,7 +825,7 @@ export default function MonthlyPropertyEarningsView({
                         {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                           <td
                             style={{
-                              ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                              ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                               width: `${columnWidths['property'] || 260}px`,
                               minWidth: `${columnWidths['property'] || 260}px`,
                               maxWidth: `${columnWidths['property'] || 260}px`
@@ -856,21 +862,6 @@ export default function MonthlyPropertyEarningsView({
                             </div>
                           </td>
                         )}
-                        {(visibleColumns.length === 0 || visibleColumns.includes('propertyCode')) && (
-                          <td className="py-2 px-3 bg-white font-mono text-xs text-slate-700 border-r border-slate-100">
-                            {row.propertyCode || '—'}
-                          </td>
-                        )}
-                        {(visibleColumns.length === 0 || visibleColumns.includes('propertyType')) && (
-                          <td className="py-2 px-3 bg-white text-xs text-slate-700 border-r border-slate-100">
-                            {row.propertyType || '—'}
-                          </td>
-                        )}
-                        {(visibleColumns.length === 0 || visibleColumns.includes('unitsCount')) && (
-                          <td className="py-2 px-3 bg-white text-center font-bold text-xs text-slate-700 border-r border-slate-100">
-                            {row.units?.length || 0}
-                          </td>
-                        )}
 
                         {/* Month Columns */}
                         {displayMonthCols.map(m => {
@@ -884,13 +875,6 @@ export default function MonthlyPropertyEarningsView({
                                 maxWidth: `${columnWidths[m.key] || 115}px`
                               }}
                               onClick={() => {
-                                if (mode === 'rent_report') {
-                                  localStorage.setItem('payments_selected_month', m.key);
-                                  if (row.propertyId) localStorage.setItem('payments_prop_filter', row.propertyId);
-                                  window.location.hash = '#/payments';
-                                  window.dispatchEvent(new PopStateEvent('popstate'));
-                                  return;
-                                }
                                 openDrilldown({
                                   propertyId: row.propertyId,
                                   month: m.key,
@@ -944,7 +928,7 @@ export default function MonthlyPropertyEarningsView({
                           {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                             <td
                               style={{
-                                ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                                ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                                 width: `${columnWidths['index'] || 48}px`,
                                 minWidth: `${columnWidths['index'] || 48}px`,
                                 maxWidth: `${columnWidths['index'] || 48}px`
@@ -957,7 +941,7 @@ export default function MonthlyPropertyEarningsView({
                           {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                             <td
                               style={{
-                                ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                                ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                                 width: `${columnWidths['property'] || 260}px`,
                                 minWidth: `${columnWidths['property'] || 260}px`,
                                 maxWidth: `${columnWidths['property'] || 260}px`
@@ -968,21 +952,6 @@ export default function MonthlyPropertyEarningsView({
                                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0" />
                                 <span className={`font-semibold text-slate-700 ${autoWrap ? 'whitespace-normal break-words leading-tight' : 'truncate'}`}>{u.unitName}</span>
                               </div>
-                            </td>
-                          )}
-                          {(visibleColumns.length === 0 || visibleColumns.includes('propertyCode')) && (
-                            <td className="py-2 px-3 bg-slate-50 font-mono text-xs text-slate-500 border-r border-slate-100">
-                              {u.unitCode || '—'}
-                            </td>
-                          )}
-                          {(visibleColumns.length === 0 || visibleColumns.includes('propertyType')) && (
-                            <td className="py-2 px-3 bg-slate-50 text-xs text-slate-500 border-r border-slate-100">
-                              {u.occupancyStatus || '—'}
-                            </td>
-                          )}
-                          {(visibleColumns.length === 0 || visibleColumns.includes('unitsCount')) && (
-                            <td className="py-2 px-3 bg-slate-50 text-center text-xs text-slate-400 border-r border-slate-100">
-                              —
                             </td>
                           )}
 
@@ -997,14 +966,6 @@ export default function MonthlyPropertyEarningsView({
                                   maxWidth: `${columnWidths[m.key] || 115}px`
                                 }}
                                 onClick={() => {
-                                  if (mode === 'rent_report') {
-                                    localStorage.setItem('payments_selected_month', m.key);
-                                    if (row.propertyId) localStorage.setItem('payments_prop_filter', row.propertyId);
-                                    if (u.unitId) localStorage.setItem('payments_target_unit_id', u.unitId);
-                                    window.location.hash = '#/payments';
-                                    window.dispatchEvent(new PopStateEvent('popstate'));
-                                    return;
-                                  }
                                   openDrilldown({
                                     propertyId: row.propertyId,
                                     unitId: u.unitId,
@@ -1062,7 +1023,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['index'] || 48}px`,
                         minWidth: `${columnWidths['index'] || 48}px`,
                         maxWidth: `${columnWidths['index'] || 48}px`
@@ -1075,7 +1036,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['property'] || 260}px`,
                         minWidth: `${columnWidths['property'] || 260}px`,
                         maxWidth: `${columnWidths['property'] || 260}px`
@@ -1097,12 +1058,6 @@ export default function MonthlyPropertyEarningsView({
                         }}
                         onClick={() => {
                           if (colSum > 0) {
-                            if (mode === 'rent_report') {
-                              localStorage.setItem('payments_selected_month', m.key);
-                              window.location.hash = '#/payments';
-                              window.dispatchEvent(new PopStateEvent('popstate'));
-                              return;
-                            }
                             openDrilldown({
                               month: m.key,
                               title: `All Properties Portfolio · ${m.label}`,
@@ -1155,7 +1110,7 @@ export default function MonthlyPropertyEarningsView({
                         {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                           <td
                             style={{
-                              ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                              ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                               width: `${columnWidths['index'] || 48}px`,
                               minWidth: `${columnWidths['index'] || 48}px`,
                               maxWidth: `${columnWidths['index'] || 48}px`
@@ -1168,7 +1123,7 @@ export default function MonthlyPropertyEarningsView({
                         {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                           <td
                             style={{
-                              ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                              ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                               width: `${columnWidths['property'] || 260}px`,
                               minWidth: `${columnWidths['property'] || 260}px`,
                               maxWidth: `${columnWidths['property'] || 260}px`
@@ -1268,7 +1223,7 @@ export default function MonthlyPropertyEarningsView({
                           {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                             <td
                               style={{
-                                ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                                ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                                 width: `${columnWidths['index'] || 48}px`,
                                 minWidth: `${columnWidths['index'] || 48}px`,
                                 maxWidth: `${columnWidths['index'] || 48}px`
@@ -1281,7 +1236,7 @@ export default function MonthlyPropertyEarningsView({
                           {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                             <td
                               style={{
-                                ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                                ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                                 width: `${columnWidths['property'] || 260}px`,
                                 minWidth: `${columnWidths['property'] || 260}px`,
                                 maxWidth: `${columnWidths['property'] || 260}px`
@@ -1362,7 +1317,7 @@ export default function MonthlyPropertyEarningsView({
                       {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                         <td
                           style={{
-                            ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                            ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                             width: `${columnWidths['index'] || 48}px`,
                             minWidth: `${columnWidths['index'] || 48}px`,
                             maxWidth: `${columnWidths['index'] || 48}px`
@@ -1375,7 +1330,7 @@ export default function MonthlyPropertyEarningsView({
                       {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                         <td
                           style={{
-                            ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                            ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                             width: `${columnWidths['property'] || 260}px`,
                             minWidth: `${columnWidths['property'] || 260}px`,
                             maxWidth: `${columnWidths['property'] || 260}px`
@@ -1472,7 +1427,7 @@ export default function MonthlyPropertyEarningsView({
                         {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                           <td
                             style={{
-                              ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                              ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                               width: `${columnWidths['index'] || 48}px`,
                               minWidth: `${columnWidths['index'] || 48}px`,
                               maxWidth: `${columnWidths['index'] || 48}px`
@@ -1485,7 +1440,7 @@ export default function MonthlyPropertyEarningsView({
                         {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                           <td
                             style={{
-                              ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                              ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                               width: `${columnWidths['property'] || 260}px`,
                               minWidth: `${columnWidths['property'] || 260}px`,
                               maxWidth: `${columnWidths['property'] || 260}px`
@@ -1563,7 +1518,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['index'] || 48}px`,
                         minWidth: `${columnWidths['index'] || 48}px`,
                         maxWidth: `${columnWidths['index'] || 48}px`
@@ -1576,7 +1531,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['property'] || 260}px`,
                         minWidth: `${columnWidths['property'] || 260}px`,
                         maxWidth: `${columnWidths['property'] || 260}px`
@@ -1638,7 +1593,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['index'] || 48}px`,
                         minWidth: `${columnWidths['index'] || 48}px`,
                         maxWidth: `${columnWidths['index'] || 48}px`
@@ -1651,7 +1606,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['property'] || 260}px`,
                         minWidth: `${columnWidths['property'] || 260}px`,
                         maxWidth: `${columnWidths['property'] || 260}px`
@@ -1706,7 +1661,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('index')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(0, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(0, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['index'] || 48}px`,
                         minWidth: `${columnWidths['index'] || 48}px`,
                         maxWidth: `${columnWidths['index'] || 48}px`
@@ -1719,7 +1674,7 @@ export default function MonthlyPropertyEarningsView({
                   {(visibleColumns.length === 0 || visibleColumns.includes('property')) && (
                     <td
                       style={{
-                        ...getFrozenColumnStyle(1, frozenColumnCount, visibleColumns, columnWidths, false),
+                        ...getFrozenColumnStyle(1, effectiveFrozenCount, visibleColumns, columnWidths, false),
                         width: `${columnWidths['property'] || 260}px`,
                         minWidth: `${columnWidths['property'] || 260}px`,
                         maxWidth: `${columnWidths['property'] || 260}px`

@@ -9,8 +9,11 @@ import { getHeaderDragProps, useResizableColumns, ResizeHandle, useFrozenColumns
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows, extractUniqueValues } from '../utils/tableUtils';
 import {
   FileText, Plus, Search, Calendar, TrendingUp, Edit2, LogOut, History,
-  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown, AlertCircle, Receipt, Check, Eye
+  X, Download, RotateCcw, ChevronLeft, ChevronRight, ArrowUpDown, AlertCircle, Receipt, Check, Eye, Sparkles,
+  Trash2, ExternalLink, RefreshCw, Split, CheckCircle2
 } from 'lucide-react';
+import PaymentEditModal from '../components/PaymentEditModal';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
 
 const CONTRACTS_COLUMNS_DEF = [
   { id: 'property', label: 'Property' },
@@ -21,6 +24,7 @@ const CONTRACTS_COLUMNS_DEF = [
   { id: 'monthlyRent', label: 'Rent Per Month' },
   { id: 'annualRent', label: 'Rent Per Annum' },
   { id: 'depositHeld', label: 'Deposit' },
+  { id: 'loanAmount', label: 'Loan Amount' },
   { id: 'startDate', label: 'Start Date' },
   { id: 'endDate', label: 'End Date' },
   { id: 'status', label: 'Contract Status' },
@@ -46,7 +50,7 @@ const CONTRACTS_COLUMNS_DEF = [
 
 const DEFAULT_CONTRACTS_COLS = [
   'property', 'subUnit', 'tenant', 'contractNo', 'contractType', 'monthlyRent', 'annualRent',
-  'depositHeld', 'startDate', 'endDate', 'status', 'notes', 'actions'
+  'depositHeld', 'loanAmount', 'startDate', 'endDate', 'status', 'notes', 'actions'
 ];
 
 const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
@@ -58,6 +62,7 @@ const DEFAULT_CONTRACTS_COLUMN_WIDTHS = {
   monthlyRent: 120,
   annualRent: 125,
   depositHeld: 110,
+  loanAmount: 110,
   startDate: 110,
   endDate: 110,
   status: 110,
@@ -104,32 +109,118 @@ const findContractConflict = () => null;
 
 const CONTRACT_RECEIPTS_COLUMNS_DEF = [
   { id: 'receiptNumber', label: 'Receipt #', defaultVisible: true },
-  { id: 'receiptDate', label: 'Date', defaultVisible: true },
+  { id: 'receiptDate', label: 'Receipt Date', defaultVisible: true },
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
-  { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
+  { id: 'contractNo', label: 'Contract #', defaultVisible: false },
+  { id: 'contractType', label: 'Contract Type', defaultVisible: false },
+  { id: 'property', label: 'Property', defaultVisible: false },
+  { id: 'unit', label: 'Sub-Property / Partition', defaultVisible: false },
+  { id: 'tenant', label: 'Tenant', defaultVisible: false },
   { id: 'status', label: 'Status', defaultVisible: true },
-  { id: 'comments', label: 'Comments', defaultVisible: true },
-  { id: 'totalAmount', label: 'Amount Received (₹)', defaultVisible: true },
-  { id: 'adjustmentAmount', label: 'Adjustment Amount (₹)', defaultVisible: false },
+  { id: 'monthlyRentExpected', label: 'Monthly Rent (₹)', defaultVisible: true },
+  { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
+  { id: 'rentAmount', label: 'Rent Amount Paid (₹)', defaultVisible: false },
+  { id: 'depositAmount', label: 'Deposit Amount (₹)', defaultVisible: false },
+  { id: 'totalAmount', label: 'Total Amount Paid (₹)', defaultVisible: true },
+  { id: 'outstanding', label: 'Outstanding Amount (₹)', defaultVisible: true },
+  { id: 'adjustmentAmount', label: 'Adjustment (+/-) (₹)', defaultVisible: true },
+  { id: 'adjustedOutstanding', label: 'Net Adjusted Outstanding (₹)', defaultVisible: true },
   { id: 'adjustmentDescription', label: 'Adjustment Reason', defaultVisible: false },
+  { id: 'paidUpTo', label: 'Paid Up To', defaultVisible: true },
+  { id: 'loanAmount', label: 'Loan Amount (₹)', defaultVisible: false },
+  { id: 'comments', label: 'Notes / Comments', defaultVisible: true },
+  { id: 'isReversed', label: 'Reversal Status', defaultVisible: false },
+  { id: 'reversalReason', label: 'Reversal Reason', defaultVisible: false },
+  { id: 'reversalDate', label: 'Reversal Date', defaultVisible: false },
   { id: 'createdAt', label: 'Created Date', defaultVisible: false },
   { id: 'updatedAt', label: 'Modified Date', defaultVisible: false },
   { id: 'actions', label: 'Action', defaultVisible: true },
 ];
 
 const DEFAULT_CONTRACT_RECEIPTS_COLS = [
-  'receiptNumber', 'receiptDate', 'accountingMonth', 'monthsCovered', 'status', 'comments', 'totalAmount', 'actions'
+  'receiptNumber',
+  'receiptDate',
+  'accountingMonth',
+  'monthsCovered',
+  'status',
+  'monthlyRentExpected',
+  'totalAmount',
+  'outstanding',
+  'adjustmentAmount',
+  'adjustedOutstanding',
+  'paidUpTo',
+  'comments',
+  'actions'
 ];
 
 const DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS = {
   receiptNumber: 130,
   receiptDate: 110,
   accountingMonth: 140,
-  monthsCovered: 160,
+  contractNo: 120,
+  contractType: 120,
+  property: 150,
+  unit: 140,
+  tenant: 150,
   status: 95,
-  comments: 180,
+  monthlyRentExpected: 130,
+  monthsCovered: 160,
+  rentAmount: 130,
+  depositAmount: 120,
   totalAmount: 140,
-  actions: 90
+  outstanding: 140,
+  adjustmentAmount: 130,
+  adjustedOutstanding: 150,
+  adjustmentDescription: 180,
+  paidUpTo: 110,
+  loanAmount: 120,
+  comments: 180,
+  isReversed: 120,
+  reversalReason: 150,
+  reversalDate: 120,
+  createdAt: 120,
+  updatedAt: 120,
+  actions: 175
+};
+
+const getContractReceiptFieldVal = (r, colId, c = null) => {
+  if (!r) return '';
+  switch (colId) {
+    case 'index': return '';
+    case 'receiptNumber': return r.receiptNumber || '';
+    case 'receiptDate': return r.receiptDate ? formatDate(r.receiptDate) : '';
+    case 'accountingMonth': {
+      const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+      return m ? formatMonthYear(m) : '';
+    }
+    case 'contractNo': return r.contractNo || c?.contractNo || '';
+    case 'contractType': return r.contractType || c?.contractType || 'Rent';
+    case 'property': return r.unitId?.propertyId?.name || c?.unitId?.propertyId?.name || '';
+    case 'unit': return r.unitId?.subUnitPartition || r.unitId?.unitName || c?.unitId?.subUnitPartition || c?.unitId?.unitName || '';
+    case 'tenant': return r.tenantId?.name || c?.tenantId?.name || '';
+    case 'status': return r.status || 'Rented';
+    case 'monthlyRentExpected': return Number(r.monthlyRentExpected) || 0;
+    case 'monthsCovered': {
+      const rawM = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+      return rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '';
+    }
+    case 'rentAmount': return Number(r.rentAmount !== undefined ? r.rentAmount : r.totalAmount) || 0;
+    case 'depositAmount': return Number(r.depositAmount) || 0;
+    case 'totalAmount': return Number(r.totalAmount) || 0;
+    case 'outstanding': return Number(r.outstanding) || 0;
+    case 'adjustmentAmount': return Number(r.adjustmentAmount) || 0;
+    case 'adjustedOutstanding': return Number(r.adjustedOutstanding) || 0;
+    case 'adjustmentDescription': return r.adjustmentDescription || '';
+    case 'paidUpTo': return r.paidUpTo || '—';
+    case 'loanAmount': return Number(r.loanAmount) || 0;
+    case 'comments': return r.comments || '';
+    case 'isReversed': return r.isReversed ? 'Reversed' : 'Active';
+    case 'reversalReason': return r.reversalReason || '';
+    case 'reversalDate': return r.reversalDate ? formatDate(r.reversalDate) : '';
+    case 'createdAt': return r.createdAt ? formatDate(r.createdAt) : '';
+    case 'updatedAt': return r.updatedAt ? formatDate(r.updatedAt) : '';
+    default: return r[colId] != null ? String(r[colId]) : '';
+  }
 };
 
 const changeRentType = (form, setForm, nextRentType) => {
@@ -175,6 +266,11 @@ export default function ContractsView() {
           const tIdx = savedColumns.indexOf('contractNo');
           if (tIdx !== -1) savedColumns.splice(tIdx + 1, 0, 'contractType');
           else savedColumns.push('contractType');
+        }
+        if (!savedColumns.includes('loanAmount')) {
+          const dIdx = savedColumns.indexOf('depositHeld');
+          if (dIdx !== -1) savedColumns.splice(dIdx + 1, 0, 'loanAmount');
+          else savedColumns.push('loanAmount');
         }
         return savedColumns;
       }
@@ -239,12 +335,22 @@ export default function ContractsView() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedContract, setSelectedContract] = useState(null);
 
+  // Month Paid For & Amounts editor for receipts in Edit Lease Contract
+  const [editingAllocReceipt, setEditingAllocReceipt] = useState(null);
+  const [allocRows, setAllocRows] = useState([]);
+  const [allocAccountingMonth, setAllocAccountingMonth] = useState('');
+  const [allocSaving, setAllocSaving] = useState(false);
+  const [allocError, setAllocError] = useState('');
+  const [editingFullPaymentReceiptId, setEditingFullPaymentReceiptId] = useState(null);
+
   // Browser Back button navigation: dismiss open modals back to table
   useModalBackHandler(showCreateModal, () => setShowCreateModal(false));
   useModalBackHandler(showEditModal, () => setShowEditModal(false));
   useModalBackHandler(showReviseModal, () => setShowReviseModal(false));
   useModalBackHandler(showVacateModal, () => setShowVacateModal(false));
   useModalBackHandler(showHistoryModal, () => setShowHistoryModal(false));
+  useModalBackHandler(Boolean(editingAllocReceipt), () => setEditingAllocReceipt(null));
+  useModalBackHandler(Boolean(editingFullPaymentReceiptId), () => setEditingFullPaymentReceiptId(null));
 
   // Forms
   const [createForm, setCreateForm] = useState({
@@ -259,6 +365,7 @@ export default function ContractsView() {
     rentType: 'Monthly Fixed',
     rentAmount: '',
     depositHeld: 0,
+    loanAmount: 0,
     terms: '',
     notes: '',
   });
@@ -275,6 +382,7 @@ export default function ContractsView() {
     rentType: 'Monthly Fixed',
     rentAmount: '',
     depositHeld: 0,
+    loanAmount: 0,
     terms: '',
     notes: '',
   });
@@ -294,6 +402,7 @@ export default function ContractsView() {
 
   // Rent Receipts for selected contract in Full-Screen Edit Modal
   const [contractReceipts, setContractReceipts] = useState([]);
+  const [outstandingSummary, setOutstandingSummary] = useState([]);
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [receiptSearchQuery, setReceiptSearchQuery] = useState('');
   const [receiptSortConfig, setReceiptSortConfig] = useState({ key: 'receiptDate', direction: 'desc' });
@@ -305,8 +414,18 @@ export default function ContractsView() {
     if (!saved) return DEFAULT_CONTRACT_RECEIPTS_COLS;
     try {
       const allowed = CONTRACT_RECEIPTS_COLUMNS_DEF.map(c => c.id);
-      const parsed = JSON.parse(saved).filter(c => allowed.includes(c));
-      return parsed.length > 0 ? parsed : DEFAULT_CONTRACT_RECEIPTS_COLS;
+      let parsed = JSON.parse(saved).filter(c => allowed.includes(c));
+      if (parsed.length > 0) {
+        ['outstanding', 'adjustedOutstanding', 'monthlyRentExpected', 'paidUpTo'].forEach(col => {
+          if (!parsed.includes(col)) {
+            const tIdx = parsed.indexOf('totalAmount');
+            if (tIdx !== -1) parsed.splice(tIdx + 1, 0, col);
+            else parsed.push(col);
+          }
+        });
+        return parsed;
+      }
+      return DEFAULT_CONTRACT_RECEIPTS_COLS;
     } catch {
       return DEFAULT_CONTRACT_RECEIPTS_COLS;
     }
@@ -314,36 +433,141 @@ export default function ContractsView() {
 
   const {
     columnWidths: receiptColumnWidths,
-    handleResizeStart: handleReceiptResizeStart
+    handleResizeStart: handleReceiptResizeStart,
+    resetColumnWidths: resetReceiptColumnWidths
   } = useResizableColumns('contract_receipts', DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS);
 
-  const [viewingReceipt, setViewingReceipt] = useState(null);
-  useModalBackHandler(Boolean(viewingReceipt), () => setViewingReceipt(null));
-  const [receiptEditForm, setReceiptEditForm] = useState({
-    receiptDate: '',
-    totalAmount: '',
-    status: 'Rented',
-    comments: ''
-  });
   const [receiptSaving, setReceiptSaving] = useState(false);
+
+  const navigateToEditPayment = (r) => {
+    // Capture drilldown context to return to this contract's Edit Lease Contract modal on update/back
+    pushDrilldown('contracts', {
+      label: `Rent Received (${selectedContract?.contractNo || r.contractNo || 'Contract'})`,
+      returnState: {
+        contractId: selectedContract?._id,
+        contractNo: selectedContract?.contractNo || r.contractNo,
+        modal: 'editContract'
+      },
+      targetTab: 'payments'
+    });
+
+    let targetMonth = r.accountingMonth || '';
+    if (r.allocations && r.allocations.length > 0) {
+      const sorted = [...r.allocations].map(a => a.rentMonthYear).filter(Boolean).sort();
+      if (sorted.length > 0) targetMonth = sorted[sorted.length - 1];
+    } else if (r.monthsCovered || r.monthPaidFor) {
+      const raw = r.monthsCovered || r.monthPaidFor;
+      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const valid = parts.filter(p => /^\d{4}-\d{2}$/.test(p)).sort();
+      if (valid.length > 0) targetMonth = valid[valid.length - 1];
+    }
+    if (!targetMonth && r.receiptDate) {
+      targetMonth = new Date(r.receiptDate).toISOString().slice(0, 7);
+    }
+
+    if (targetMonth) {
+      localStorage.setItem('payments_selected_month', targetMonth);
+    }
+    localStorage.setItem('payments_edit_receipt_id', String(r._id));
+    localStorage.removeItem('payments_target_unit_id');
+    const tId = r.tenantId?._id || r.tenantId || selectedContract?.tenantId?._id || selectedContract?.tenantId;
+    if (tId) {
+      localStorage.setItem('payments_target_tenant_id', String(tId));
+      localStorage.setItem('payments_tenant_filter', String(tId));
+    }
+    const pId = r.propertyId?._id || r.propertyId || r.unitId?.propertyId?._id || r.unitId?.propertyId || selectedContract?.unitId?.propertyId?._id || selectedContract?.unitId?.propertyId || selectedContract?.propertyId?._id || selectedContract?.propertyId;
+    if (pId) {
+      localStorage.setItem('payments_prop_filter', String(pId));
+    }
+    const contractNoStr = r.contractNo || selectedContract?.contractNo;
+    if (contractNoStr) {
+      localStorage.setItem('payments_target_contract_no', String(contractNoStr));
+    }
+    const expRent = Number(r.monthlyRentExpected ?? (selectedContract?.currentAgreement?.monthlyRate ?? selectedContract?.currentMonthlyRate ?? 0));
+    if (expRent > 0) {
+      localStorage.setItem('payments_target_monthly_rent', String(expRent));
+    }
+    navigateToTab('payments');
+  };
 
   const handleReceiptHeaderSort = (colId) => {
     if (colId === 'actions') return;
     setReceiptSortConfig(prev => cycleThreeStateSort(prev, colId));
   };
 
+  // Enriched contract receipts with live outstanding, adjusted outstanding, and contract attributes
+  const enrichedContractReceipts = useMemo(() => {
+    if (!selectedContract) return contractReceipts;
+    const c = selectedContract;
+    const cNo = (c.contractNo || '').trim().toLowerCase();
+    const uId = String(c.unitId?._id || c.unitId || '');
+    const tId = String(c.tenantId?._id || c.tenantId || '');
+
+    const summary = outstandingSummary.find(s => {
+      if (cNo && s.contractNo) return s.contractNo.toLowerCase() === cNo;
+      const sUId = String(s.unit?._id || s.unit || '');
+      const sTId = String(s.tenant?._id || s.tenant || '');
+      return sUId === uId && sTId === tId;
+    });
+
+    const cMonthlyRate = Number(c.currentAgreement?.monthlyRate ?? c.currentMonthlyRate ?? summary?.monthlyRentExpected ?? c.unitId?.monthlyRentExpected ?? 0) || 0;
+    const cTotalOut = Number(summary?.totalOutstanding || 0);
+
+    return contractReceipts.map(r => {
+      const monthlyRentExpected = Number(r.monthlyRentExpected ?? cMonthlyRate);
+      const outstanding = Number(r.outstanding !== undefined ? r.outstanding : cTotalOut);
+      const adjustmentAmount = Number(r.adjustmentAmount || 0);
+      const adjustmentDescription = r.adjustmentDescription || '';
+      const adjustedOutstanding = Number(r.adjustedOutstanding !== undefined ? r.adjustedOutstanding : Math.max(0, outstanding + adjustmentAmount));
+
+      let paidUpTo = r.paidUpTo || '';
+      if (!paidUpTo && summary?.paidTillMonth && summary.paidTillMonth !== 'None' && summary.paidTillMonth !== 'Vacant') {
+        paidUpTo = formatMonthYear(summary.paidTillMonth);
+      }
+      if (!paidUpTo && (r.accountingMonth || r.monthPaidFor)) {
+        const rawM = r.accountingMonth || r.monthPaidFor;
+        const parts = rawM.split(',').map(s => s.trim()).filter(Boolean);
+        const lastM = parts.sort()[parts.length - 1];
+        if (lastM && /^\d{4}-\d{2}$/.test(lastM)) {
+          paidUpTo = formatMonthYear(lastM);
+        }
+      }
+
+      return {
+        ...r,
+        contractNo: r.contractNo || c.contractNo || '',
+        contractType: c.contractType || r.contractType || summary?.contractType || 'Rent',
+        monthlyRentExpected,
+        outstanding,
+        adjustmentAmount,
+        adjustmentDescription,
+        adjustedOutstanding,
+        paidUpTo: paidUpTo || '—',
+        loanAmount: Number(r.loanAmount !== undefined ? r.loanAmount : (c.loanAmount || 0))
+      };
+    });
+  }, [contractReceipts, selectedContract, outstandingSummary]);
+
   const receiptFilterSuggestions = useMemo(() => {
     return {
-      receiptNumber: extractUniqueValues(contractReceipts, r => r.receiptNumber),
-      receiptDate: extractUniqueValues(contractReceipts, r => r.receiptDate ? formatDate(r.receiptDate) : ''),
-      monthsCovered: extractUniqueValues(contractReceipts, r => r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || ''),
+      receiptNumber: extractUniqueValues(enrichedContractReceipts, r => r.receiptNumber),
+      receiptDate: extractUniqueValues(enrichedContractReceipts, r => r.receiptDate ? formatDate(r.receiptDate) : ''),
+      accountingMonth: extractUniqueValues(enrichedContractReceipts, r => {
+        const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : '');
+        return m ? formatMonthYear(m) : '';
+      }),
+      contractType: ['Rent', 'Business'],
+      monthsCovered: extractUniqueValues(enrichedContractReceipts, r => r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || ''),
       status: ['Rented', 'Vacant'],
-      comments: extractUniqueValues(contractReceipts, r => r.comments)
+      paidUpTo: extractUniqueValues(enrichedContractReceipts, r => r.paidUpTo),
+      adjustmentDescription: extractUniqueValues(enrichedContractReceipts, r => r.adjustmentDescription),
+      isReversed: ['Active', 'Reversed'],
+      comments: extractUniqueValues(enrichedContractReceipts, r => r.comments)
     };
-  }, [contractReceipts]);
+  }, [enrichedContractReceipts]);
 
   const processedContractReceipts = useMemo(() => {
-    let rows = [...contractReceipts];
+    let rows = [...enrichedContractReceipts];
 
     // 1. Search Query
     if (receiptSearchQuery.trim()) {
@@ -353,8 +577,12 @@ export default function ContractsView() {
         ((r.status || 'Rented').toLowerCase().includes(q)) ||
         (r.comments && r.comments.toLowerCase().includes(q)) ||
         (r.monthsCovered && r.monthsCovered.toLowerCase().includes(q)) ||
+        (r.adjustmentDescription && r.adjustmentDescription.toLowerCase().includes(q)) ||
+        (r.paidUpTo && r.paidUpTo.toLowerCase().includes(q)) ||
         (r.allocations && r.allocations.some(a => a.rentMonthYear && a.rentMonthYear.toLowerCase().includes(q))) ||
-        String(r.totalAmount || '').includes(q)
+        String(r.totalAmount || '').includes(q) ||
+        String(r.outstanding || '').includes(q) ||
+        String(r.adjustedOutstanding || '').includes(q)
       );
     }
 
@@ -362,13 +590,7 @@ export default function ContractsView() {
     if (receiptActiveFilters.length > 0) {
       rows = rows.filter(r => {
         return receiptActiveFilters.every(flt => {
-          let cellVal = '';
-          if (flt.column === 'receiptNumber') cellVal = r.receiptNumber;
-          else if (flt.column === 'receiptDate') cellVal = r.receiptDate ? formatDate(r.receiptDate) : '';
-          else if (flt.column === 'monthsCovered') cellVal = r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '';
-          else if (flt.column === 'status') cellVal = r.status || 'Rented';
-          else if (flt.column === 'comments') cellVal = r.comments;
-          else if (flt.column === 'totalAmount') cellVal = r.totalAmount;
+          const cellVal = getContractReceiptFieldVal(r, flt.column, selectedContract);
           return evaluateFilterRule(cellVal, flt.operator, flt.value);
         });
       });
@@ -377,15 +599,24 @@ export default function ContractsView() {
     // 3. Sorting
     if (receiptSortConfig.key) {
       rows = sortDataRows(rows, receiptSortConfig, (item, key) => {
-        if (key === 'totalAmount') return Number(item.totalAmount) || 0;
-        if (key === 'receiptDate') return item.receiptDate ? new Date(item.receiptDate).getTime() : 0;
-        if (key === 'monthsCovered') return item.monthsCovered || (item.allocations && item.allocations.map(a => a.rentMonthYear).join(', ')) || '';
-        return item[key] || '';
+        if (['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'monthlyRentExpected', 'outstanding', 'adjustedOutstanding', 'loanAmount'].includes(key)) {
+          return Number(getContractReceiptFieldVal(item, key, selectedContract)) || 0;
+        }
+        if (['receiptDate', 'createdAt', 'updatedAt', 'reversalDate'].includes(key)) {
+          return item[key] ? new Date(item[key]).getTime() : 0;
+        }
+        if (key === 'accountingMonth') {
+          return item.accountingMonth || (item.receiptDate ? new Date(item.receiptDate).toISOString().slice(0, 7) : '') || '';
+        }
+        if (key === 'monthsCovered') {
+          return item.monthsCovered || (item.allocations && item.allocations.map(a => a.rentMonthYear).join(', ')) || '';
+        }
+        return getContractReceiptFieldVal(item, key, selectedContract);
       });
     }
 
     return rows;
-  }, [contractReceipts, receiptSearchQuery, receiptActiveFilters, receiptSortConfig]);
+  }, [enrichedContractReceipts, receiptSearchQuery, receiptActiveFilters, receiptSortConfig, selectedContract]);
 
   const paginatedContractReceipts = useMemo(() => {
     if (receiptRowsPerPage === 'All') return processedContractReceipts;
@@ -395,16 +626,17 @@ export default function ContractsView() {
 
   const exportContractReceiptsToExcel = () => {
     try {
-      const dataToExport = processedContractReceipts.map((r, i) => ({
-        '#': i + 1,
-        'Receipt #': r.receiptNumber || '',
-        'Date': r.receiptDate ? formatDate(r.receiptDate) : '',
-        'Contract No': r.contractNo || selectedContract?.contractNo || '',
-        'Month(s) Covered': r.monthsCovered || (r.allocations && r.allocations.map(a => a.rentMonthYear).join(', ')) || '',
-        'Status': r.status || 'Rented',
-        'Comments': r.comments || '',
-        'Amount Received (₹)': Number(r.totalAmount) || 0
-      }));
+      const exportCols = CONTRACT_RECEIPTS_COLUMNS_DEF.filter(c => c.id !== 'actions' && (receiptVisibleColumns.includes(c.id) || receiptVisibleColumns.length === 0));
+      const dataToExport = processedContractReceipts.map((r, i) => {
+        const row = { '#': i + 1 };
+        exportCols.forEach(col => {
+          const val = getContractReceiptFieldVal(r, col.id, selectedContract);
+          row[col.label] = ['totalAmount', 'rentAmount', 'depositAmount', 'adjustmentAmount', 'monthlyRentExpected', 'outstanding', 'adjustedOutstanding', 'loanAmount'].includes(col.id)
+            ? (Number(val) || 0)
+            : val;
+        });
+        return row;
+      });
 
       const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
@@ -414,6 +646,56 @@ export default function ContractsView() {
     } catch (err) {
       console.error('Failed to export receipts to Excel:', err);
       alert('Failed to export Excel.');
+    }
+  };
+
+  const fetchContractReceipts = async (contract) => {
+    const c = contract || selectedContract;
+    if (!c) return;
+    setReceiptsLoading(true);
+    try {
+      const tId = c.tenantId?._id || c.tenantId || '';
+      const uId = c.unitId?._id || c.unitId || '';
+      const cNo = c.contractNo || '';
+      const [res, oRes] = await Promise.all([
+        API.get(`/payments?tenantId=${tId}&unitId=${uId}&contractNo=${encodeURIComponent(cNo)}`),
+        API.get('/payments/outstanding-summary').catch(() => ({ data: { success: false } }))
+      ]);
+      if (oRes?.data?.success && oRes.data.data) {
+        setOutstandingSummary(oRes.data.data);
+      }
+      const allReceipts = res.data?.data || [];
+
+      const isContractMatch = (cNoStr, rNoStr) => {
+        if (!cNoStr || !rNoStr) return false;
+        const c1 = cNoStr.trim().toLowerCase();
+        const r1 = rNoStr.trim().toLowerCase();
+        if (c1 === r1) return true;
+        if ((c1 === 'de-2025' || c1 === 'delhiery-2025') && (r1 === 'de-2025' || r1 === 'delhiery-2025')) return true;
+        return false;
+      };
+
+      const matching = allReceipts.filter(r => {
+        if (cNo && r.contractNo) {
+          return isContractMatch(cNo, r.contractNo);
+        }
+        if (cNo && r.allocations && r.allocations.some(a => isContractMatch(cNo, a.contractNo))) {
+          return true;
+        }
+        if (c.startDate && r.receiptDate) {
+          const rDate = new Date(r.receiptDate);
+          if (new Date(c.startDate) > rDate) return false;
+          if (c.endDate && new Date(c.endDate) < rDate) return false;
+        }
+        return true;
+      });
+
+      setContractReceipts(matching);
+    } catch (err) {
+      console.error('Failed to load contract receipts:', err);
+      setContractReceipts([]);
+    } finally {
+      setReceiptsLoading(false);
     }
   };
 
@@ -437,105 +719,226 @@ export default function ContractsView() {
           : agreement.monthlyRate ?? c.currentMonthlyRate ?? ''
       ),
       depositHeld: c.depositHeld || 0,
+      loanAmount: c.loanAmount || 0,
       terms: agreement.terms || '',
       notes: c.notes || '',
     });
     setReceiptSearchQuery('');
     setShowEditModal(true);
+    fetchContractReceipts(c);
+  };
 
-    // Fetch rent receipts for this contract
-    setReceiptsLoading(true);
-    try {
-      const tId = c.tenantId?._id || c.tenantId || '';
-      const uId = c.unitId?._id || c.unitId || '';
-      const cNo = c.contractNo || '';
-      const res = await API.get(`/payments?tenantId=${tId}&unitId=${uId}&contractNo=${encodeURIComponent(cNo)}`);
-      const allReceipts = res.data?.data || [];
+  // Get all contract calendar months between startDate and endDate
+  const contractTermMonths = useMemo(() => {
+    if (!selectedContract) return [];
+    const startStr = selectedContract.startDate ? String(selectedContract.startDate).slice(0, 7) : '';
+    const endStr = selectedContract.endDate ? String(selectedContract.endDate).slice(0, 7) : '';
+    if (!startStr) return [];
+    
+    const months = [];
+    let [curYear, curMonth] = startStr.split('-').map(Number);
+    const targetEnd = endStr || `${curYear + 1}-${String(curMonth).padStart(2, '0')}`;
+    const [endYear, endMonth] = targetEnd.split('-').map(Number);
 
-      const matching = allReceipts.filter(r => {
-        if (cNo && r.contractNo) {
-          return r.contractNo.toLowerCase() === cNo.toLowerCase();
-        }
-        if (c.startDate && r.receiptDate) {
-          const rDate = new Date(r.receiptDate);
-          if (new Date(c.startDate) > rDate) return false;
-          if (c.endDate && new Date(c.endDate) < rDate) return false;
-        }
-        return true;
-      });
-
-      setContractReceipts(matching);
-    } catch (err) {
-      console.error('Failed to load contract receipts:', err);
-      setContractReceipts([]);
-    } finally {
-      setReceiptsLoading(false);
+    let safety = 0;
+    while (safety < 36) {
+      safety++;
+      const ym = `${curYear}-${String(curMonth).padStart(2, '0')}`;
+      months.push(ym);
+      if (curYear === endYear && curMonth === endMonth) break;
+      curMonth++;
+      if (curMonth > 12) {
+        curMonth = 1;
+        curYear++;
+      }
     }
-  };
+    return months;
+  }, [selectedContract]);
 
-  const openViewReceiptModal = (r) => {
-    setViewingReceipt(r);
-    setReceiptEditForm({
-      receiptDate: r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      totalAmount: String(r.totalAmount || 0),
-      status: r.status || 'Rented',
-      comments: r.comments || ''
-    });
-  };
-
-  const handleSaveReceiptDetails = async (e) => {
-    e.preventDefault();
-    if (!viewingReceipt) return;
+  const openEditAllocationsModal = async (r) => {
+    setAllocError('');
+    setAllocSaving(false);
+    
+    let freshReceipt = r;
     try {
-      setReceiptSaving(true);
-      const payload = {
-        receiptDate: receiptEditForm.receiptDate,
-        totalAmount: Number(receiptEditForm.totalAmount),
-        status: receiptEditForm.status || 'Rented',
-        comments: receiptEditForm.comments,
-        allocations: (viewingReceipt.allocations || []).map(a => ({
-          rentMonthYear: a.rentMonthYear,
-          allocatedAmount: a.allocatedAmount,
-          notes: a.notes || ''
-        }))
-      };
-      const res = await API.put(`/payments/${viewingReceipt._id}`, payload);
-      if (res.data?.success) {
-        setViewingReceipt(null);
-        if (selectedContract) {
-          const tId = selectedContract.tenantId?._id || selectedContract.tenantId || '';
-          const uId = selectedContract.unitId?._id || selectedContract.unitId || '';
-          const cNo = selectedContract.contractNo || '';
-          const refreshRes = await API.get(`/payments?tenantId=${tId}&unitId=${uId}&contractNo=${encodeURIComponent(cNo)}`);
-          const allR = refreshRes.data?.data || [];
-          setContractReceipts(allR.filter(r => {
-            if (cNo && r.contractNo) return r.contractNo.toLowerCase() === cNo.toLowerCase();
-            return true;
-          }));
-        }
-        fetchData();
+      const res = await API.get(`/payments/${r._id}`);
+      if (res.data?.success && res.data.data) {
+        freshReceipt = res.data.data;
       }
     } catch (err) {
-      console.error('Failed to update receipt:', err);
-      alert(err.response?.data?.message || 'Failed to update receipt');
+      console.warn('Could not fetch fresh single receipt, using row data:', err);
+    }
+
+    const acctMonth = freshReceipt.accountingMonth || (freshReceipt.receiptDate ? new Date(freshReceipt.receiptDate).toISOString().slice(0, 7) : '');
+    setAllocAccountingMonth(acctMonth);
+
+    let rows = [];
+    if (freshReceipt.allocations && Array.isArray(freshReceipt.allocations) && freshReceipt.allocations.length > 0) {
+      rows = freshReceipt.allocations.map(a => ({
+        id: a._id || Math.random().toString(36).slice(2, 9),
+        rentMonthYear: a.rentMonthYear,
+        allocatedAmount: String(a.allocatedAmount !== undefined ? a.allocatedAmount : 0)
+      }));
+    } else if (freshReceipt.monthsCovered || freshReceipt.monthPaidFor) {
+      const raw = freshReceipt.monthsCovered || freshReceipt.monthPaidFor;
+      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const totalRent = freshReceipt.rentAmount !== undefined ? freshReceipt.rentAmount : (freshReceipt.totalAmount || 0);
+      const splitAmt = parts.length > 0 ? Math.round(totalRent / parts.length) : totalRent;
+      rows = parts.map((m, idx) => ({
+        id: Math.random().toString(36).slice(2, 9),
+        rentMonthYear: m,
+        allocatedAmount: String(idx === parts.length - 1 ? (totalRent - splitAmt * (parts.length - 1)) : splitAmt)
+      }));
+    }
+
+    if (rows.length === 0) {
+      const defaultMonth = acctMonth || new Date().toISOString().slice(0, 7);
+      const totalRent = freshReceipt.rentAmount !== undefined ? freshReceipt.rentAmount : (freshReceipt.totalAmount || 0);
+      rows = [{
+        id: Math.random().toString(36).slice(2, 9),
+        rentMonthYear: defaultMonth,
+        allocatedAmount: String(totalRent)
+      }];
+    }
+
+    setAllocRows(rows);
+    setEditingAllocReceipt(freshReceipt);
+  };
+
+  const handleAddAllocMonth = (monthToSet) => {
+    const existingMonths = new Set(allocRows.map(r => r.rentMonthYear));
+    let nextMonth = monthToSet || '';
+    if (!nextMonth) {
+      const availableContractMonth = contractTermMonths.find(m => !existingMonths.has(m));
+      if (availableContractMonth) {
+        nextMonth = availableContractMonth;
+      } else if (allocRows.length > 0) {
+        const lastM = allocRows[allocRows.length - 1].rentMonthYear;
+        if (/^\d{4}-\d{2}$/.test(lastM)) {
+          let [y, m] = lastM.split('-').map(Number);
+          m++;
+          if (m > 12) { m = 1; y++; }
+          nextMonth = `${y}-${String(m).padStart(2, '0')}`;
+        }
+      } else {
+        nextMonth = new Date().toISOString().slice(0, 7);
+      }
+    }
+
+    const cMonthlyRate = Number(selectedContract?.currentAgreement?.monthlyRate ?? selectedContract?.currentMonthlyRate ?? selectedContract?.unitId?.monthlyRentExpected ?? 22000);
+    setAllocRows(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).slice(2, 9),
+        rentMonthYear: nextMonth,
+        allocatedAmount: String(cMonthlyRate)
+      }
+    ]);
+  };
+
+  const handleRemoveAllocMonth = (id) => {
+    if (allocRows.length <= 1) {
+      setAllocError('At least one month paid for must be specified.');
+      return;
+    }
+    setAllocRows(prev => prev.filter(r => r.id !== id));
+  };
+
+  const handleUpdateAllocMonth = (id, newMonth) => {
+    setAllocRows(prev => prev.map(r => r.id === id ? { ...r, rentMonthYear: newMonth } : r));
+  };
+
+  const handleUpdateAllocAmount = (id, newAmt) => {
+    setAllocRows(prev => prev.map(r => r.id === id ? { ...r, allocatedAmount: newAmt } : r));
+  };
+
+  const handleSplitEvenly = () => {
+    if (allocRows.length === 0) return;
+    const totalRent = Number(editingAllocReceipt?.rentAmount !== undefined ? editingAllocReceipt.rentAmount : (editingAllocReceipt?.totalAmount || 0));
+    const splitAmt = Math.round(totalRent / allocRows.length);
+    setAllocRows(prev => prev.map((r, idx) => ({
+      ...r,
+      allocatedAmount: String(idx === prev.length - 1 ? (totalRent - splitAmt * (prev.length - 1)) : splitAmt)
+    })));
+  };
+
+  const handleFillContractRate = () => {
+    const cMonthlyRate = Number(selectedContract?.currentAgreement?.monthlyRate ?? selectedContract?.currentMonthlyRate ?? selectedContract?.unitId?.monthlyRentExpected ?? 22000);
+    setAllocRows(prev => prev.map(r => ({
+      ...r,
+      allocatedAmount: String(cMonthlyRate)
+    })));
+  };
+
+  const handleSaveAllocations = async () => {
+    if (allocRows.length === 0) {
+      setAllocError('Please add at least one month paid for.');
+      return;
+    }
+    for (const row of allocRows) {
+      if (!row.rentMonthYear || !/^\d{4}-\d{2}$/.test(row.rentMonthYear)) {
+        setAllocError('All months must be in valid YYYY-MM format.');
+        return;
+      }
+      if (Number(row.allocatedAmount) < 0 || isNaN(Number(row.allocatedAmount))) {
+        setAllocError('Amount for each month must be a valid positive number.');
+        return;
+      }
+    }
+
+    setAllocSaving(true);
+    setAllocError('');
+
+    try {
+      const payloadAllocations = allocRows.map(row => ({
+        rentMonthYear: row.rentMonthYear,
+        allocatedAmount: Number(row.allocatedAmount) || 0,
+        contractNo: selectedContract?.contractNo || editingAllocReceipt.contractNo || ''
+      }));
+
+      const totalAllocated = payloadAllocations.reduce((sum, a) => sum + a.allocatedAmount, 0);
+      const depAmount = Number(editingAllocReceipt.depositAmount || 0);
+
+      const payload = {
+        allocations: payloadAllocations,
+        rentAmount: totalAllocated,
+        depositAmount: depAmount,
+        totalAmount: totalAllocated + depAmount,
+        accountingMonth: allocAccountingMonth || payloadAllocations[0]?.rentMonthYear,
+        contractNo: selectedContract?.contractNo || editingAllocReceipt.contractNo || ''
+      };
+
+      const res = await API.put(`/payments/${editingAllocReceipt._id}`, payload);
+      if (res.data?.success) {
+        await fetchContractReceipts(selectedContract);
+        fetchData();
+        setEditingAllocReceipt(null);
+      } else {
+        setAllocError(res.data?.message || 'Failed to save month allocations');
+      }
+    } catch (err) {
+      console.error('Failed to save allocations:', err);
+      setAllocError(err.response?.data?.message || err.message || 'Error saving month allocations');
     } finally {
-      setReceiptSaving(false);
+      setAllocSaving(false);
     }
   };
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [cRes, tRes, pRes, uRes] = await Promise.all([
+      const [cRes, tRes, pRes, uRes, oRes] = await Promise.all([
         API.get('/assignments'),
         API.get('/tenants'),
         API.get('/properties'),
         API.get('/units'),
+        API.get('/payments/outstanding-summary').catch(() => ({ data: { success: false } }))
       ]);
       if (cRes.data.success) setContracts(cRes.data.data);
       if (tRes.data.success) setTenants(tRes.data.data);
       if (pRes.data.success) setProperties(pRes.data.data);
       if (uRes.data.success) setUnits(uRes.data.data);
+      if (oRes?.data?.success) setOutstandingSummary(oRes.data.data || []);
     } catch (err) {
       console.error('Failed to load contracts data:', err);
     } finally {
@@ -546,6 +949,36 @@ export default function ContractsView() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Check incoming request to open specific contract (from drilldown return or cross-view navigation)
+  useEffect(() => {
+    const checkTargetContract = () => {
+      if (contracts.length === 0) return;
+      const targetContractId = localStorage.getItem('contracts_target_id');
+      const targetContractNo = localStorage.getItem('contracts_target_no');
+      if (targetContractId || targetContractNo) {
+        localStorage.removeItem('contracts_target_id');
+        localStorage.removeItem('contracts_target_no');
+        const matched = contracts.find(c => 
+          (targetContractId && String(c._id) === String(targetContractId)) ||
+          (targetContractNo && (c.contractNo || '').trim().toLowerCase() === targetContractNo.trim().toLowerCase())
+        );
+        if (matched) {
+          openEditModal(matched);
+        }
+      }
+    };
+
+    checkTargetContract();
+    window.addEventListener('popstate', checkTargetContract);
+    window.addEventListener('hashchange', checkTargetContract);
+    window.addEventListener('app_check_edit_request', checkTargetContract);
+    return () => {
+      window.removeEventListener('popstate', checkTargetContract);
+      window.removeEventListener('hashchange', checkTargetContract);
+      window.removeEventListener('app_check_edit_request', checkTargetContract);
+    };
+  }, [contracts]);
 
   // Filtered Units based on Property selection in Create Form
   const availableUnitsForProperty = units.filter(
@@ -579,6 +1012,8 @@ export default function ContractsView() {
 
     try {
       setSubmitting(true);
+      const isBusiness = createForm.contractType === 'Business';
+      const numRent = (isBusiness && (!createForm.rentAmount || isNaN(Number(createForm.rentAmount)))) ? 0 : Number(createForm.rentAmount || 0);
       const res = await API.post('/assignments', {
         tenantId: createForm.tenantId,
         unitId: createForm.unitId,
@@ -588,8 +1023,9 @@ export default function ContractsView() {
         status: finalStatus,
         contractType: createForm.contractType || 'Rent',
         rentType: createForm.rentType,
-        rentAmount: Number(createForm.rentAmount),
+        rentAmount: numRent,
         depositHeld: Number(createForm.depositHeld) || 0,
+        loanAmount: Number(createForm.loanAmount) || 0,
         terms: createForm.terms,
         notes: createForm.notes,
       });
@@ -608,6 +1044,7 @@ export default function ContractsView() {
           rentType: 'Monthly Fixed',
           rentAmount: '',
           depositHeld: 0,
+          loanAmount: 0,
           terms: '',
           notes: '',
         });
@@ -635,6 +1072,8 @@ export default function ContractsView() {
 
     try {
       setSubmitting(true);
+      const isBusiness = editForm.contractType === 'Business';
+      const numRent = (isBusiness && (!editForm.rentAmount || isNaN(Number(editForm.rentAmount)))) ? 0 : Number(editForm.rentAmount || 0);
       const res = await API.put(`/assignments/${selectedContract._id}`, {
         tenantId: editForm.tenantId,
         unitId: editForm.unitId,
@@ -645,8 +1084,9 @@ export default function ContractsView() {
         status: finalStatus,
         contractType: editForm.contractType || 'Rent',
         rentType: editForm.rentType,
-        rentAmount: Number(editForm.rentAmount),
+        rentAmount: numRent,
         depositHeld: Number(editForm.depositHeld) || 0,
+        loanAmount: Number(editForm.loanAmount) || 0,
         terms: editForm.terms,
         notes: editForm.notes,
       });
@@ -835,6 +1275,7 @@ export default function ContractsView() {
         'Rent Per month': c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c)),
         'Rent per Annum': c.currentAgreement?.annualRate || (c.currentAgreement?.monthlyRate ? c.currentAgreement.monthlyRate * 12 : 0),
         'Deposit': c.depositHeld || 0,
+        'Loan Amount': c.loanAmount || 0,
         'Start Date': c.startDate ? formatDate(c.startDate) : '',
         'End Date': c.endDate ? formatDate(c.endDate) : 'Ongoing',
         'Contract Status': c.status || 'Active',
@@ -866,51 +1307,59 @@ export default function ContractsView() {
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Lease Contract</h2>
-          </div>
-        </div>
-
-        {/* Quick Property & Status Filters */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto">
-          <SearchableSelect
-            className="w-full sm:w-52"
-            value={propertyFilter}
-            onChange={setPropertyFilter}
-            placeholder="All Properties"
-            searchPlaceholder="Filter property..."
-            options={properties.map((p) => ({ value: p._id, label: p.name }))}
-          />
-
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 w-full sm:w-auto justify-between sm:justify-start">
-            <button
-              onClick={() => { setStatusFilter('Active'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                statusFilter === 'Active' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Active ({totalActive})
-            </button>
-            <button
-              onClick={() => { setStatusFilter('Past'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                statusFilter === 'Past' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Past / Vacated
-            </button>
-            <button
-              onClick={() => { setStatusFilter(''); setCurrentPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                !statusFilter ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              All
-            </button>
+            <p className="text-xs text-slate-500 font-medium">Manage lease agreements, active rentals, and historical contracts</p>
           </div>
         </div>
       </div>
 
       {/* Oracle APEX-Style Interactive Toolbar (Columns, Filter, Freeze Header, Save View, Download, Rows Per Page) */}
       <ApexToolbar
+        propertyFilter={
+          <SearchableSelect
+            className="w-44 sm:w-52 text-xs"
+            value={propertyFilter}
+            onChange={setPropertyFilter}
+            placeholder="All Properties"
+            searchPlaceholder="Filter property..."
+            options={properties.map((p) => ({ value: p._id, label: p.name }))}
+          />
+        }
+        statusFilter={
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+            <button
+              type="button"
+              onClick={() => { setStatusFilter('Active'); setCurrentPage(1); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                statusFilter === 'Active' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Active ({totalActive})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter('Past'); setCurrentPage(1); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                statusFilter === 'Past' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Past / Vacated
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter(''); setCurrentPage(1); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                !statusFilter ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              All
+            </button>
+          </div>
+        }
+        kpiFilter={
+          <div className="text-xs text-slate-600 bg-slate-100 font-semibold px-2.5 py-1 rounded-xl shrink-0">
+            <b>{filteredContracts.length}</b> Contracts
+          </div>
+        }
         search={search}
         onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}
@@ -988,7 +1437,7 @@ export default function ContractsView() {
                     const frozenStyle = getFrozenColumnStyle(colIndex, frozenColumnCount, visibleColumns, columnWidths, true);
                     let alignClass = 'text-left';
                     if (['history', 'createdAt', 'updatedAt', 'status'].includes(colId)) alignClass = 'text-center';
-                    if (['monthlyRent', 'annualRent', 'currentRate', 'depositHeld', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
+                    if (['monthlyRent', 'annualRent', 'currentRate', 'depositHeld', 'loanAmount', 'totalReceived', 'outstanding'].includes(colId)) alignClass = 'text-right';
                     if (colId === 'actions') alignClass = 'text-center';
 
                     return (
@@ -1118,10 +1567,11 @@ export default function ContractsView() {
                         }
 
                         if (colId === 'monthlyRent') {
+                          const isBusiness = c.contractType === 'Business';
                           const monthly = c.currentAgreement?.monthlyRate || (c.currentAgreement?.rentType === 'Annual Fixed' ? Math.round((c.currentAgreement?.annualRate || 0) / 12) : getContractRentAmount(c));
                           return (
                             <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-bold text-slate-900 font-mono">
-                              {monthly ? formatCurrency(monthly) : '—'}
+                              {monthly ? formatCurrency(monthly) : (isBusiness ? <span className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">₹0 (Business)</span> : '—')}
                             </td>
                           );
                         }
@@ -1139,6 +1589,14 @@ export default function ContractsView() {
                           return (
                             <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-medium text-slate-700">
                               {c.depositHeld ? formatCurrency(c.depositHeld) : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (colId === 'loanAmount') {
+                          return (
+                            <td key={colId} style={frozenStyle} className="py-3 px-3.5 border-r border-slate-200 text-right whitespace-nowrap font-mono font-medium text-slate-700">
+                              {c.loanAmount ? formatCurrency(c.loanAmount) : '—'}
                             </td>
                           );
                         }
@@ -1534,9 +1992,18 @@ export default function ContractsView() {
                 </div>
               )}
 
+              {createForm.contractType === 'Business' && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span><strong>Business Contract:</strong> Monthly rent is not compulsory (defaults to ₹0). Other business revenues and income generated from this business are recorded through Receipts.</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Rent Frequency *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Rent Frequency {createForm.contractType === 'Business' ? '(Optional)' : '*'}
+                  </label>
                   <select
                     value={createForm.rentType}
                     onChange={(e) => changeRentType(createForm, setCreateForm, e.target.value)}
@@ -1549,13 +2016,15 @@ export default function ContractsView() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    {createForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *'}
+                    {createForm.contractType === 'Business'
+                      ? 'Monthly Rent Rate (₹) (Optional — No rent for Business)'
+                      : (createForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *')}
                   </label>
                   <input
                     type="number"
-                    required
+                    required={createForm.contractType !== 'Business'}
                     min="0"
-                    placeholder={createForm.rentType === 'Annual Fixed' ? 'e.g. 108000' : 'e.g. 9000'}
+                    placeholder={createForm.contractType === 'Business' ? '₹0 (No rent required)' : (createForm.rentType === 'Annual Fixed' ? 'e.g. 108000' : 'e.g. 9000')}
                     value={createForm.rentAmount}
                     onChange={(e) => setCreateForm({ ...createForm, rentAmount: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
@@ -1567,21 +2036,34 @@ export default function ContractsView() {
                         ? (createForm.rentType === 'Annual Fixed'
                             ? formatCurrency(Math.round(Number(createForm.rentAmount) / 12)) + ' / month'
                             : formatCurrency(Number(createForm.rentAmount) * 12) + ' / year')
-                        : '—'}
+                        : (createForm.contractType === 'Business' ? '₹0 (Business)' : '—')}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Deposit Held (₹)</label>
                   <input
                     type="number"
                     min="0"
+                    placeholder="0"
                     value={createForm.depositHeld}
                     onChange={(e) => setCreateForm({ ...createForm, depositHeld: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Loan Amount (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={createForm.loanAmount}
+                    onChange={(e) => setCreateForm({ ...createForm, loanAmount: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
                   />
                 </div>
 
@@ -1833,10 +2315,19 @@ export default function ContractsView() {
                     </div>
                   </div>
 
-                  {/* Row 3: Rent Frequency, Rent Rate, Security Deposit, Agreement Terms */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {editForm.contractType === 'Business' && (
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span><strong>Business Contract:</strong> Monthly rent is not compulsory (defaults to ₹0). Other business revenues and income generated from this business are recorded through Receipts.</span>
+                    </div>
+                  )}
+
+                  {/* Row 3: Rent Frequency, Rent Rate */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Rent Frequency *</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Rent Frequency {editForm.contractType === 'Business' ? '(Optional)' : '*'}
+                      </label>
                       <select
                         value={editForm.rentType}
                         onChange={(e) => changeRentType(editForm, setEditForm, e.target.value)}
@@ -1849,15 +2340,18 @@ export default function ContractsView() {
 
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-1">
-                        {editForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *'}
+                        {editForm.contractType === 'Business'
+                          ? 'Monthly Rent Rate (₹) (Optional — No rent for Business)'
+                          : (editForm.rentType === 'Annual Fixed' ? 'Annual Rent Rate (₹) *' : 'Monthly Rent Rate (₹) *')}
                       </label>
                       <input
                         type="number"
-                        required
+                        required={editForm.contractType !== 'Business'}
                         min="0"
+                        placeholder={editForm.contractType === 'Business' ? '₹0 (No rent required)' : ''}
                         value={editForm.rentAmount}
                         onChange={(e) => setEditForm({ ...editForm, rentAmount: e.target.value })}
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 font-bold text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
                       />
                       <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
                         <span>{editForm.rentType === 'Annual Fixed' ? 'Monthly:' : 'Annual:'}</span>
@@ -1866,11 +2360,14 @@ export default function ContractsView() {
                             ? (editForm.rentType === 'Annual Fixed'
                                 ? formatCurrency(Math.round(Number(editForm.rentAmount) / 12)) + '/mo'
                                 : formatCurrency(Number(editForm.rentAmount) * 12) + '/yr')
-                            : '—'}
+                            : (editForm.contractType === 'Business' ? '₹0 (Business)' : '—')}
                         </span>
                       </div>
                     </div>
+                  </div>
 
+                  {/* Row 4: Security Deposit, Loan Amount, Agreement Terms */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-1">Security Deposit Held (₹)</label>
                       <input
@@ -1878,6 +2375,18 @@ export default function ContractsView() {
                         min="0"
                         value={editForm.depositHeld}
                         onChange={(e) => setEditForm({ ...editForm, depositHeld: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Loan Amount (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={editForm.loanAmount}
+                        onChange={(e) => setEditForm({ ...editForm, loanAmount: e.target.value })}
                         className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono"
                       />
                     </div>
@@ -1942,6 +2451,14 @@ export default function ContractsView() {
 
                 {/* Standard APEX Toolbar for Contract Receipts */}
                 <ApexToolbar
+                  kpiFilter={
+                    <div className="px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-200 shadow-2xs text-right shrink-0 flex items-center gap-1.5">
+                      <span className="text-[10px] text-emerald-800 font-semibold">Total Received:</span>
+                      <span className="text-xs font-black text-emerald-800 font-mono">
+                        {formatCurrency(contractReceipts.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0))}
+                      </span>
+                    </div>
+                  }
                   search={receiptSearchQuery}
                   onSearchChange={(v) => { setReceiptSearchQuery(v); setReceiptCurrentPage(1); }}
                   rowsPerPage={receiptRowsPerPage}
@@ -1955,7 +2472,7 @@ export default function ContractsView() {
                     try { localStorage.setItem('cols_contract_receipts_v2', JSON.stringify(cols)); } catch(e){}
                   }}
                   columnWidths={receiptColumnWidths}
-                  onResetWidths={() => {}}
+                  onResetWidths={resetReceiptColumnWidths}
                   sortConfig={receiptSortConfig}
                   onSortChange={setReceiptSortConfig}
                   filters={receiptActiveFilters}
@@ -1986,16 +2503,32 @@ export default function ContractsView() {
                             const def = CONTRACT_RECEIPTS_COLUMNS_DEF.find(c => c.id === colId) || { id: colId, label: colId };
                             const width = receiptColumnWidths[colId] || DEFAULT_CONTRACT_RECEIPTS_COLUMN_WIDTHS[colId] || 120;
                             const isActions = colId === 'actions';
-                            const isAmount = colId === 'totalAmount';
-                            const align = isActions ? 'text-center' : isAmount ? 'text-right' : 'text-left';
+                            const isAmount = ['totalAmount', 'rentAmount', 'depositAmount', 'monthlyRentExpected', 'adjustmentAmount', 'outstanding', 'adjustedOutstanding', 'loanAmount'].includes(colId);
+                            const isCenter = ['contractType', 'paidUpTo', 'isReversed', 'status'].includes(colId);
+                            const align = isActions || isCenter ? 'text-center' : isAmount ? 'text-right' : 'text-left';
+
+                            const dragProps = getHeaderDragProps(
+                              colId,
+                              receiptVisibleColumns,
+                              (cols) => {
+                                setReceiptVisibleColumns(cols);
+                                try { localStorage.setItem('cols_contract_receipts_v2', JSON.stringify(cols)); } catch(e){}
+                              },
+                              'contract_receipts_v2'
+                            );
 
                             return (
                               <th
                                 key={colId}
-                                style={{ width: `${Math.max(width, 50)}px`, minWidth: `${Math.max(width, 50)}px` }}
-                                className={`py-2 pl-3 pr-6 border-r border-slate-300 relative group bg-slate-100 ${align}`}
+                                {...dragProps}
+                                style={{
+                                  ...dragProps.style,
+                                  width: `${Math.max(width, 50)}px`,
+                                  minWidth: `${Math.max(width, 50)}px`
+                                }}
+                                className={`py-2 pl-3 pr-6 border-r border-slate-300 relative group bg-slate-100 cursor-grab active:cursor-grabbing select-none ${align}`}
                               >
-                                <div className={`flex items-center gap-1 w-full ${isActions ? 'justify-center' : isAmount ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`flex items-center gap-1 w-full ${isActions || isCenter ? 'justify-center' : isAmount ? 'justify-end' : 'justify-start'}`}>
                                   {isActions ? (
                                     <span className="text-xs font-bold text-slate-700">{def.label}</span>
                                   ) : (
@@ -2033,7 +2566,14 @@ export default function ContractsView() {
                               if (colId === 'receiptNumber') {
                                 return (
                                   <td key={colId} className="py-2 px-3 border-r border-slate-200 font-mono font-bold text-teal-800 whitespace-nowrap">
-                                    {r.receiptNumber}
+                                    <button
+                                      type="button"
+                                      onClick={() => navigateToEditPayment(r)}
+                                      className="hover:underline hover:text-teal-600 cursor-pointer font-mono font-bold text-left"
+                                      title="Click to edit in Edit Month / Payment screen"
+                                    >
+                                      {r.receiptNumber}
+                                    </button>
                                   </td>
                                 );
                               }
@@ -2059,9 +2599,15 @@ export default function ContractsView() {
                                 const formatted = rawM ? rawM.split(',').map(m => formatMonthYear(m.trim())).join(', ') : '—';
                                 return (
                                   <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">
-                                    <span className="inline-block px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 font-bold text-[11px] border border-blue-200">
-                                      {formatted}
-                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditAllocationsModal(r)}
+                                      className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-[11px] border border-blue-200/80 transition-all cursor-pointer shadow-2xs hover:shadow-xs"
+                                      title="Click to edit and select months paid for and amounts for each month"
+                                    >
+                                      <span>{formatted}</span>
+                                      <Edit2 className="w-3 h-3 text-blue-600 opacity-60 group-hover:opacity-100 transition-opacity" />
+                                    </button>
                                   </td>
                                 );
                               }
@@ -2081,10 +2627,72 @@ export default function ContractsView() {
                                 );
                               }
                               
-                              if (colId === 'comments') {
+                              if (colId === 'contractNo') {
+                                const cNo = r.contractNo || selectedContract?.contractNo || '';
                                 return (
-                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-slate-600 text-[11px] max-w-xs truncate" title={r.comments}>
-                                    {r.comments || '—'}
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap font-mono text-[11px]">
+                                    {cNo ? (
+                                      <span className="inline-block px-2 py-0.5 rounded-lg bg-teal-50 text-teal-800 font-bold border border-teal-200/60">
+                                        {cNo}
+                                      </span>
+                                    ) : <span className="text-slate-400">—</span>}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'contractType') {
+                                const isBiz = (r.contractType || selectedContract?.contractType || '').toLowerCase() === 'business';
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                                      isBiz ? 'bg-purple-50 text-purple-800 border-purple-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    }`}>
+                                      {isBiz ? 'Business' : 'Rent'}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              if (colId === 'property') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 font-medium text-slate-900 whitespace-nowrap">
+                                    {r.unitId?.propertyId?.name || selectedContract?.unitId?.propertyId?.name || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'unit') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap font-medium text-slate-700">
+                                    {r.unitId?.subUnitPartition || r.unitId?.unitName || selectedContract?.unitId?.subUnitPartition || selectedContract?.unitId?.unitName || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'tenant') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 whitespace-nowrap font-bold text-slate-900">
+                                    {r.tenantId?.name || selectedContract?.tenantId?.name || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'monthlyRentExpected') {
+                                const num = Number(r.monthlyRentExpected) || 0;
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-slate-800 whitespace-nowrap">
+                                    {num > 0 ? formatCurrency(num) : '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'rentAmount') {
+                                const rVal = r.rentAmount !== undefined ? r.rentAmount : (r.totalAmount || 0);
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-emerald-800 whitespace-nowrap">
+                                    {formatCurrency(rVal)}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'depositAmount') {
+                                const dVal = Number(r.depositAmount) || 0;
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-amber-800 whitespace-nowrap">
+                                    {dVal > 0 ? formatCurrency(dVal) : '—'}
                                   </td>
                                 );
                               }
@@ -2095,30 +2703,43 @@ export default function ContractsView() {
                                   </td>
                                 );
                               }
-                              if (colId === 'actions') {
+                              if (colId === 'outstanding') {
+                                const outVal = Number(r.outstanding) || 0;
                                 return (
-                                  <td key={colId} className="py-2 px-3 text-center whitespace-nowrap">
-                                    <button
-                                      type="button"
-                                      onClick={() => openViewReceiptModal(r)}
-                                      className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1.5 border border-teal-200/60 cursor-pointer shadow-2xs"
-                                      title="Edit Receipt Details"
-                                    >
-                                      <Edit2 className="w-3 h-3 text-teal-600" />
-                                      <span>Edit</span>
-                                    </button>
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono whitespace-nowrap">
+                                    {outVal > 0 ? (
+                                      <span className="font-extrabold text-rose-700">
+                                        {formatCurrency(outVal)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400">₹0</span>
+                                    )}
                                   </td>
                                 );
                               }
                               if (colId === 'adjustmentAmount') {
                                 const adj = Number(r.adjustmentAmount) || 0;
                                 return (
-                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-xs">
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-bold text-xs whitespace-nowrap">
                                     {adj !== 0 ? (
-                                      <span className={adj > 0 ? 'text-blue-700' : 'text-amber-700'}>
+                                      <span className={adj > 0 ? 'text-emerald-700' : 'text-rose-600'}>
                                         {adj > 0 ? `+${formatCurrency(adj)}` : formatCurrency(adj)}
                                       </span>
                                     ) : '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'adjustedOutstanding') {
+                                const adjOut = Number(r.adjustedOutstanding) || 0;
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono whitespace-nowrap">
+                                    {adjOut > 0 ? (
+                                      <span className="inline-block px-2 py-0.5 rounded-lg bg-rose-50 text-rose-800 font-extrabold text-[11px] border border-rose-200/60">
+                                        {formatCurrency(adjOut)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-emerald-600 font-bold">₹0</span>
+                                    )}
                                   </td>
                                 );
                               }
@@ -2129,10 +2750,90 @@ export default function ContractsView() {
                                   </td>
                                 );
                               }
+                              if (colId === 'paidUpTo') {
+                                const val = r.paidUpTo && r.paidUpTo !== 'None' && r.paidUpTo !== 'Vacant' ? r.paidUpTo : '—';
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                                    {val !== '—' ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 font-bold text-[11px] border border-teal-200/60">
+                                        {val}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400">—</span>
+                                    )}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'loanAmount') {
+                                const lVal = Number(r.loanAmount) || 0;
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-right font-mono font-medium text-slate-800 whitespace-nowrap">
+                                    {lVal > 0 ? formatCurrency(lVal) : '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'comments') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-slate-600 text-[11px] max-w-xs truncate" title={r.comments}>
+                                    {r.comments || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'isReversed') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-center whitespace-nowrap">
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      r.isReversed ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                    }`}>
+                                      {r.isReversed ? 'Reversed' : 'Active'}
+                                    </span>
+                                  </td>
+                                );
+                              }
+                              if (colId === 'reversalReason') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-xs text-slate-600 max-w-xs truncate" title={r.reversalReason}>
+                                    {r.reversalReason || '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'reversalDate') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 border-r border-slate-200 text-xs text-slate-600 whitespace-nowrap">
+                                    {r.reversalDate ? formatDate(r.reversalDate) : '—'}
+                                  </td>
+                                );
+                              }
                               if (colId === 'createdAt' || colId === 'updatedAt') {
                                 return (
                                   <td key={colId} className="py-2 px-3 border-r border-slate-200 text-xs text-slate-600 whitespace-nowrap">
                                     {r[colId] ? formatDate(r[colId]) : '—'}
+                                  </td>
+                                );
+                              }
+                              if (colId === 'actions') {
+                                return (
+                                  <td key={colId} className="py-2 px-3 text-center whitespace-nowrap">
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditAllocationsModal(r)}
+                                        className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1 border border-indigo-200/70 cursor-pointer shadow-2xs"
+                                        title="Edit & select months paid for and amounts for each month"
+                                      >
+                                        <Calendar className="w-3 h-3 text-indigo-600" />
+                                        <span>Months & Amounts</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingFullPaymentReceiptId(r._id)}
+                                        className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1 border border-teal-200/60 cursor-pointer shadow-2xs"
+                                        title="Edit payment receipt in Edit Month / Payment screen"
+                                      >
+                                        <Edit2 className="w-3 h-3 text-teal-600" />
+                                        <span>Edit</span>
+                                      </button>
+                                    </div>
                                   </td>
                                 );
                               }
@@ -2196,116 +2897,7 @@ export default function ContractsView() {
         </div>
       )}
 
-      {/* RECEIPT DETAIL / EDIT MODAL */}
-      {viewingReceipt && (
-        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-teal-600 text-white">
-                  <Receipt className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Receipt Details</h3>
-                  <p className="text-xs font-mono text-teal-800 font-bold">{viewingReceipt.receiptNumber}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setViewingReceipt(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
 
-            <form onSubmit={handleSaveReceiptDetails} className="p-5 space-y-3.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Receipt Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={receiptEditForm.receiptDate}
-                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, receiptDate: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Amount (₹)</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={receiptEditForm.totalAmount}
-                    onChange={(e) => setReceiptEditForm({ ...receiptEditForm, totalAmount: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Status</label>
-                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => setReceiptEditForm({ ...receiptEditForm, status: 'Rented' })}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        receiptEditForm.status !== 'Vacant'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Rented
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setReceiptEditForm({ ...receiptEditForm, status: 'Vacant' })}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        receiptEditForm.status === 'Vacant'
-                          ? 'bg-amber-600 text-white shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Vacant
-                    </button>
-                  </div>
-                </div>
-                
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Comments / Remarks</label>
-                <textarea
-                  rows="2"
-                  value={receiptEditForm.comments}
-                  onChange={(e) => setReceiptEditForm({ ...receiptEditForm, comments: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setViewingReceipt(null)}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={receiptSaving}
-                  className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs disabled:opacity-50 flex items-center gap-1 cursor-pointer"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>{receiptSaving ? 'Saving...' : 'Save Receipt'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* MODAL 3: Revise Rate */}
       {showReviseModal && selectedContract && (
@@ -2605,6 +3197,312 @@ export default function ContractsView() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: EDIT MONTHS PAID FOR & AMOUNTS (UNDER LEASE CONTRACT) */}
+      {editingAllocReceipt && (
+        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden my-auto flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-indigo-700 to-indigo-900 px-5 py-4 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2.5 rounded-xl bg-white/10 backdrop-blur-xs text-white shrink-0">
+                  <Calendar className="w-5 h-5 text-indigo-200" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base text-white">Edit Months Paid For & Amounts</h3>
+                    <span className="px-2 py-0.5 rounded-md bg-white/20 text-indigo-100 font-mono font-bold text-xs">
+                      {editingAllocReceipt.receiptNumber}
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-200 truncate mt-0.5">
+                    Tenant: <strong className="text-white">{editingAllocReceipt.tenantId?.name || selectedContract?.tenantId?.name}</strong> • Contract: <strong className="text-white">{selectedContract?.contractNo || editingAllocReceipt.contractNo}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingAllocReceipt(null)}
+                className="p-1.5 rounded-lg text-indigo-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              {allocError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{allocError}</span>
+                </div>
+              )}
+
+              {/* Financial Summary & Balance Banner */}
+              {(() => {
+                const totalAlloc = allocRows.reduce((sum, r) => sum + (Number(r.allocatedAmount) || 0), 0);
+                const originalRent = Number(editingAllocReceipt.rentAmount !== undefined ? editingAllocReceipt.rentAmount : (editingAllocReceipt.totalAmount || 0));
+                const diff = originalRent - totalAlloc;
+                const isBalanced = Math.abs(diff) < 0.01;
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">Receipt Rent Total</span>
+                      <span className="text-base font-extrabold text-slate-900 font-mono">
+                        {formatCurrency(originalRent)}
+                      </span>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">Total Allocated Across Months</span>
+                      <span className="text-base font-extrabold text-indigo-700 font-mono">
+                        {formatCurrency(totalAlloc)}
+                      </span>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">Allocation Status</span>
+                      {isBalanced ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Balanced
+                        </span>
+                      ) : diff > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-amber-700">
+                            {formatCurrency(diff)} unallocated
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (allocRows.length > 0) {
+                                const lastId = allocRows[allocRows.length - 1].id;
+                                setAllocRows(prev => prev.map(r => r.id === lastId ? { ...r, allocatedAmount: String((Number(r.allocatedAmount) || 0) + diff) } : r));
+                              }
+                            }}
+                            className="px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold cursor-pointer"
+                            title="Add remaining amount to last month"
+                          >
+                            + Add to Last
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-rose-700">
+                            +{formatCurrency(-diff)} exceeds total
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAllocReceipt(prev => ({
+                                ...prev,
+                                rentAmount: totalAlloc,
+                                totalAmount: totalAlloc + (Number(prev?.depositAmount) || 0)
+                              }));
+                            }}
+                            className="px-1.5 py-0.5 rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-[10px] font-bold cursor-pointer"
+                            title="Update receipt total rent to match allocated sum"
+                          >
+                            Sync Total
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Quick Helper Tools */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pb-1">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <span>Months Paid For ({allocRows.length}):</span>
+                </span>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleSplitEvenly}
+                    className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    title="Split total rent evenly across all selected months"
+                  >
+                    <Split className="w-3 h-3 text-slate-500" />
+                    <span>Split Evenly</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleFillContractRate}
+                    className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    title="Set amount for each month to contract's monthly rate"
+                  >
+                    <span>Fill Rate ({formatCurrency(Number(selectedContract?.currentAgreement?.monthlyRate ?? selectedContract?.currentMonthlyRate ?? selectedContract?.unitId?.monthlyRentExpected ?? 22000))})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddAllocMonth()}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition-colors inline-flex items-center gap-1 border border-indigo-200/60 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Add Month</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Month-by-month rows */}
+              <div className="space-y-2 border border-slate-200 rounded-xl p-3 bg-slate-50/50 max-h-60 overflow-y-auto">
+                {allocRows.map((row, idx) => {
+                  const mFormatted = /^\d{4}-\d{2}$/.test(row.rentMonthYear) ? formatMonthYear(row.rentMonthYear) : row.rentMonthYear;
+                  return (
+                    <div key={row.id} className="flex items-center gap-3 p-2 bg-white rounded-lg border border-slate-200 shadow-2xs hover:border-indigo-300 transition-colors">
+                      <span className="text-slate-400 font-bold text-[11px] w-5 text-center shrink-0">
+                        {idx + 1}.
+                      </span>
+
+                      {/* Month input / selector */}
+                      <div className="flex-1 min-w-0">
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">
+                          Month Paid For
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="month"
+                            value={row.rentMonthYear}
+                            onChange={(e) => handleUpdateAllocMonth(row.id, e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                          />
+                          <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100 whitespace-nowrap shrink-0">
+                            {mFormatted}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Amount input */}
+                      <div className="w-36 shrink-0">
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">
+                          Amount (₹)
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={row.allocatedAmount}
+                            onChange={(e) => handleUpdateAllocAmount(row.id, e.target.value)}
+                            className="w-full pl-6 pr-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white text-right"
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Delete row */}
+                      <div className="pt-4 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAllocMonth(row.id)}
+                          disabled={allocRows.length <= 1}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-30 cursor-pointer"
+                          title="Remove this month"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Contract Months Quick-Add Suggestions */}
+              {contractTermMonths.length > 0 && (
+                <div className="pt-1">
+                  <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">
+                    Quick-Add Contract Term Month:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                    {contractTermMonths.map(ym => {
+                      const alreadyAdded = allocRows.some(r => r.rentMonthYear === ym);
+                      return (
+                        <button
+                          key={ym}
+                          type="button"
+                          disabled={alreadyAdded}
+                          onClick={() => handleAddAllocMonth(ym)}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-all ${
+                            alreadyAdded
+                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer hover:shadow-2xs'
+                          }`}
+                        >
+                          {alreadyAdded ? '✓ ' : '+ '}{formatMonthYear(ym)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Accounting Month Field */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block">
+                    Receipt Accounting Month
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Primary accounting month when this payment was recorded in financial reports
+                  </p>
+                </div>
+                <input
+                  type="month"
+                  value={allocAccountingMonth}
+                  onChange={(e) => setAllocAccountingMonth(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setEditingAllocReceipt(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={allocSaving}
+                onClick={handleSaveAllocations}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>{allocSaving ? 'Saving...' : 'Save Months & Amounts'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL PAYMENT EDIT MODAL OVERLAY IN CONTRACTS VIEW */}
+      {editingFullPaymentReceiptId && (
+        <PaymentEditModal
+          isOpen={Boolean(editingFullPaymentReceiptId)}
+          onClose={() => setEditingFullPaymentReceiptId(null)}
+          receiptId={editingFullPaymentReceiptId}
+          tenants={tenants}
+          assignments={contracts}
+          backButtonLabel="Back to Contract"
+          onSuccess={async () => {
+            setEditingFullPaymentReceiptId(null);
+            await fetchContractReceipts(selectedContract);
+            fetchData();
+          }}
+        />
       )}
     </div>
   );

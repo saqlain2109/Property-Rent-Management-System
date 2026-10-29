@@ -449,50 +449,59 @@ export default function TenantsView({ onDataChanged }) {
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-slate-900 leading-tight">Tenants</h2>
-          </div>
-        </div>
-
-        {/* Quick Filters */}
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <SearchableSelect
-            className="w-full sm:w-52"
-            value={propertyFilter}
-            onChange={(val) => { setPropertyFilter(val); setCurrentPage(1); }}
-            placeholder="All Properties"
-            searchPlaceholder="Search properties..."
-            options={properties.map((property) => ({ value: property._id, label: property.name }))}
-          />
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
-            <button
-              onClick={() => { setStatusFilter(''); setCurrentPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                !statusFilter ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              All ({tenants.length})
-            </button>
-            <button
-              onClick={() => { setStatusFilter('active'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                statusFilter === 'active' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Active
-            </button>
-            <button
-              onClick={() => { setStatusFilter('inactive'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                statusFilter === 'inactive' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Inactive
-            </button>
+            <p className="text-xs text-slate-500 font-medium">Manage lease tenants, contact info, and active lease occupancies</p>
           </div>
         </div>
       </div>
 
       {/* Oracle APEX-Style Toolbar */}
       <ApexToolbar
+        propertyFilter={
+          <SearchableSelect
+            className="w-44 sm:w-52 text-xs"
+            value={propertyFilter}
+            onChange={(val) => { setPropertyFilter(val); setCurrentPage(1); }}
+            placeholder="All Properties"
+            searchPlaceholder="Search properties..."
+            options={properties.map((property) => ({ value: property._id, label: property.name }))}
+          />
+        }
+        statusFilter={
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+            <button
+              type="button"
+              onClick={() => { setStatusFilter(''); setCurrentPage(1); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                !statusFilter ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              All ({tenants.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter('active'); setCurrentPage(1); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                statusFilter === 'active' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter('inactive'); setCurrentPage(1); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                statusFilter === 'inactive' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Inactive
+            </button>
+          </div>
+        }
+        kpiFilter={
+          <div className="text-xs text-slate-600 bg-slate-100 font-semibold px-2.5 py-1 rounded-xl shrink-0">
+            <b>{filteredTenants.length}</b> Tenants
+          </div>
+        }
         search={search}
         onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}

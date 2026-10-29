@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import API from '../services/api';
 import PaymentEditModal from './PaymentEditModal';
 import { useModalBackHandler } from '../utils/useModalBackHandler';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import {
   X, Edit3, Save, Calendar, CheckCircle2, AlertCircle, Plus, Trash2,
@@ -313,6 +314,11 @@ export default function ReportDrilldownModal({
 
   // ---------------- Payment Receipt Edit Handlers ----------------
   const navigateToEditPayment = (rec) => {
+    const fromTab = window.location.hash.replace(/^#\/?/, '').trim() || 'dashboard';
+    pushDrilldown(fromTab, {
+      label: 'Report Drilldown',
+      targetTab: 'payments'
+    });
     onClose();
     let targetMonth = rec.accountingMonth || '';
     if (rec.allocations && rec.allocations.length > 0) {
@@ -337,13 +343,30 @@ export default function ReportDrilldownModal({
     const recId = rec.receiptId || rec._id;
     if (recId) {
       localStorage.setItem('payments_edit_receipt_id', String(recId));
+      localStorage.removeItem('payments_target_unit_id');
+    } else {
+      const uId = rec.unitId?._id || rec.unitId || rec.unit?._id || rec.unit?.unitId;
+      if (uId) {
+        localStorage.setItem('payments_target_unit_id', String(uId));
+      }
     }
-    const uId = rec.unitId?._id || rec.unitId || rec.unit?._id || rec.unit?.unitId;
-    if (uId) {
-      localStorage.setItem('payments_target_unit_id', String(uId));
+    const tId = rec.tenantId?._id || rec.tenantId || rec.tenant?._id;
+    if (tId) {
+      localStorage.setItem('payments_target_tenant_id', String(tId));
+      localStorage.setItem('payments_tenant_filter', String(tId));
     }
-    window.location.hash = '#/payments';
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    if (rec.contractNo) {
+      localStorage.setItem('payments_target_contract_no', String(rec.contractNo));
+    }
+    const expRent = Number(rec.monthlyRentExpected || rec.rentAmount || 0);
+    if (expRent > 0) {
+      localStorage.setItem('payments_target_monthly_rent', String(expRent));
+    }
+    const pId = rec.property?._id || rec.propertyId?._id || rec.propertyId || rec.unit?.propertyId?._id || rec.unit?.propertyId || target?.propertyId;
+    if (pId && pId !== '__COMMON__') {
+      localStorage.setItem('payments_prop_filter', String(pId));
+    }
+    navigateToTab('payments');
   };
   const startEditingReceipt = (record) => {
     setErrorMsg('');
@@ -615,7 +638,22 @@ export default function ReportDrilldownModal({
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={openAddNewRecord}
+              onClick={() => {
+                if (isExpenseTarget) {
+                  openAddNewRecord();
+                } else {
+                  onClose();
+                  const targetMonth = target.month && target.month !== 'all' ? target.month : new Date().toISOString().slice(0, 7);
+                  localStorage.setItem('payments_selected_month', targetMonth);
+                  if (target.propertyId && target.propertyId !== '__COMMON__') {
+                    localStorage.setItem('payments_prop_filter', target.propertyId);
+                  }
+                  if (target.unitId) {
+                    localStorage.setItem('payments_target_unit_id', target.unitId);
+                  }
+                  navigateToTab('payments');
+                }
+              }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-bold text-xs shadow-sm transition-all cursor-pointer ${
                 isExpenseTarget ? 'bg-rose-600 hover:bg-rose-700' : 'bg-teal-600 hover:bg-teal-700'
               }`}
@@ -972,7 +1010,22 @@ export default function ReportDrilldownModal({
               </div>
               <button
                 type="button"
-                onClick={openAddNewRecord}
+                onClick={() => {
+                  if (isExpenseTarget) {
+                    openAddNewRecord();
+                  } else {
+                    onClose();
+                    const targetMonth = target.month && target.month !== 'all' ? target.month : new Date().toISOString().slice(0, 7);
+                    localStorage.setItem('payments_selected_month', targetMonth);
+                    if (target.propertyId && target.propertyId !== '__COMMON__') {
+                      localStorage.setItem('payments_prop_filter', target.propertyId);
+                    }
+                    if (target.unitId) {
+                      localStorage.setItem('payments_target_unit_id', target.unitId);
+                    }
+                    navigateToTab('payments');
+                  }
+                }}
                 className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white font-bold text-xs shadow-md transition-all cursor-pointer ${
                   isExpenseTarget ? 'bg-rose-600 hover:bg-rose-700' : 'bg-teal-600 hover:bg-teal-700'
                 }`}
@@ -1197,9 +1250,14 @@ export default function ReportDrilldownModal({
                       <div className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="space-y-1.5 flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-xs font-bold text-slate-900 px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200">
+                            <button
+                              type="button"
+                              onClick={() => navigateToEditPayment(rec)}
+                              className="font-mono text-xs font-bold text-teal-800 hover:text-teal-600 hover:underline px-2 py-0.5 rounded-md bg-teal-50 border border-teal-200 cursor-pointer text-left"
+                              title="Click to edit receipt in Edit Month / Payment screen"
+                            >
                               {rec.receiptNumber}
-                            </span>
+                            </button>
                             <span className="text-xs text-slate-500 flex items-center gap-1">
                               <Calendar className="w-3.5 h-3.5 text-slate-400" />
                               {formatDate(rec.receiptDate)}
@@ -1468,8 +1526,7 @@ export default function ReportDrilldownModal({
               if (targetMonth) {
                 localStorage.setItem('payments_selected_month', targetMonth);
               }
-              window.location.hash = '#/payments';
-              window.dispatchEvent(new PopStateEvent('popstate'));
+              navigateToTab('payments');
             }}
           />
         )}

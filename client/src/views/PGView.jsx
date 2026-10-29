@@ -273,6 +273,11 @@ export default function PGView() {
 
       {/* Oracle APEX-Style Toolbar */}
       <ApexToolbar
+        kpiFilter={
+          <div className="text-xs text-slate-600 bg-slate-100 font-semibold px-2.5 py-1 rounded-xl shrink-0">
+            <b>{filteredSettlements.length}</b> Monthly Records
+          </div>
+        }
         search={search}
         onSearchChange={(val) => { setSearch(val); setCurrentPage(1); }}
         rowsPerPage={rowsPerPage}

@@ -215,7 +215,9 @@ router.post('/', protect, authorize('admin', 'manager'), [
   body('contractType').optional().isIn(['Rent', 'Business']).withMessage('Contract type must be Rent or Business'),
   body('rentType').optional().isIn(['Monthly Fixed', 'Annual Fixed', 'Variable PG Share', 'Irregular / Custom']),
   body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
-  body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number')
+  body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number'),
+  body('depositHeld').optional({ checkFalsy: true }).isFloat({ min: 0 }).withMessage('Deposit must be a non-negative number'),
+  body('loanAmount').optional({ checkFalsy: true }).isFloat({ min: 0 }).withMessage('Loan amount must be a non-negative number')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -224,13 +226,20 @@ router.post('/', protect, authorize('admin', 'manager'), [
 
   try {
     const {
-      tenantId, unitId, startDate, endDate, depositHeld, contractType = 'Rent',
+      tenantId, unitId, startDate, endDate, depositHeld, loanAmount = 0, contractType = 'Rent',
       rentType = 'Monthly Fixed', rentAmount, monthlyRate, terms, notes, status, contractNo
     } = req.body;
     const finalContractType = contractType === 'Business' ? 'Business' : 'Rent';
-    const enteredRent = rentAmount ?? monthlyRate;
-    if (enteredRent === undefined || enteredRent === null || enteredRent === '') {
-      return res.status(400).json({ success: false, message: 'Rent amount is required' });
+    let enteredRent = rentAmount ?? monthlyRate;
+    if (finalContractType === 'Business') {
+      // For Business contracts, monthly rent is NOT compulsory and defaults to 0
+      if (enteredRent === undefined || enteredRent === null || enteredRent === '' || isNaN(Number(enteredRent))) {
+        enteredRent = 0;
+      }
+    } else {
+      if (enteredRent === undefined || enteredRent === null || enteredRent === '') {
+        return res.status(400).json({ success: false, message: 'Rent amount is required' });
+      }
     }
     const contractEndDate = endDate || null;
     const contractStartDate = startDate || null;
@@ -256,6 +265,7 @@ router.post('/', protect, authorize('admin', 'manager'), [
       startDate: contractStartDate,
       endDate: contractEndDate,
       depositHeld: Number(depositHeld) || 0,
+      loanAmount: Number(loanAmount) || 0,
       contractType: finalContractType,
       notes: notes || '',
       status: finalStatus
@@ -454,6 +464,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
   body('rentAmount').optional().isFloat({ min: 0 }).withMessage('Rent amount must be a non-negative number'),
   body('monthlyRate').optional().isFloat({ min: 0 }).withMessage('Monthly rent rate must be a non-negative number'),
   body('depositHeld').optional().isFloat({ min: 0 }).withMessage('Deposit must be a non-negative number'),
+  body('loanAmount').optional({ checkFalsy: true }).isFloat({ min: 0 }).withMessage('Loan amount must be a non-negative number'),
   body('status').optional().isIn(['Active', 'Past / Vacated', 'Terminated', 'Ended']).withMessage('Invalid contract status'),
   body('contractType').optional().isIn(['Rent', 'Business']).withMessage('Contract type must be Rent or Business'),
   body('notes').optional().isString().withMessage('Notes must be text'),
@@ -472,7 +483,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
 
     const {
       startDate, endDate, tenantId, unitId, propertyId, contractType,
-      rentType, rentAmount, monthlyRate, depositHeld, notes, terms, status, contractNo
+      rentType, rentAmount, monthlyRate, depositHeld, loanAmount, notes, terms, status, contractNo
     } = req.body;
     const nextTenantId = tenantId || assignment.tenantId;
     const nextUnitId = unitId || assignment.unitId;
@@ -548,8 +559,13 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
       });
     }
 
-    const enteredRent = rentAmount ?? monthlyRate;
-    if (enteredRent !== undefined && enteredRent !== null && enteredRent === '') {
+    const targetContractType = contractType !== undefined ? (contractType === 'Business' ? 'Business' : 'Rent') : (assignment.contractType || 'Rent');
+    let enteredRent = rentAmount ?? monthlyRate;
+    if (targetContractType === 'Business') {
+      if (enteredRent === undefined || enteredRent === null || enteredRent === '' || isNaN(Number(enteredRent))) {
+        enteredRent = 0;
+      }
+    } else if (enteredRent !== undefined && enteredRent !== null && enteredRent === '') {
       return res.status(400).json({ success: false, message: 'Rent amount cannot be empty' });
     }
     const previousState = {
@@ -564,6 +580,7 @@ router.put('/:id', protect, authorize('admin', 'manager'), [
     assignment.unitId = nextUnitId;
     if (contractType !== undefined) assignment.contractType = contractType === 'Business' ? 'Business' : 'Rent';
     if (depositHeld !== undefined) assignment.depositHeld = Number(depositHeld) || 0;
+    if (loanAmount !== undefined) assignment.loanAmount = Number(loanAmount) || 0;
     if (contractNo !== undefined) assignment.contractNo = String(contractNo).trim();
     if (notes !== undefined) assignment.notes = notes;
     await assignment.save();

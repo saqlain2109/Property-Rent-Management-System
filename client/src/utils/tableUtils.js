@@ -101,6 +101,111 @@ export function evaluateFilterRule(srcVal, operator, filterVal) {
   }
 }
 
+const MONTH_NAMES_MAP = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12
+};
+
+/**
+ * Parses any month string, ISO representation, or date into an array of chronological integers (YYYYMM).
+ * Examples:
+ *  'Jan 2026' -> [202601]
+ *  'Feb 26' -> [202602]
+ *  'March 2026' -> [202603]
+ *  'Sept 25' -> [202509]
+ *  '2026-02' -> [202602]
+ *  'Jan 2026, Feb 2026' -> [202601, 202602]
+ */
+export function parseMonthChronological(val) {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return [val.getFullYear() * 100 + (val.getMonth() + 1)];
+  }
+
+  if (Array.isArray(val)) {
+    const list = [];
+    for (const item of val) {
+      const parsed = parseMonthChronological(item);
+      if (parsed) list.push(...parsed);
+    }
+    return list.length > 0 ? list : null;
+  }
+
+  const str = String(val).trim();
+  if (!str || str === '—' || str === '-' || str === 'null' || str === 'undefined') return null;
+
+  const segments = str.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+  const result = [];
+
+  for (const seg of segments) {
+    // 1. Check for YYYY-MM or YYYY/MM (e.g., 2026-02 or 2026-02-15)
+    const isoMatch = seg.match(/\b(19\d\d|20\d\d)[-/](0?[1-9]|1[0-2])\b/);
+    if (isoMatch) {
+      result.push(parseInt(isoMatch[1], 10) * 100 + parseInt(isoMatch[2], 10));
+      continue;
+    }
+
+    // 2. Check for MM/YYYY or MM-YYYY
+    const mmYyyyMatch = seg.match(/\b(0?[1-9]|1[0-2])[-/](19\d\d|20\d\d)\b/);
+    if (mmYyyyMatch) {
+      result.push(parseInt(mmYyyyMatch[2], 10) * 100 + parseInt(mmYyyyMatch[1], 10));
+      continue;
+    }
+
+    // 3. Check for month name followed or preceded by 2 or 4 digit year
+    const words = seg.replace(/[-_.'’]/g, ' ').toLowerCase().split(/\s+/).filter(Boolean);
+    let mNum = null;
+    let yNum = null;
+
+    for (const w of words) {
+      const cleanW = w.replace(/[^a-z]/g, '');
+      if (!mNum && MONTH_NAMES_MAP[cleanW]) {
+        mNum = MONTH_NAMES_MAP[cleanW];
+      }
+      const digits = w.replace(/[^0-9]/g, '');
+      if (!yNum && (digits.length === 2 || digits.length === 4)) {
+        let yr = parseInt(digits, 10);
+        if (digits.length === 2) {
+          yr = yr < 50 ? 2000 + yr : 1900 + yr;
+        }
+        if (yr >= 1970 && yr <= 2099) {
+          yNum = yr;
+        }
+      }
+    }
+
+    if (mNum && yNum) {
+      result.push(yNum * 100 + mNum);
+    }
+  }
+
+  return result.length > 0 ? result : null;
+}
+
+/**
+ * Compares two arrays of chronological month integers [YYYYMM, ...]
+ */
+export function compareChronologicalMonths(monthsA, monthsB) {
+  const len = Math.max(monthsA.length, monthsB.length);
+  for (let i = 0; i < len; i++) {
+    const mA = monthsA[i] !== undefined ? monthsA[i] : -Infinity;
+    const mB = monthsB[i] !== undefined ? monthsB[i] : -Infinity;
+    if (mA !== mB) return mA - mB;
+  }
+  return 0;
+}
+
 /**
  * Generic sorting utility for table rows
  * Supports:
@@ -130,6 +235,7 @@ export function sortDataRows(rows, sortConfigOrKey, directionOrExtractors = {}, 
   }
 
   const isAsc = String(direction).toLowerCase() === 'asc';
+  const isMonthCol = key && /month/i.test(key);
 
   return [...rows].sort((a, b) => {
     let valA;
@@ -155,7 +261,19 @@ export function sortDataRows(rows, sortConfigOrKey, directionOrExtractors = {}, 
       return isAsc ? valA - valB : valB - valA;
     }
 
-    // Date check (Date instance or YYYY-MM / YYYY-MM-DD string)
+    // Chronological Month check (e.g. accountingMonth, monthsCovered, 'Jan 2026', 'Feb 26', '2026-02')
+    const monthsA = parseMonthChronological(valA);
+    const monthsB = parseMonthChronological(valB);
+    const hasFullDayDate = /^\d{4}-\d{2}-\d{2}/.test(String(valA)) || /^\d{4}-\d{2}-\d{2}/.test(String(valB));
+
+    if (monthsA && monthsB && (isMonthCol || !hasFullDayDate)) {
+      const cmp = compareChronologicalMonths(monthsA, monthsB);
+      if (cmp !== 0) {
+        return isAsc ? cmp : -cmp;
+      }
+    }
+
+    // Date check (Date instance or YYYY-MM-DD / ISO date string)
     if (valA instanceof Date || valB instanceof Date || (typeof valA === 'string' && /^\d{4}-\d{2}/.test(valA))) {
       const dateA = new Date(valA).getTime();
       const dateB = new Date(valB).getTime();
@@ -189,5 +307,12 @@ export function extractUniqueValues(items, extractor) {
       set.add(String(val).trim());
     }
   }
-  return Array.from(set).sort((a, b) => a.localeCompare(undefined, { numeric: true, sensitivity: 'base' }));
+  return Array.from(set).sort((a, b) => {
+    const mA = parseMonthChronological(a);
+    const mB = parseMonthChronological(b);
+    if (mA && mB) {
+      return compareChronologicalMonths(mA, mB);
+    }
+    return a.localeCompare(undefined, { numeric: true, sensitivity: 'base' });
+  });
 }

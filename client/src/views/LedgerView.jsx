@@ -5,6 +5,7 @@ import ColumnManager, { getHeaderDragProps, useResizableColumns, ResizeHandle, u
 import ApexToolbar from '../components/ApexToolbar';
 import { cycleThreeStateSort, evaluateFilterRule, sortDataRows } from '../utils/tableUtils';
 import * as XLSX from 'xlsx';
+import { pushDrilldown, navigateToTab } from '../utils/navigationHistory';
 import { 
   BookOpen, CheckCircle2, TrendingUp, TrendingDown, Minus, 
   RotateCcw, RefreshCw, Eye, X, ArrowUpRight, Calendar, DollarSign,
@@ -607,13 +608,17 @@ export default function LedgerView() {
                               <tr 
                                 key={r._id} 
                                 onClick={() => {
+                                  pushDrilldown('ledger_reports', {
+                                    label: 'Tenant Ledger',
+                                    targetTab: 'payments'
+                                  });
                                   const m = r.accountingMonth || (r.receiptDate ? new Date(r.receiptDate).toISOString().slice(0, 7) : selectedMonth);
                                   if (m) localStorage.setItem('payments_selected_month', m);
                                   localStorage.setItem('payments_edit_receipt_id', String(r._id));
+                                  localStorage.removeItem('payments_target_unit_id');
                                   setSelectedMonth(null);
                                   setMonthDetails(null);
-                                  window.location.hash = '#/payments';
-                                  window.dispatchEvent(new PopStateEvent('popstate'));
+                                  navigateToTab('payments');
                                 }}
                                 className="hover:bg-teal-50/70 cursor-pointer transition-colors group/lrow"
                                 title="Click to edit payment in Edit Month / Payment screen"

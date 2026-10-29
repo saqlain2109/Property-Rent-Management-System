@@ -250,8 +250,25 @@ router.post('/', protect, authorize('admin', 'manager'), [
       }
     }
 
-    const count = await Expense.countDocuments();
-    const expenseCode = `EXP-${finalExpenseDate.getFullYear()}-${String(count + 1).padStart(5, '0')}`;
+    // Generate robust unique expenseCode
+    const year = finalExpenseDate.getFullYear();
+    const prefix = `EXP-${year}-`;
+    const lastExp = await Expense.findOne({ expenseCode: { $regex: `^${prefix}\\d+$` } })
+      .sort({ expenseCode: -1 })
+      .collation({ locale: 'en_US', numericOrdering: true });
+
+    let nextNum = 1;
+    if (lastExp && lastExp.expenseCode) {
+      const match = lastExp.expenseCode.match(/(\d+)$/);
+      if (match) {
+        nextNum = parseInt(match[1], 10) + 1;
+      }
+    }
+    let expenseCode = `${prefix}${String(nextNum).padStart(5, '0')}`;
+    while (await Expense.exists({ expenseCode })) {
+      nextNum++;
+      expenseCode = `${prefix}${String(nextNum).padStart(5, '0')}`;
+    }
 
     const expense = await Expense.create({
       ...rest,
