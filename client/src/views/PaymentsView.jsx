@@ -2647,46 +2647,41 @@ export default function PaymentsView() {
 
   return (
     <div className="space-y-2 w-full min-w-0">
-      {/* Top Header Card */}
-      <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 className="text-xl font-extrabold text-slate-900">Rent & Payments</h2>
-          </div>
-
-          {/* Tab Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-            <button
-              onClick={() => setActiveTab('sheet')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'sheet'
-                  ? 'bg-white text-emerald-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              Monthly Collection Grid
-            </button>
-            <button
-              onClick={() => setActiveTab('receipts')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'receipts'
-                  ? 'bg-white text-emerald-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5" />
-              Receipts Register ({receipts.length})
-            </button>
-          </div>
-        </div>
-      </div>
+      
 
       {/* VIEW 1: EXCEL-TEMPLATE-STYLE GRID */}
       {activeTab === 'sheet' && (
         <div className="space-y-2">
           {/* APEX Toolbar for Rent Sheet */}
           <ApexToolbar
+            statusFilter={
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('sheet')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeTab === 'sheet'
+                      ? 'bg-white text-emerald-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Monthly Collection Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('receipts')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeTab === 'receipts'
+                      ? 'bg-white text-emerald-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>Receipts Register ({receipts.length})</span>
+                </button>
+              </div>
+            }
             monthFilter={
               <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-xl border border-slate-200 shadow-2xs shrink-0">
                 <button
@@ -4771,8 +4766,35 @@ export default function PaymentsView() {
               </select>
             }
             statusFilter={
-              <select
-                value={receiptStatusFilter}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('sheet')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeTab === 'sheet'
+                        ? 'bg-white text-emerald-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Monthly Collection Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('receipts')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeTab === 'receipts'
+                        ? 'bg-white text-emerald-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    <span>Receipts Register ({receipts.length})</span>
+                  </button>
+                </div>
+                <select
+                  value={receiptStatusFilter}
                 onChange={(e) => { setReceiptStatusFilter(e.target.value); setReceiptCurrentPage(1); }}
                 className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer shrink-0"
               >
@@ -4780,6 +4802,7 @@ export default function PaymentsView() {
                 <option value="Rented">Rented</option>
                 <option value="Vacant">Vacant</option>
               </select>
+              </div>
             }
             monthFilter={
               <div className="relative shrink-0">

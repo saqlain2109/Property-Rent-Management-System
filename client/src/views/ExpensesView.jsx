@@ -1258,66 +1258,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
 
   return (
     <div className="space-y-2">
-      {/* Top Header Card */}
-      <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-2xs border border-slate-200">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <span className="p-2 bg-rose-50 text-rose-600 rounded-xl">
-                <IndianRupee className="w-5 h-5" />
-              </span>
-              <div>
-                <h2 className="text-xl font-extrabold text-slate-900">Expenses</h2>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Tab Selector (Exact same as PaymentsView) */}
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setActiveTab('sheet')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === 'sheet'
-                    ? 'bg-white text-emerald-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                Monthly Expense Grid
-              </button>
-              <button
-                onClick={() => setActiveTab('register')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                  activeTab === 'register'
-                    ? 'bg-white text-emerald-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Receipt className="w-3.5 h-3.5" />
-                All Expenses Register ({expenses.length})
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowManageHeadsModal(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-2xs active:scale-95 shrink-0 cursor-pointer"
-              title="Manage Expense Heads (Property Heads vs Common Heads)"
-            >
-              <Tag className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Expense Heads</span>
-            </button>
-
-            <button
-              onClick={handleOpenCreate}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 active:scale-95 shrink-0 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Full Form</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      
 
       {/* ======================================================== */}
       {/* VIEW 1: EXCEL-TEMPLATE-STYLE MONTHLY EXPENSE GRID */}
@@ -1326,6 +1267,55 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
         <div className="space-y-4">
           {/* APEX Toolbar for Monthly Expense Sheet */}
           <ApexToolbar
+            statusFilter={
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('sheet')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeTab === 'sheet'
+                      ? 'bg-white text-emerald-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Monthly Expense Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('register')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeTab === 'register'
+                      ? 'bg-white text-emerald-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>All Expenses Register ({expenses.length})</span>
+                </button>
+              </div>
+            }
+            primaryAction={
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowManageHeadsModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-2xs active:scale-95 cursor-pointer shrink-0"
+                  title="Manage Expense Heads"
+                >
+                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Expense Heads</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm shadow-emerald-600/30 active:scale-95 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Expense</span>
+                </button>
+              </div>
+            }
             monthFilter={
               <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-xl border border-slate-200 shadow-2xs shrink-0">
                 <button
@@ -1370,45 +1360,6 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                   className="text-[11px] font-bold px-2 py-0.5 rounded-lg text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer"
                 >
                   Today
-                </button>
-              </div>
-            }
-            statusFilter={
-              <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleScopeChange('property')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    expenseScope === 'property'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Building2 className="w-3.5 h-3.5" />
-                  <span>Property</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleScopeChange('other')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    expenseScope === 'other'
-                      ? 'bg-purple-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Other</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleScopeChange('all')}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    expenseScope === 'all'
-                      ? 'bg-slate-800 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <span>All</span>
                 </button>
               </div>
             }
@@ -2059,8 +2010,56 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
         <div className="space-y-4">
           {/* APEX Interactive Toolbar for Register */}
           <ApexToolbar
+            primaryAction={
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowManageHeadsModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-2xs active:scale-95 cursor-pointer shrink-0"
+                  title="Manage Expense Heads"
+                >
+                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Expense Heads</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm shadow-emerald-600/30 active:scale-95 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Expense</span>
+                </button>
+              </div>
+            }
             statusFilter={
-              <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('sheet')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeTab === 'sheet'
+                        ? 'bg-white text-emerald-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Monthly Expense Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('register')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeTab === 'register'
+                        ? 'bg-white text-emerald-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    <span>All Expenses Register ({expenses.length})</span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0">
                 <button
                   type="button"
                   onClick={() => handleScopeChange('property')}
@@ -2096,6 +2095,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                 >
                   <span>All</span>
                 </button>
+              </div>
               </div>
             }
             searchPlaceholder="Search description, payee, or property..."
