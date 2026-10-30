@@ -68,7 +68,7 @@
     "unitId": "6ada066dd7c483f46dca037d",
     "tenantId": "6ada066dd7c483f46dca0397",
     "rentType": "Monthly Fixed",
-    "monthlyRate": 78750,
+    "monthlyRate": 75000,
     "annualRate": 945000,
     "cashPortion": 0,
     "chequePortion": 0,
@@ -79,7 +79,7 @@
     "terms": "5% rent escalation from Sep 2026",
     "isCurrentRate": true,
     "createdAt": "2026-10-22T12:49:49.625Z",
-    "updatedAt": "2026-10-22T12:49:49.625Z",
+    "updatedAt": "2026-10-30T08:07:00.940Z",
     "__v": 0,
     "contractType": "Rent"
   },

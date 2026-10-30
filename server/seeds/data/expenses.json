@@ -5068,5 +5068,23 @@
     "createdAt": "2026-10-28T16:47:45.536Z",
     "updatedAt": "2026-10-28T16:47:45.536Z",
     "__v": 0
+  },
+  {
+    "_id": "6ae2f41949843583ab0a45bf",
+    "expenseCode": "EXP-2026-00295",
+    "expenseDate": "2026-02-01T00:00:00.000Z",
+    "expenseMonth": "2026-02",
+    "propertyId": "6ada066dd7c483f46dca0378",
+    "unitId": null,
+    "headType": "Property",
+    "category": "Micelleneous",
+    "amount": 4800,
+    "description": "sweeper",
+    "recordedBy": "6ada066dd7c483f46dca036f",
+    "isReversed": true,
+    "reversalReason": "Reversed from Rents & Payments view",
+    "createdAt": "2026-10-29T07:22:01.843Z",
+    "updatedAt": "2026-10-29T07:22:07.247Z",
+    "__v": 0
   }
 ]

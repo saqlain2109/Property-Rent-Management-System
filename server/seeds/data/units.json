@@ -45,7 +45,7 @@
     "unitName": "65 Large Godown",
     "areaSqFt": 1500,
     "carpetAreaSqFt": 1500,
-    "monthlyRentExpected": 78750,
+    "monthlyRentExpected": 75000,
     "unitType": "Commercial Godown",
     "floor": "",
     "occupancyStatus": "Occupied",
@@ -53,7 +53,7 @@
     "isActive": true,
     "displayOrder": 2,
     "createdAt": "2026-10-22T12:49:49.472Z",
-    "updatedAt": "2026-10-23T06:58:48.287Z",
+    "updatedAt": "2026-10-30T08:07:00.935Z",
     "__v": 0
   },
   {
