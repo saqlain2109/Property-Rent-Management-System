@@ -479,29 +479,68 @@ export default function PaymentsView() {
     return false;
   };
 
-  // Locate existing receipt for a unit in a given accounting month (strictly 1 receipt per unit per accounting month)
+  // Locate existing receipt for a unit in a given month (checks month paid for first, then accounting month)
   const findReceiptForUnitAndMonth = (item, targetMonth = selectedMonth) => {
     const unitIdStr = String(item?.unit?._id || item?.unitId?._id || item?.unitId || item?.unit || '');
     if (!unitIdStr) return null;
     const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
     const tenantIdStr = String(item?.tenant?._id || item?.tenantId?._id || item?.tenantId || item?.tenant || '');
 
-    // Priority 1: Match unit, contractNo, tenantId whose accountingMonth is targetMonth
+    // 1. Priority 1: Match unit, contractNo, tenantId that covers targetMonth in monthPaidFor / allocations
     if (contractNoStr && tenantIdStr) {
-      const match = receipts.find(r => 
+      const exactCovered = receipts.find(r => 
         !r.isReversed &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
+        isContractMatch(r.contractNo, contractNoStr) &&
+        receiptCoversMonthPaidFor(r, targetMonth)
+      );
+      if (exactCovered) return exactCovered;
+    }
+
+    // 2. Priority 2: Match unit, tenantId that covers targetMonth
+    if (tenantIdStr) {
+      const tenantCovered = receipts.find(r => 
+        !r.isReversed &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
+        receiptCoversMonthPaidFor(r, targetMonth)
+      );
+      if (tenantCovered) return tenantCovered;
+    }
+
+    // 3. Priority 3: Match unit that covers targetMonth
+    const unitCovered = receipts.find(r => 
+      !r.isReversed &&
+      String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+      receiptCoversMonthPaidFor(r, targetMonth)
+    );
+    if (unitCovered) return unitCovered;
+
+    // 4. Priority 4: Match unit, contractNo, tenantId by accounting month
+    if (contractNoStr && tenantIdStr) {
+      const exactMatch = receipts.find(r => 
         receiptMatchesAccountingMonth(r, targetMonth) &&
         String(r.unitId?._id || r.unitId || '') === unitIdStr &&
         String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
         isContractMatch(r.contractNo, contractNoStr)
       );
-      if (match) return match;
+      if (exactMatch) return exactMatch;
     }
 
-    // Priority 2: Match unit, tenantId whose accountingMonth is targetMonth
+    // 5. Priority 5: Match unit, contractNo by accounting month
+    if (contractNoStr) {
+      const contractMatch = receipts.find(r => 
+        receiptMatchesAccountingMonth(r, targetMonth) &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        isContractMatch(r.contractNo, contractNoStr)
+      );
+      if (contractMatch) return contractMatch;
+    }
+
+    // 6. Priority 6: Match unit, tenantId by accounting month
     if (tenantIdStr) {
       const tenantMatch = receipts.find(r => 
-        !r.isReversed &&
         receiptMatchesAccountingMonth(r, targetMonth) &&
         String(r.unitId?._id || r.unitId || '') === unitIdStr &&
         String(r.tenantId?._id || r.tenantId || '') === tenantIdStr
@@ -509,33 +548,11 @@ export default function PaymentsView() {
       if (tenantMatch) return tenantMatch;
     }
 
-    // Priority 3: Match unit whose accountingMonth is targetMonth
+    // 7. Priority 7: Match unit by accounting month
     return receipts.find(r => 
-      !r.isReversed &&
       receiptMatchesAccountingMonth(r, targetMonth) &&
       String(r.unitId?._id || r.unitId || '') === unitIdStr
     ) || null;
-  };
-
-  // Calculate how much has been paid for each monthYear across all active receipts for this unit (excluding currentReceiptId)
-  const getPaidAmountForMonthYear = (unitIdStr, monthYearStr, currentReceiptId = null) => {
-    if (!unitIdStr || !monthYearStr) return 0;
-    return receipts
-      .filter(r => 
-        !r.isReversed &&
-        (!currentReceiptId || String(r._id) !== String(currentReceiptId)) &&
-        String(r.unitId?._id || r.unitId || '') === String(unitIdStr)
-      )
-      .reduce((sum, r) => {
-        if (r.allocations && Array.isArray(r.allocations) && r.allocations.length > 0) {
-          const a = r.allocations.find(al => al.rentMonthYear === monthYearStr);
-          return sum + (a ? Number(a.allocatedAmount || 0) : 0);
-        }
-        if (r.monthPaidFor && String(r.monthPaidFor).split(',').map(s => s.trim()).includes(monthYearStr)) {
-          return sum + Number(r.rentAmount || r.totalAmount || 0);
-        }
-        return sum;
-      }, 0);
   };
 
   // Resolve accurate month(s) paid for a unit/item from existing receipt or allocations
@@ -775,11 +792,12 @@ export default function PaymentsView() {
     };
   };
 
-  // Get all payable months for a tenant with strict duplicate-payment prevention:
+  // Get all payable months for a tenant:
+  // 1. Accounting month as 1st month
+  // 2. Followed by previous months in descending order (e.g., if accounting month is Dec '25 -> Nov '25, Oct '25, Sep '25...)
+  // 3. Followed by upcoming advance months
   const getPayableMonthsList = (item, activeMonth, currentSelectedMonths = []) => {
     const defaultRate = item.monthlyRentExpected || item.unit?.monthlyRentExpected || 0;
-    const unitIdStr = String(item.unit?._id || item.unitId || '');
-    const currentRec = findReceiptForUnitAndMonth(item, activeMonth);
     const list = [];
 
     // Parse activeMonth (YYYY-MM)
@@ -787,44 +805,45 @@ export default function PaymentsView() {
     const actYear = parseInt(actYearStr, 10) || new Date().getFullYear();
     const actMonth = parseInt(actMonthStr, 10) || (new Date().getMonth() + 1);
 
-    // Helper to evaluate month status
-    const evaluateMonth = (mStr, type) => {
-      const mData = item.monthsBreakdown?.find(m => m.monthYear === mStr);
-      const expRate = mData?.expectedRate || defaultRate;
-      
-      // How much has been paid by OTHER receipts for this month?
-      const paidByOthers = getPaidAmountForMonthYear(unitIdStr, mStr, currentRec?._id);
-      
-      // Is it fully paid by other receipts?
-      const isFullyPaid = paidByOthers >= expRate && expRate > 0;
-      const isPartiallyPaid = paidByOthers > 0 && paidByOthers < expRate;
-      const remainingDue = Math.max(0, expRate - paidByOthers);
-
-      return {
-        monthYear: mStr,
-        dueAmount: isFullyPaid ? 0 : (remainingDue > 0 ? remainingDue : expRate),
-        expectedRate: expRate,
-        paidByOthers,
-        isFullyPaid,
-        isPartiallyPaid,
-        type
-      };
-    };
-
     // 1. Active accounting month (1st month)
-    list.push(evaluateMonth(activeMonth, 'current'));
+    const activeData = item.monthsBreakdown?.find(m => m.monthYear === activeMonth);
+    const activePaid = activeData ? activeData.allocatedAmount : 0;
+    const activeExpected = activeData ? activeData.expectedRate : defaultRate;
+    const remainingActive = Math.max(0, activeExpected - activePaid);
+
+    list.push({
+      monthYear: activeMonth,
+      dueAmount: remainingActive > 0 ? remainingActive : (activeExpected || defaultRate),
+      type: 'current'
+    });
 
     // 2. Previous months in descending order (e.g. if accounting month is Dec '25 -> Nov '25, Oct '25, Sep '25...)
     for (let i = 1; i <= 12; i++) {
       const d = new Date(actYear, actMonth - 1 - i, 1);
       const mStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      list.push(evaluateMonth(mStr, 'past'));
+      const mData = item.monthsBreakdown?.find(b => b.monthYear === mStr);
+      const paid = mData ? mData.allocatedAmount : 0;
+      const exp = mData ? mData.expectedRate : defaultRate;
+      const remaining = mData ? (mData.outstandingAmount > 0 ? mData.outstandingAmount : Math.max(0, exp - paid)) : defaultRate;
+
+      list.push({
+        monthYear: mStr,
+        dueAmount: remaining > 0 ? remaining : defaultRate,
+        type: 'past'
+      });
     }
 
     // 3. Upcoming advance months (at least 2 months in future, showing 6 months in chronological order)
     const upcoming = getUpcomingMonths(activeMonth, 6);
     upcoming.forEach(mStr => {
-      list.push(evaluateMonth(mStr, 'advance'));
+      const fData = item.monthsBreakdown?.find(bm => bm.monthYear === mStr);
+      const fPaid = fData ? fData.allocatedAmount : 0;
+      const fExp = fData ? fData.expectedRate : defaultRate;
+      list.push({
+        monthYear: mStr,
+        dueAmount: Math.max(0, fExp - fPaid) || defaultRate,
+        type: 'advance'
+      });
     });
 
     // 4. Any month in currentSelectedMonths not already in list
@@ -832,11 +851,15 @@ export default function PaymentsView() {
       if (!list.some(x => x.monthYear === mStr)) {
         const isAdv = mStr > activeMonth;
         const isPast = mStr < activeMonth;
-        list.push(evaluateMonth(mStr, isAdv ? 'advance' : isPast ? 'past' : 'current'));
+        list.push({
+          monthYear: mStr,
+          dueAmount: defaultRate,
+          type: isAdv ? 'advance' : isPast ? 'past' : 'current'
+        });
       }
     });
 
-    // Deduplicate while preserving order: Accounting Month 1st, then past months, then advance months
+    // Deduplicate while preserving order: Accounting Month 1st, then past months (Nov 25, Oct 25, Sep 25...), then advance months
     const uniqueMap = new Map();
     list.forEach(mItem => {
       if (!uniqueMap.has(mItem.monthYear)) {
@@ -975,14 +998,6 @@ export default function PaymentsView() {
     const rowKey = getRowKey(item);
     const current = getRowDraft(item);
     const currentMonths = current.selectedMonths || [];
-
-    // Safety guard: if this month is already paid in full by another receipt, block selection!
-    const checkList = getPayableMonthsList(item, selectedMonth, currentMonths);
-    const targetMonthItem = checkList.find(p => p.monthYear === monthStr);
-    if (targetMonthItem?.isFullyPaid && !currentMonths.includes(monthStr)) {
-      return; // Do not allow selecting already-paid duplicate month!
-    }
-
     let nextMonths;
     if (currentMonths.includes(monthStr)) {
       nextMonths = currentMonths.filter(m => m !== monthStr);
@@ -1264,7 +1279,7 @@ export default function PaymentsView() {
           !r.isReversed &&
           r._id.toString() !== existingReceipt._id.toString() &&
           String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-          receiptMatchesAccountingMonth(r, targetMonth)
+          r.allocations?.some(a => a.rentMonthYear === targetMonth)
         );
         for (const dup of duplicates) {
           try { await API.delete(`/payments/${dup._id}/permanent`); } catch(e){}
@@ -3344,47 +3359,29 @@ export default function PaymentsView() {
                                                   </span>
                                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                                                     {pastMonths.map(m => (
-                                                      m.isFullyPaid ? (
-                                                        <div
-                                                          key={m.monthYear}
-                                                          className="flex items-center justify-between gap-1.5 p-1.5 rounded-lg border bg-slate-50/80 border-slate-200/90 text-slate-400 select-none cursor-not-allowed"
-                                                          title={`${formatMonthYear(m.monthYear)} is already paid in full by another receipt.`}
-                                                        >
-                                                          <div className="flex items-center gap-1.5 min-w-0">
-                                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                                            <span className="text-slate-500 font-bold text-[11px] truncate line-through decoration-slate-300">
-                                                              {formatMonthYear(m.monthYear)}
-                                                            </span>
-                                                          </div>
-                                                          <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">
-                                                            Paid in Full
+                                                      <label 
+                                                        key={m.monthYear} 
+                                                        className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
+                                                          selMonths.includes(m.monthYear)
+                                                            ? 'bg-amber-50/80 border-amber-400 shadow-2xs'
+                                                            : 'hover:bg-slate-50 border-slate-200/80'
+                                                        }`}
+                                                      >
+                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                          <input
+                                                            type="checkbox"
+                                                            checked={selMonths.includes(m.monthYear)}
+                                                            onChange={() => handleToggleMonthForRow(item, m.monthYear)}
+                                                            className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                          />
+                                                          <span className="text-slate-800 font-bold text-[11px] truncate">
+                                                            {formatMonthYear(m.monthYear)}
                                                           </span>
                                                         </div>
-                                                      ) : (
-                                                        <label 
-                                                          key={m.monthYear} 
-                                                          className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
-                                                            selMonths.includes(m.monthYear)
-                                                              ? 'bg-amber-50/80 border-amber-400 shadow-2xs'
-                                                              : 'hover:bg-slate-50 border-slate-200/80'
-                                                          }`}
-                                                        >
-                                                          <div className="flex items-center gap-1.5 min-w-0">
-                                                            <input
-                                                              type="checkbox"
-                                                              checked={selMonths.includes(m.monthYear)}
-                                                              onChange={() => handleToggleMonthForRow(item, m.monthYear)}
-                                                              className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                                            />
-                                                            <span className="text-slate-800 font-bold text-[11px] truncate">
-                                                              {formatMonthYear(m.monthYear)}
-                                                            </span>
-                                                          </div>
-                                                          <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/90 px-1.5 py-0.5 rounded shrink-0">
-                                                            {m.isPartiallyPaid ? `Due ₹${Number(m.dueAmount || 0).toLocaleString('en-IN')}` : `₹${Number(m.dueAmount || 0).toLocaleString('en-IN')}`}
-                                                          </span>
-                                                        </label>
-                                                      )
+                                                        <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/90 px-1.5 py-0.5 rounded shrink-0">
+                                                          ₹{Number(m.dueAmount || 0).toLocaleString('en-IN')}
+                                                        </span>
+                                                      </label>
                                                     ))}
                                                   </div>
                                                 </div>
