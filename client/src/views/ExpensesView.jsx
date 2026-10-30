@@ -1330,7 +1330,7 @@ const totalSheetTableWidth = visibleSheetColumns.reduce((sum, colId) => {
                 <div className="flex items-center gap-1 px-1.5 py-0.5">
                   <Calendar className="w-3 h-3 text-emerald-600 shrink-0" />
                   <div className="text-left leading-none">
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Month</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Accounting Month</span>
                     <span className="text-xs font-black text-slate-900 whitespace-nowrap leading-tight">{formatMonthYear(selectedMonth)}</span>
                   </div>
                 </div>

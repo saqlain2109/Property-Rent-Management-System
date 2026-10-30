@@ -23,7 +23,14 @@ export function useModalBackHandler(isOpen, onClose) {
     window.history.pushState(modalState, '', currentHash);
     isBackTriggeredRef.current = false;
 
-    const handlePopState = () => {
+    // Guard: ignore popstate events during initial mount or React StrictMode cleanup cycles
+    let isArmed = false;
+    const armTimer = setTimeout(() => {
+      isArmed = true;
+    }, 100);
+
+    const handlePopState = (e) => {
+      if (!isArmed) return;
       // When back button is pressed, dismiss the modal
       isBackTriggeredRef.current = true;
       if (typeof onCloseRef.current === 'function') {
@@ -34,13 +41,13 @@ export function useModalBackHandler(isOpen, onClose) {
     window.addEventListener('popstate', handlePopState, { once: true });
 
     return () => {
+      clearTimeout(armTimer);
       window.removeEventListener('popstate', handlePopState);
-      // If closed by user clicking an on-screen button (Save/Cancel/Close/X)
-      // pop the pushed modal entry from history so user doesn't have a dead back click,
-      // but only if the user hasn't already navigated to a different screen/hash
+      // Clean up modal state in history without calling window.history.back()
+      // Calling history.back() inside unmount causes asynchronous popstate races in React 18 / StrictMode
       if (!isBackTriggeredRef.current && window.history.state?.modalKey === modalKey) {
         if (window.location.hash === currentHash) {
-          window.history.back();
+          window.history.replaceState({ modalOpen: false }, '', currentHash);
         }
       }
     };

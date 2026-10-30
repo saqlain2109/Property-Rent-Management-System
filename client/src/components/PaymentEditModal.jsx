@@ -1453,7 +1453,7 @@ export default function PaymentEditModal({
                   </span>
                 </div>
                 <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  Month: {formatMonthYear(activeMonth)}
+                  Accounting Month: {formatMonthYear(activeMonth)}
                 </span>
               </div>
 

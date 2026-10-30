@@ -91,7 +91,7 @@ const RECEIPTS_COLUMNS_DEF = [
   { id: 'tenant', label: 'Tenant & Sub-Unit', defaultVisible: true },
   { id: 'accountingMonth', label: 'Accounting Month', defaultVisible: true },
   { id: 'monthsCovered', label: 'Month Paid For', defaultVisible: true },
-  { id: 'paidForMonth', label: 'Paid for Month', defaultVisible: false },
+  { id: 'paidForMonth', label: 'Month Paid For', defaultVisible: false },
   { id: 'rentAmount', label: 'Rent Amount Paid', defaultVisible: true },
   { id: 'depositAmount', label: 'Deposit Amount', defaultVisible: true },
   { id: 'totalAmount', label: 'Total Amount Paid', defaultVisible: true },
@@ -479,47 +479,25 @@ export default function PaymentsView() {
     return false;
   };
 
-  // Locate existing receipt for a unit in a given month (checks month paid for first, then accounting month)
+  // Locate existing receipt for a unit in a given accounting month (strictly matches Accounting Month)
   const findReceiptForUnitAndMonth = (item, targetMonth = selectedMonth) => {
+    if (!item) return null;
+
+    // 0. Priority 0: Direct receiptId match if item has receiptId for this accounting month
+    if (item?.receiptId) {
+      const byId = receipts.find(r => !r.isReversed && String(r._id) === String(item.receiptId));
+      if (byId && receiptMatchesAccountingMonth(byId, targetMonth)) return byId;
+    }
+
     const unitIdStr = String(item?.unit?._id || item?.unitId?._id || item?.unitId || item?.unit || '');
     if (!unitIdStr) return null;
     const contractNoStr = String(item?.contractNo || '').trim().toLowerCase();
     const tenantIdStr = String(item?.tenant?._id || item?.tenantId?._id || item?.tenantId || item?.tenant || '');
 
-    // 1. Priority 1: Match unit, contractNo, tenantId that covers targetMonth in monthPaidFor / allocations
-    if (contractNoStr && tenantIdStr) {
-      const exactCovered = receipts.find(r => 
-        !r.isReversed &&
-        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
-        isContractMatch(r.contractNo, contractNoStr) &&
-        receiptCoversMonthPaidFor(r, targetMonth)
-      );
-      if (exactCovered) return exactCovered;
-    }
-
-    // 2. Priority 2: Match unit, tenantId that covers targetMonth
-    if (tenantIdStr) {
-      const tenantCovered = receipts.find(r => 
-        !r.isReversed &&
-        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-        String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
-        receiptCoversMonthPaidFor(r, targetMonth)
-      );
-      if (tenantCovered) return tenantCovered;
-    }
-
-    // 3. Priority 3: Match unit that covers targetMonth
-    const unitCovered = receipts.find(r => 
-      !r.isReversed &&
-      String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-      receiptCoversMonthPaidFor(r, targetMonth)
-    );
-    if (unitCovered) return unitCovered;
-
-    // 4. Priority 4: Match unit, contractNo, tenantId by accounting month
+    // 1. Priority 1: Match unit, contractNo, tenantId by Accounting Month
     if (contractNoStr && tenantIdStr) {
       const exactMatch = receipts.find(r => 
+        !r.isReversed &&
         receiptMatchesAccountingMonth(r, targetMonth) &&
         String(r.unitId?._id || r.unitId || '') === unitIdStr &&
         String(r.tenantId?._id || r.tenantId || '') === tenantIdStr &&
@@ -528,19 +506,10 @@ export default function PaymentsView() {
       if (exactMatch) return exactMatch;
     }
 
-    // 5. Priority 5: Match unit, contractNo by accounting month
-    if (contractNoStr) {
-      const contractMatch = receipts.find(r => 
-        receiptMatchesAccountingMonth(r, targetMonth) &&
-        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-        isContractMatch(r.contractNo, contractNoStr)
-      );
-      if (contractMatch) return contractMatch;
-    }
-
-    // 6. Priority 6: Match unit, tenantId by accounting month
+    // 2. Priority 2: Match unit, tenantId by Accounting Month
     if (tenantIdStr) {
       const tenantMatch = receipts.find(r => 
+        !r.isReversed &&
         receiptMatchesAccountingMonth(r, targetMonth) &&
         String(r.unitId?._id || r.unitId || '') === unitIdStr &&
         String(r.tenantId?._id || r.tenantId || '') === tenantIdStr
@@ -548,8 +517,20 @@ export default function PaymentsView() {
       if (tenantMatch) return tenantMatch;
     }
 
-    // 7. Priority 7: Match unit by accounting month
+    // 3. Priority 3: Match unit, contractNo by Accounting Month
+    if (contractNoStr) {
+      const contractMatch = receipts.find(r => 
+        !r.isReversed &&
+        receiptMatchesAccountingMonth(r, targetMonth) &&
+        String(r.unitId?._id || r.unitId || '') === unitIdStr &&
+        isContractMatch(r.contractNo, contractNoStr)
+      );
+      if (contractMatch) return contractMatch;
+    }
+
+    // 4. Priority 4: Match unit by Accounting Month
     return receipts.find(r => 
+      !r.isReversed &&
       receiptMatchesAccountingMonth(r, targetMonth) &&
       String(r.unitId?._id || r.unitId || '') === unitIdStr
     ) || null;
@@ -638,6 +619,7 @@ export default function PaymentsView() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedLedgerModal, setSelectedLedgerModal] = useState(null);
   const [returnToLedgerModal, setReturnToLedgerModal] = useState(null);
+  const isDrilldownOriginRef = useRef(false);
 
   const handleClosePaymentModal = () => {
     setShowPaymentModal(false);
@@ -651,9 +633,12 @@ export default function PaymentsView() {
       setSelectedLedgerModal(returnToLedgerModal);
       setReturnToLedgerModal(null);
     }
-    const drilldown = peekDrilldown();
-    if (drilldown) {
-      popAndReturnDrilldown();
+    if (isDrilldownOriginRef.current) {
+      isDrilldownOriginRef.current = false;
+      const drilldown = peekDrilldown();
+      if (drilldown) {
+        popAndReturnDrilldown();
+      }
     }
   };
 
@@ -894,22 +879,19 @@ export default function PaymentsView() {
       ? Number(existingReceipt.totalAmount)
       : null;
 
-    const paidThisMonth = existingTotal !== null
-      ? existingTotal
-      : (directAllocated > 0
-          ? directAllocated
-          : (monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : (item.actualPaidForMonth || 0)));
+    // Strictly reflect collections recorded in this Accounting Month
+    const paidThisMonth = existingTotal !== null ? existingTotal : 0;
 
     const existingRent = (existingReceipt && !existingReceipt.isReversed && existingReceipt.rentAmount !== undefined && existingReceipt.status !== 'Vacant')
       ? Number(existingReceipt.rentAmount)
-      : null;
+      : existingTotal;
     const existingDeposit = (existingReceipt && !existingReceipt.isReversed && existingReceipt.depositAmount !== undefined && existingReceipt.status !== 'Vacant')
       ? Number(existingReceipt.depositAmount)
       : 0;
 
     const defaultTotal = paidThisMonth > 0 ? String(paidThisMonth) : '0';
     const defaultDeposit = existingDeposit > 0 ? String(existingDeposit) : '0';
-    const defaultRent = existingRent !== null
+    const defaultRent = existingRent !== null && existingRent !== undefined
       ? String(existingRent)
       : (paidThisMonth > 0 ? String(paidThisMonth - existingDeposit) : '0');
 
@@ -921,7 +903,7 @@ export default function PaymentsView() {
       rentAmount: rowStatus === 'Vacant' ? '0' : defaultRent,
       depositAmount: rowStatus === 'Vacant' ? '0' : defaultDeposit,
       amount: rowStatus === 'Vacant' ? '0' : defaultTotal,
-      selectedMonths: initialSelectedMonths,
+      selectedMonths: initialSelectedMonths.length > 0 ? initialSelectedMonths : [selectedMonth],
     };
   };
 
@@ -1220,9 +1202,12 @@ export default function PaymentsView() {
       ? Number(draft.rentAmount)
       : Math.max(0, enteredTotal - enteredDeposit);
 
-    const targetMonths = (draft.selectedMonths && draft.selectedMonths.length > 0)
+    const resolvedMonths = (draft.selectedMonths && draft.selectedMonths.length > 0)
       ? draft.selectedMonths
       : resolveSelectedMonthsForItem(item, targetMonth, existingReceipt);
+    const targetMonths = (resolvedMonths && resolvedMonths.length > 0)
+      ? resolvedMonths
+      : [targetMonth];
 
     let rem = enteredRent;
     const singleAllocation = targetMonths.map((m, idx) => {
@@ -1279,7 +1264,7 @@ export default function PaymentsView() {
           !r.isReversed &&
           r._id.toString() !== existingReceipt._id.toString() &&
           String(r.unitId?._id || r.unitId || '') === unitIdStr &&
-          r.allocations?.some(a => a.rentMonthYear === targetMonth)
+          receiptMatchesAccountingMonth(r, targetMonth)
         );
         for (const dup of duplicates) {
           try { await API.delete(`/payments/${dup._id}/permanent`); } catch(e){}
@@ -1587,6 +1572,7 @@ export default function PaymentsView() {
 
     // Open Fast Payment Modal for a specific row / tenant
   const openFastPaymentModal = (item) => {
+    isDrilldownOriginRef.current = false;
     const existingReceipt = findReceiptForUnitAndMonth(item, selectedMonth);
     setEditingReceiptId(existingReceipt ? existingReceipt._id : null);
     setEditingReceiptObj(existingReceipt || null);
@@ -1596,6 +1582,7 @@ export default function PaymentsView() {
 
   // Open Modal to Edit an Existing Receipt
   const openEditReceiptModal = (receipt, fromLedgerModal = null) => {
+    isDrilldownOriginRef.current = false;
     if (fromLedgerModal) {
       setReturnToLedgerModal(fromLedgerModal);
       setSelectedLedgerModal(null);
@@ -1628,6 +1615,7 @@ export default function PaymentsView() {
       // 2. Open edit receipt modal if a specific receipt edit was requested
       const targetReceiptId = localStorage.getItem('payments_edit_receipt_id');
       if (targetReceiptId) {
+        isDrilldownOriginRef.current = true;
         localStorage.removeItem('payments_edit_receipt_id');
         localStorage.removeItem('payments_target_unit_id');
         setEditingReceiptId(targetReceiptId);
@@ -1638,8 +1626,8 @@ export default function PaymentsView() {
         return;
       }
 
-      // 3. If already actively editing a receipt, protect it from being overridden by background data updates
-      if (showPaymentModal && editingReceiptId) {
+      // 3. If modal is already open, protect it from being overridden by background data updates
+      if (showPaymentModal) {
         return;
       }
 
@@ -1663,7 +1651,7 @@ export default function PaymentsView() {
       window.removeEventListener('popstate', checkIncomingEditRequest);
       window.removeEventListener('app_check_edit_request', checkIncomingEditRequest);
     };
-  }, [selectedMonth, outstandingData, showPaymentModal, editingReceiptId]);
+  }, [selectedMonth, outstandingData]);
 
   // Keep editingReceiptObj synchronized once receipts load asynchronously
   useEffect(() => {
@@ -1944,29 +1932,11 @@ export default function PaymentsView() {
 
   const totalPaidSum = React.useMemo(() => {
     return filteredOut.reduce((sum, item) => {
-      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-      const directAllocated = receipts
-        .filter(r => !r.isReversed &&
-          (r.unitId?._id === item.unit?._id || r.unitId === item.unit?._id) &&
-          (!item.tenant?._id || r.tenantId?._id === item.tenant?._id || r.tenantId === item.tenant?._id)
-        )
-        .reduce((s, r) => {
-          const alloc = r.allocations?.find(a => a.rentMonthYear === selectedMonth);
-          return s + (alloc ? Number(alloc.allocatedAmount || 0) : 0);
-        }, 0);
-
       const existingReceipt = findReceiptForUnitAndMonth(item, selectedMonth);
-      const existingTotal = (existingReceipt && !existingReceipt.isReversed && existingReceipt.totalAmount !== undefined && existingReceipt.status !== 'Vacant')
-        ? Number(existingReceipt.totalAmount)
-        : null;
-
-      const paid = existingTotal !== null
-        ? existingTotal
-        : (directAllocated > 0
-            ? directAllocated
-            : (monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : (item.actualPaidForMonth || 0)));
-
-      return sum + paid;
+      if (existingReceipt && !existingReceipt.isReversed && existingReceipt.status !== 'Vacant') {
+        return sum + Number(existingReceipt.totalAmount || 0);
+      }
+      return sum;
     }, 0);
   }, [filteredOut, selectedMonth, receipts]);
 
@@ -1977,9 +1947,7 @@ export default function PaymentsView() {
         const rVal = existingReceipt.rentAmount !== undefined ? Number(existingReceipt.rentAmount) : Number(existingReceipt.totalAmount || 0);
         return sum + rVal;
       }
-      const monthData = item.monthsBreakdown?.find(m => m.monthYear === selectedMonth);
-      const paid = monthData ? (monthData.actualAllocated ?? monthData.allocatedAmount ?? 0) : (item.actualPaidForMonth || 0);
-      return sum + paid;
+      return sum;
     }, 0);
   }, [filteredOut, selectedMonth, receipts]);
 
@@ -2696,7 +2664,7 @@ export default function PaymentsView() {
                 <div className="flex items-center gap-1 px-1.5 py-0.5">
                   <Calendar className="w-3 h-3 text-emerald-600 shrink-0" />
                   <div className="text-left leading-none">
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Month</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">Accounting Month</span>
                     <span className="text-xs font-black text-slate-900 whitespace-nowrap leading-tight">{formatMonthYear(selectedMonth)}</span>
                   </div>
                 </div>
@@ -3301,7 +3269,7 @@ export default function PaymentsView() {
                                             <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
                                               <div className="flex items-center gap-1.5">
                                                 <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                                                <span className="font-extrabold text-slate-900">Select Month(s) to Pay</span>
+                                                <span className="font-extrabold text-slate-900">Select Month(s) Paid For</span>
                                               </div>
                                               <button
                                                 type="button"
