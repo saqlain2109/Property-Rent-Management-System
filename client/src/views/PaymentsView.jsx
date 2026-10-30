@@ -692,6 +692,7 @@ export default function PaymentsView() {
   const [deletingRowKey, setDeletingRowKey] = useState(null);
   const [savedFeedback, setSavedFeedback] = useState({});
   const [openMonthPickerRow, setOpenMonthPickerRow] = useState(null);
+  const [monthPickerCoords, setMonthPickerCoords] = useState({ top: 0, left: 0 });
 
   // Clear drafts when selected month changes so default calculations or blanks apply fresh
   useEffect(() => {
@@ -3228,7 +3229,29 @@ export default function PaymentsView() {
                                       type="button"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setOpenMonthPickerRow(openMonthPickerRow === rowKey ? null : rowKey);
+                                        if (openMonthPickerRow === rowKey) {
+                                          setOpenMonthPickerRow(null);
+                                        } else {
+                                          const rect = e.currentTarget.getBoundingClientRect();
+                                          const popoverWidth = 450;
+                                          const popoverHeight = 360;
+                                          
+                                          // Smart Horizontal: fit within window with 16px margins
+                                          let left = rect.left;
+                                          if (left + popoverWidth > window.innerWidth - 16) {
+                                            left = window.innerWidth - popoverWidth - 16;
+                                          }
+                                          if (left < 16) left = 16;
+
+                                          // Smart Vertical: prefer below button, flip above if not enough space
+                                          let top = rect.bottom + 6;
+                                          if (top + popoverHeight > window.innerHeight - 16 && rect.top > popoverHeight + 16) {
+                                            top = rect.top - popoverHeight - 6;
+                                          }
+
+                                          setMonthPickerCoords({ top, left });
+                                          setOpenMonthPickerRow(rowKey);
+                                        }
                                       }}
                                       className="w-full inline-flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-white hover:border-emerald-500 hover:shadow-xs transition-all text-slate-800 group"
                                       title="Click to select or change payment month(s)"
@@ -3252,197 +3275,205 @@ export default function PaymentsView() {
                                   </div>
 
                                   {/* Multi-Month Selection Popover */}
-                                  {openMonthPickerRow === rowKey && (() => {
-                                    const payableMonths = getPayableMonthsList(item, selectedMonth, selMonths);
-                                    const currentMonths = payableMonths.filter(m => m.type === 'current');
-                                    const pastMonths = payableMonths.filter(m => m.type === 'past').sort((a, b) => b.monthYear.localeCompare(a.monthYear));
-                                    const advanceMonths = payableMonths.filter(m => m.type === 'advance').sort((a, b) => a.monthYear.localeCompare(b.monthYear));
+                                  {openMonthPickerRow === rowKey && typeof document !== 'undefined' && createPortal(
+                                    (() => {
+                                      const payableMonths = getPayableMonthsList(item, selectedMonth, selMonths);
+                                      const currentMonths = payableMonths.filter(m => m.type === 'current');
+                                      const pastMonths = payableMonths.filter(m => m.type === 'past').sort((a, b) => b.monthYear.localeCompare(a.monthYear));
+                                      const advanceMonths = payableMonths.filter(m => m.type === 'advance').sort((a, b) => a.monthYear.localeCompare(b.monthYear));
 
-                                    return (
-                                      <>
-                                        {/* Click-away backdrop overlay to dismiss on outside click */}
-                                        <div 
-                                          className="fixed inset-0 z-40 bg-slate-900/10 cursor-default" 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setOpenMonthPickerRow(null);
-                                          }} 
-                                        />
+                                      return (
+                                        <div className="fixed inset-0 z-[99999] pointer-events-auto">
+                                          {/* Click-away backdrop overlay to dismiss on outside click */}
+                                          <div 
+                                            className="fixed inset-0 bg-slate-900/15 backdrop-blur-[0.5px] cursor-default" 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setOpenMonthPickerRow(null);
+                                            }} 
+                                          />
 
-                                        <div
-                                          onClick={(e) => e.stopPropagation()}
-                                          className="absolute top-11 left-0 z-50 bg-white border border-slate-200 rounded-2xl shadow-2xl p-3 w-[450px] max-w-[92vw] text-xs cursor-default text-left animate-in fade-in zoom-in-95 duration-150"
-                                        >
-                                          {/* Popover Header */}
-                                          <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
-                                            <div className="flex items-center gap-1.5">
-                                              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                                              <span className="font-extrabold text-slate-900">Select Month(s) to Pay</span>
-                                            </div>
-                                            <button
-                                              type="button"
-                                              onClick={() => setOpenMonthPickerRow(null)}
-                                              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md p-1 transition-colors cursor-pointer"
-                                              title="Close"
-                                            >
-                                              <X className="w-3.5 h-3.5" />
-                                            </button>
-                                          </div>
-
-                                          {/* 2-Columns Side by Side Month Grid to eliminate long vertical scrolling */}
-                                          <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-                                            {/* 1. Accounting Month (1st) */}
-                                            {currentMonths.length > 0 && (
-                                              <div>
-                                                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded block border border-emerald-200/60 mb-1">
-                                                  Accounting Month
-                                                </span>
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                                  {currentMonths.map(m => (
-                                                    <label 
-                                                      key={m.monthYear} 
-                                                      className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
-                                                        selMonths.includes(m.monthYear)
-                                                          ? 'bg-emerald-50/80 border-emerald-400 shadow-2xs'
-                                                          : 'hover:bg-slate-50 border-slate-200/80'
-                                                      }`}
-                                                    >
-                                                      <div className="flex items-center gap-1.5 min-w-0">
-                                                        <input
-                                                          type="checkbox"
-                                                          checked={selMonths.includes(m.monthYear)}
-                                                          onChange={() => handleToggleMonthForRow(item, m.monthYear)}
-                                                          className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                                        />
-                                                        <span className="text-slate-900 font-extrabold text-[11px] truncate">
-                                                          {formatMonthYear(m.monthYear)}
-                                                        </span>
-                                                      </div>
-                                                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-100/90 px-1.5 py-0.5 rounded shrink-0">
-                                                        ₹{Number(m.dueAmount || 0).toLocaleString('en-IN')}
-                                                      </span>
-                                                    </label>
-                                                  ))}
-                                                </div>
+                                          <div
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{
+                                              position: 'fixed',
+                                              top: `${monthPickerCoords.top}px`,
+                                              left: `${monthPickerCoords.left}px`,
+                                            }}
+                                            className="bg-white border border-slate-200 rounded-2xl shadow-2xl p-3 w-[450px] max-w-[calc(100vw-32px)] text-xs cursor-default text-left animate-in fade-in zoom-in-95 duration-150"
+                                          >
+                                            {/* Popover Header */}
+                                            <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                                              <div className="flex items-center gap-1.5">
+                                                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                                                <span className="font-extrabold text-slate-900">Select Month(s) to Pay</span>
                                               </div>
-                                            )}
-
-                                            {/* 2. Previous Month(s) - 2-Column Grid */}
-                                            {pastMonths.length > 0 && (
-                                              <div>
-                                                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded block border border-amber-200/60 mb-1">
-                                                  Previous Month(s) ({pastMonths.length})
-                                                </span>
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                                  {pastMonths.map(m => (
-                                                    <label 
-                                                      key={m.monthYear} 
-                                                      className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
-                                                        selMonths.includes(m.monthYear)
-                                                          ? 'bg-amber-50/80 border-amber-400 shadow-2xs'
-                                                          : 'hover:bg-slate-50 border-slate-200/80'
-                                                      }`}
-                                                    >
-                                                      <div className="flex items-center gap-1.5 min-w-0">
-                                                        <input
-                                                          type="checkbox"
-                                                          checked={selMonths.includes(m.monthYear)}
-                                                          onChange={() => handleToggleMonthForRow(item, m.monthYear)}
-                                                          className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                                        />
-                                                        <span className="text-slate-800 font-bold text-[11px] truncate">
-                                                          {formatMonthYear(m.monthYear)}
-                                                        </span>
-                                                      </div>
-                                                      <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/90 px-1.5 py-0.5 rounded shrink-0">
-                                                        ₹{Number(m.dueAmount || 0).toLocaleString('en-IN')}
-                                                      </span>
-                                                    </label>
-                                                  ))}
-                                                </div>
-                                              </div>
-                                            )}
-
-                                            {/* 3. Advance Months - 2-Column Grid */}
-                                            {advanceMonths.length > 0 && (
-                                              <div>
-                                                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded block border border-blue-200/60 mb-1">
-                                                  Upcoming Month(s) (Advance)
-                                                </span>
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                                  {advanceMonths.map(m => (
-                                                    <label 
-                                                      key={m.monthYear} 
-                                                      className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
-                                                        selMonths.includes(m.monthYear)
-                                                          ? 'bg-blue-50/80 border-blue-400 shadow-2xs'
-                                                          : 'hover:bg-slate-50 border-slate-200/80'
-                                                      }`}
-                                                    >
-                                                      <div className="flex items-center gap-1.5 min-w-0">
-                                                        <input
-                                                          type="checkbox"
-                                                          checked={selMonths.includes(m.monthYear)}
-                                                          onChange={() => handleToggleMonthForRow(item, m.monthYear)}
-                                                          className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                                        />
-                                                        <span className="text-slate-800 font-bold text-[11px] truncate">
-                                                          {formatMonthYear(m.monthYear)}
-                                                        </span>
-                                                      </div>
-                                                      <span className="text-[10px] font-extrabold text-blue-700 bg-blue-100/90 px-1.5 py-0.5 rounded shrink-0">
-                                                        Adv
-                                                      </span>
-                                                    </label>
-                                                  ))}
-                                                </div>
-                                              </div>
-                                            )}
-                                          </div>
-
-                                          {/* Popover Footer: Summary + Direct Save Action right inside the dropdown */}
-                                          <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px]">
-                                            <div className="flex flex-col leading-tight min-w-0">
-                                              <span className="text-[10px] text-slate-400 font-bold uppercase">Selected Total</span>
-                                              <span className="text-slate-800 font-black truncate">
-                                                {selMonths.length} mo • ₹{Number(draft.amount || 0).toLocaleString('en-IN')}
-                                              </span>
-                                            </div>
-
-                                            <div className="flex items-center gap-1.5 shrink-0">
                                               <button
                                                 type="button"
                                                 onClick={() => setOpenMonthPickerRow(null)}
-                                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 text-xs transition-colors cursor-pointer"
-                                                title="Close month picker"
+                                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md p-1 transition-colors cursor-pointer"
+                                                title="Close"
                                               >
-                                                Done
+                                                <X className="w-3.5 h-3.5" />
                                               </button>
-                                              <button
-                                                type="button"
-                                                onClick={async () => {
-                                                  setOpenMonthPickerRow(null);
-                                                  await handleDirectSaveRow(item);
-                                                }}
-                                                disabled={savingRows[rowKey]}
-                                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm shadow-emerald-600/30 active:scale-95 transition-all cursor-pointer"
-                                                title="Save payment immediately without scrolling to the table end"
-                                              >
-                                                {savingRows[rowKey] ? (
-                                                  <span>Saving...</span>
-                                                ) : (
-                                                  <>
-                                                    <Check className="w-3.5 h-3.5" />
-                                                    <span>Save Payment</span>
-                                                  </>
-                                                )}
-                                              </button>
+                                            </div>
+
+                                            {/* 2-Columns Side by Side Month Grid */}
+                                            <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                                              {/* 1. Accounting Month (1st) */}
+                                              {currentMonths.length > 0 && (
+                                                <div>
+                                                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded block border border-emerald-200/60 mb-1">
+                                                    Accounting Month
+                                                  </span>
+                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                    {currentMonths.map(m => (
+                                                      <label 
+                                                        key={m.monthYear} 
+                                                        className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
+                                                          selMonths.includes(m.monthYear)
+                                                            ? 'bg-emerald-50/80 border-emerald-400 shadow-2xs'
+                                                            : 'hover:bg-slate-50 border-slate-200/80'
+                                                        }`}
+                                                      >
+                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                          <input
+                                                            type="checkbox"
+                                                            checked={selMonths.includes(m.monthYear)}
+                                                            onChange={() => handleToggleMonthForRow(item, m.monthYear)}
+                                                            className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                          />
+                                                          <span className="text-slate-900 font-extrabold text-[11px] truncate">
+                                                            {formatMonthYear(m.monthYear)}
+                                                          </span>
+                                                        </div>
+                                                        <span className="text-[10px] font-black text-emerald-700 bg-emerald-100/90 px-1.5 py-0.5 rounded shrink-0">
+                                                          ₹{Number(m.dueAmount || 0).toLocaleString('en-IN')}
+                                                        </span>
+                                                      </label>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+
+                                              {/* 2. Previous Month(s) - 2-Column Grid */}
+                                              {pastMonths.length > 0 && (
+                                                <div>
+                                                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded block border border-amber-200/60 mb-1">
+                                                    Previous Month(s) ({pastMonths.length})
+                                                  </span>
+                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                    {pastMonths.map(m => (
+                                                      <label 
+                                                        key={m.monthYear} 
+                                                        className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
+                                                          selMonths.includes(m.monthYear)
+                                                            ? 'bg-amber-50/80 border-amber-400 shadow-2xs'
+                                                            : 'hover:bg-slate-50 border-slate-200/80'
+                                                        }`}
+                                                      >
+                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                          <input
+                                                            type="checkbox"
+                                                            checked={selMonths.includes(m.monthYear)}
+                                                            onChange={() => handleToggleMonthForRow(item, m.monthYear)}
+                                                            className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                          />
+                                                          <span className="text-slate-800 font-bold text-[11px] truncate">
+                                                            {formatMonthYear(m.monthYear)}
+                                                          </span>
+                                                        </div>
+                                                        <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/90 px-1.5 py-0.5 rounded shrink-0">
+                                                          ₹{Number(m.dueAmount || 0).toLocaleString('en-IN')}
+                                                        </span>
+                                                      </label>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+
+                                              {/* 3. Advance Months - 2-Column Grid */}
+                                              {advanceMonths.length > 0 && (
+                                                <div>
+                                                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded block border border-blue-200/60 mb-1">
+                                                    Upcoming Month(s) (Advance)
+                                                  </span>
+                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                    {advanceMonths.map(m => (
+                                                      <label 
+                                                        key={m.monthYear} 
+                                                        className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg cursor-pointer border transition-all ${
+                                                          selMonths.includes(m.monthYear)
+                                                            ? 'bg-blue-50/80 border-blue-400 shadow-2xs'
+                                                            : 'hover:bg-slate-50 border-slate-200/80'
+                                                        }`}
+                                                      >
+                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                          <input
+                                                            type="checkbox"
+                                                            checked={selMonths.includes(m.monthYear)}
+                                                            onChange={() => handleToggleMonthForRow(item, m.monthYear)}
+                                                            className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                                          />
+                                                          <span className="text-slate-800 font-bold text-[11px] truncate">
+                                                            {formatMonthYear(m.monthYear)}
+                                                          </span>
+                                                        </div>
+                                                        <span className="text-[10px] font-extrabold text-blue-700 bg-blue-100/90 px-1.5 py-0.5 rounded shrink-0">
+                                                          Adv
+                                                        </span>
+                                                      </label>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+
+                                            {/* Popover Footer: Summary + Direct Save Action right inside the dropdown */}
+                                            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px]">
+                                              <div className="flex flex-col leading-tight min-w-0">
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase">Selected Total</span>
+                                                <span className="text-slate-800 font-black truncate">
+                                                  {selMonths.length} mo • ₹{Number(draft.amount || 0).toLocaleString('en-IN')}
+                                                </span>
+                                              </div>
+
+                                              <div className="flex items-center gap-1.5 shrink-0">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setOpenMonthPickerRow(null)}
+                                                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 text-xs transition-colors cursor-pointer"
+                                                  title="Close month picker"
+                                                >
+                                                  Done
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={async () => {
+                                                    setOpenMonthPickerRow(null);
+                                                    await handleDirectSaveRow(item);
+                                                  }}
+                                                  disabled={savingRows[rowKey]}
+                                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm shadow-emerald-600/30 active:scale-95 transition-all cursor-pointer"
+                                                  title="Save payment immediately without scrolling to the table end"
+                                                >
+                                                  {savingRows[rowKey] ? (
+                                                    <span>Saving...</span>
+                                                  ) : (
+                                                    <>
+                                                      <Check className="w-3.5 h-3.5" />
+                                                      <span>Save Payment</span>
+                                                    </>
+                                                  )}
+                                                </button>
+                                              </div>
                                             </div>
                                           </div>
                                         </div>
-                                      </>
-                                    );
-                                  })()}
+                                      );
+                                    })(),
+                                    document.body
+                                  )}
                                 </>
                               );
                             }
